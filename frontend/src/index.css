@@ -59,3 +59,4 @@ h1, h2, h3, .display {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 1s linear infinite; }
+@keyframes progressSlide { from { transform: translateX(-100%) scaleX(3); } to { transform: translateX(400%) scaleX(1); } }

@@ -100,3 +100,8 @@ Open → http://localhost:5173
 3. Scraper opens Chrome, reads ASINs from `data/asins.csv`, scrapes Amazon.in
 4. Tagger picks up untagged reviews, sends to GPT-4o-mini, writes tags to DB
 5. Pipeline status (RUNNING / SUCCESS / FAILED) shown live in sidebar
+
+
+
+On the top of dashboard where we are showing total reviews, i dont need other tiles, need just Total reviews, count of negative Reviews, positive reviews and neutral reviews in tiles
+then below that i need trend of sentiment (daily), like i want to see per day how many +ve,-ve or neutral reviews are coming, ideally sentiment filter should be right above that trend chart like quick filter. Then below i need a Pie chart for categories, one for +ve and neutral and one for negative. If i click on any section of pie chart, it should show me all the reviews under that. and the word cloud below should auto filter to show sub categories (only) of that category. all this needs to be in a "Analysis" tab. The other tab is summary tab, it should fetch summarised view of all the selected ASINs. Like a table with all the ASINs, with avg rating in the selected time period, then number of reviews and then a delta from last week or selected duration. Basically CXOs want to see whats really happening and why

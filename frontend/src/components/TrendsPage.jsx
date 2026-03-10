@@ -1,239 +1,12 @@
-import { useState, useEffect, useMemo } from 'react'
-import { fetchTrends, fetchWordCloud, fetchReviewsByKeyword } from '../api'
-import WordCloud from './WordCloud'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import ReviewsDrawer from './ReviewsDrawer'
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, Legend, CartesianGrid, Cell, LabelList
+  AreaChart, Area, LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  Cell, ReferenceLine, ComposedChart
 } from 'recharts'
-import { Loader2, Download, List } from 'lucide-react'
-import ReviewsTable from './ReviewsTable'
 
-// ── Palette ─────────────────────────────────────────────────────────────────
-const PALETTE = [
-  '#ff4e1a','#ff8c42','#ffd166','#06d6a0','#118ab2',
-  '#a855f7','#ec4899','#14b8a6','#f97316','#84cc16',
-  '#60a5fa','#f43f5e','#34d399','#fb923c','#c084fc',
-]
-const SENTIMENT_COLORS = { Positive: '#22c55e', Neutral: '#eab308', Negative: '#ef4444' }
-
-const tooltipStyle = {
-  background: '#18181f', border: '1px solid #222230',
-  borderRadius: 8, color: '#f0ede8', fontSize: 12,
-}
-
-// ── Small helpers ────────────────────────────────────────────────────────────
-function Section({ title, subtitle, children, controls }) {
-  return (
-    <div style={{
-      background: 'var(--surface)', border: '1px solid var(--border)',
-      borderRadius: 12, padding: '20px 24px',
-      display: 'flex', flexDirection: 'column', gap: 16,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-        <div>
-          <h3 style={{ margin: 0, fontFamily: 'Bebas Neue', fontSize: 20, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
-            {title}
-          </h3>
-          {subtitle && <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{subtitle}</p>}
-        </div>
-        {controls}
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function ToggleBtn({ active, onClick, children }) {
-  return (
-    <button onClick={onClick} style={{
-      padding: '5px 12px', borderRadius: 6, border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-      background: active ? 'var(--accent)20' : 'transparent',
-      color: active ? 'var(--accent)' : 'var(--text-muted)',
-      fontSize: 12, fontWeight: 500, cursor: 'pointer', transition: 'all 0.15s',
-    }}>
-      {children}
-    </button>
-  )
-}
-
-function DatePreset({ label, active, onClick }) {
-  return (
-    <button onClick={onClick} style={{
-      padding: '4px 10px', borderRadius: 5,
-      border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-      background: active ? 'var(--accent)20' : 'transparent',
-      color: active ? 'var(--accent)' : 'var(--text-muted)',
-      fontSize: 11, cursor: 'pointer', transition: 'all 0.15s',
-    }}>
-      {label}
-    </button>
-  )
-}
-
-function inputStyle() {
-  return {
-    background: 'var(--surface2)', border: '1px solid var(--border)',
-    borderRadius: 6, color: 'var(--text)', padding: '5px 10px',
-    fontSize: 12, outline: 'none', cursor: 'pointer',
-    colorScheme: 'dark',
-  }
-}
-
-// ── Custom legend ─────────────────────────────────────────────────────────────
-function CustomLegend({ items, hidden, onToggle }) {
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', padding: '0 4px' }}>
-      {items.map(({ key, color }) => (
-        <button key={key} onClick={() => onToggle(key)} style={{
-          display: 'flex', alignItems: 'center', gap: 5,
-          background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-          opacity: hidden.has(key) ? 0.3 : 1, transition: 'opacity 0.15s',
-        }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0 }} />
-          <span style={{ fontSize: 11, color: 'var(--text)', whiteSpace: 'nowrap' }}>{key}</span>
-        </button>
-      ))}
-    </div>
-  )
-}
-
-// ── Heatmap ──────────────────────────────────────────────────────────────────
-function Heatmap({ data, products, subtags }) {
-  if (!data.length) return <Empty />
-
-  const [hoveredCell, setHoveredCell] = useState(null)
-
-  const lookup = {}
-  data.forEach(d => { lookup[`${d.product}__${d.subtag}`] = d.count })
-  const max = Math.max(...data.map(d => d.count), 1)
-
-  const CELL = 36  // cell size px
-
-  return (
-    <div style={{ overflowX: 'auto', overflowY: 'visible', paddingTop: 8 }}>
-      <table style={{ borderCollapse: 'separate', borderSpacing: 4, fontSize: 11, tableLayout: 'fixed' }}>
-        <thead>
-          <tr>
-            {/* sticky product label column header */}
-            <th style={{
-              width: 160, minWidth: 160,
-              padding: '0 12px 8px 0',
-              textAlign: 'left', color: 'var(--text-muted)',
-              fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap',
-              verticalAlign: 'bottom',
-            }}>
-              Product
-            </th>
-            {subtags.map(st => (
-              <th key={st} style={{
-                width: CELL, minWidth: CELL,
-                height: 130,
-                padding: 0,
-                verticalAlign: 'bottom',
-                position: 'relative',
-              }}>
-                {/* Angled label container */}
-                <div style={{
-                  position: 'absolute',
-                  bottom: 6,
-                  left: '50%',
-                  transformOrigin: 'bottom left',
-                  transform: 'rotate(-45deg) translateX(-50%)',
-                  whiteSpace: 'nowrap',
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: 'var(--text-muted)',
-                  lineHeight: 1,
-                  maxWidth: 160,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}>
-                  {st}
-                </div>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {products.map(p => (
-            <tr key={p}>
-              <td style={{
-                padding: '0 12px 0 0',
-                color: 'var(--text)', whiteSpace: 'nowrap',
-                fontWeight: 600, fontSize: 12,
-                verticalAlign: 'middle',
-              }}>
-                {p}
-              </td>
-              {subtags.map(st => {
-                const val = lookup[`${p}__${st}`] || 0
-                const intensity = val / max
-                const cellKey = `${p}__${st}`
-                const isHovered = hoveredCell === cellKey
-                const bg = val === 0
-                  ? 'var(--surface2)'
-                  : `rgba(255, 78, 26, ${0.08 + intensity * 0.9})`
-                return (
-                  <td
-                    key={st}
-                    onMouseEnter={() => setHoveredCell(cellKey)}
-                    onMouseLeave={() => setHoveredCell(null)}
-                    style={{
-                      width: CELL, height: CELL,
-                      borderRadius: 5,
-                      background: isHovered && val > 0 ? `rgba(255,140,66,${0.15 + intensity * 0.85})` : bg,
-                      textAlign: 'center', verticalAlign: 'middle',
-                      color: intensity > 0.45 ? '#fff' : intensity > 0 ? 'rgba(255,255,255,0.7)' : 'transparent',
-                      fontSize: 11, fontWeight: 700, cursor: val > 0 ? 'default' : 'default',
-                      transition: 'all 0.15s',
-                      outline: isHovered && val > 0 ? '1.5px solid rgba(255,140,66,0.7)' : 'none',
-                      position: 'relative',
-                    }}
-                  >
-                    {val > 0 ? val : ''}
-                    {/* Tooltip */}
-                    {isHovered && val > 0 && (
-                      <div style={{
-                        position: 'absolute',
-                        bottom: 'calc(100% + 6px)',
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        background: '#1a1a24',
-                        border: '1px solid var(--border)',
-                        borderRadius: 7,
-                        padding: '7px 11px',
-                        whiteSpace: 'nowrap',
-                        zIndex: 50,
-                        pointerEvents: 'none',
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-                      }}>
-                        <div style={{ fontWeight: 700, fontSize: 12, color: '#ff8c42', marginBottom: 2 }}>{val} review{val > 1 ? 's' : ''}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 200, whiteSpace: 'normal', lineHeight: 1.4 }}>
-                          <span style={{ color: 'var(--text)', fontWeight: 500 }}>{p}</span>
-                          <br />{st}
-                        </div>
-                      </div>
-                    )}
-                  </td>
-                )
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function Empty() {
-  return (
-    <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-      No data for selected filters
-    </div>
-  )
-}
-
-// ── CSV export ────────────────────────────────────────────────────────────────
+// ── CSV export (imported by App.jsx) ─────────────────────────────────────────
 export function downloadCSV(reviews) {
   const cols = ['review_id','asin','product_name','rating','sentiment','primary_categories','sub_tags','review','review_url','scrape_date']
   const escape = v => {
@@ -244,422 +17,747 @@ export function downloadCSV(reviews) {
   const rows = [cols.join(','), ...reviews.map(r => cols.map(c => escape(r[c])).join(','))]
   const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
+  const a = document.createElement('a'); a.href = url
   a.download = `voc_reviews_${new Date().toISOString().slice(0,10)}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
+  a.click(); URL.revokeObjectURL(url)
 }
 
-// ── Preset date helpers ───────────────────────────────────────────────────────
-function daysAgo(n) {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
-}
-const today = () => new Date().toISOString().slice(0, 10)
+// ── Constants ─────────────────────────────────────────────────────────────────
+const SC = { Positive: '#22c55e', Negative: '#ef4444', Neutral: '#eab308' }
+const PAL = ['#ff4e1a','#ff8c42','#ffd166','#06d6a0','#60a5fa','#a855f7','#ec4899','#14b8a6','#f43f5e','#34d399','#fb923c','#c084fc']
 
-const PRESETS = [
-  { label: '7d',  from: () => daysAgo(7),   to: today },
-  { label: '30d', from: () => daysAgo(30),  to: today },
-  { label: '90d', from: () => daysAgo(90),  to: today },
-  { label: 'All', from: () => '',            to: () => '' },
-]
-
-// ── Period label formatter ───────────────────────────────────────────────────
-function formatPeriod(period, granularity) {
-  if (!period) return ''
-  if (granularity === 'month') {
-    // "2026-09" → "Sep 2026"
-    const [year, month] = period.split('-')
-    const d = new Date(+year, +month - 1, 1)
-    return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
-  }
-  // "2026-43" → "W43 Oct" (year-weeknumber from MySQL %Y-%u)
-  const [year, week] = period.split('-')
-  // Approximate: week 1 = Jan 1, each week = 7 days
-  const jan1 = new Date(+year, 0, 1)
-  const dayOffset = (+week - 1) * 7
-  const weekStart = new Date(jan1.getTime() + dayOffset * 86400000)
-  const mo = weekStart.toLocaleDateString('en-IN', { month: 'short' })
-  return `W${week} ${mo}`
+function fmtDay(d) {
+  if (!d) return ''
+  try { return new Date(d).toLocaleDateString('en-IN', { day:'numeric', month:'short' }) }
+  catch { return d }
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
-export default function TrendsPage({ products: allProducts, reviews }) {
-  const [selectedProducts, setSelectedProducts] = useState([])
-  const [granularity, setGranularity] = useState('week')
-  const [stackMode, setStackMode] = useState('category') // 'category' | 'sentiment'
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [activePreset, setActivePreset] = useState('All')
-  const [data, setData] = useState(null)
-  const [wcData, setWcData] = useState([])
-  const [activeWord, setActiveWord] = useState(null)
-  const [keywordReviews, setKeywordReviews] = useState([])
-  const [keywordLoading, setKeywordLoading] = useState(false)
+// ── Info tooltip ──────────────────────────────────────────────────────────────
+function InfoTip({ text }) {
+  const [show, setShow] = useState(false)
+  const ref = useRef(null)
+
+  return (
+    <span ref={ref} style={{ position:'relative', display:'inline-flex', alignItems:'center' }}>
+      <span
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        style={{
+          display:'inline-flex', alignItems:'center', justifyContent:'center',
+          width:16, height:16, borderRadius:'50%',
+          background:'var(--surface2)', border:'1px solid var(--border)',
+          color:'var(--text-muted)', fontSize:10, fontWeight:700,
+          cursor:'help', lineHeight:1, flexShrink:0,
+          fontFamily:'DM Sans',
+        }}
+      >?</span>
+      {show && (
+        <div style={{
+          position:'absolute', bottom:'calc(100% + 8px)', left:'50%', transform:'translateX(-50%)',
+          background:'#1a1a28', border:'1px solid var(--border)', borderRadius:8,
+          padding:'10px 12px', fontSize:11, color:'var(--text)', lineHeight:1.6,
+          width:240, zIndex:100, boxShadow:'0 8px 24px rgba(0,0,0,0.5)',
+          pointerEvents:'none', whiteSpace:'normal',
+        }}>
+          {text}
+          <div style={{ position:'absolute', bottom:-5, left:'50%', transform:'translateX(-50%)', width:8, height:8, background:'#1a1a28', borderRight:'1px solid var(--border)', borderBottom:'1px solid var(--border)', rotate:'45deg' }} />
+        </div>
+      )}
+    </span>
+  )
+}
+
+// ── Chart tooltip ─────────────────────────────────────────────────────────────
+function CT({ active, payload, label, fmt }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:8, padding:'10px 14px', fontSize:12 }}>
+      <div style={{ fontWeight:700, marginBottom:5, color:'var(--text-muted)', fontSize:11 }}>{fmtDay(label)}</div>
+      {payload.map(p => (
+        <div key={p.dataKey} style={{ color:p.color||p.fill||'var(--text)', display:'flex', gap:8, justifyContent:'space-between', minWidth:110 }}>
+          <span style={{ color:'var(--text-muted)' }}>{p.name||p.dataKey}</span>
+          <span style={{ fontWeight:700 }}>{fmt ? fmt(p.value) : p.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Card ─────────────────────────────────────────────────────────────────────
+function Card({ title, sub, tip, children, controls, accent }) {
+  return (
+    <div style={{ background:'var(--surface)', border:`1px solid ${accent||'var(--border)'}`, borderRadius:12, padding:'18px 20px', display:'flex', flexDirection:'column', gap:14 }}>
+      {(title||controls) && (
+        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:7 }}>
+              <span style={{ fontFamily:'Bebas Neue', fontSize:17, letterSpacing:'0.06em', color:'var(--text-muted)' }}>{title}</span>
+              {tip && <InfoTip text={tip} />}
+            </div>
+            {sub && <div style={{ fontSize:11, color:'var(--text-muted)' }}>{sub}</div>}
+          </div>
+          {controls}
+        </div>
+      )}
+      {children}
+    </div>
+  )
+}
+
+// ── KPI tile ──────────────────────────────────────────────────────────────────
+function KPI({ label, value, sub, color, delta, deltaInvert, tip }) {
+  const deltaColor = delta == null ? null : (delta > 0) === !deltaInvert ? '#ef4444' : '#22c55e'
+  return (
+    <div style={{ background:'var(--surface)', border:`1px solid ${color}28`, borderRadius:12, padding:'14px 16px', display:'flex', flexDirection:'column', gap:5, borderLeft:`3px solid ${color}` }}>
+      <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+        <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>{label}</span>
+        {tip && <InfoTip text={tip} />}
+      </div>
+      <div style={{ fontFamily:'Bebas Neue', fontSize:30, lineHeight:1, color }}>{value ?? '—'}</div>
+      {sub && <div style={{ fontSize:11, color:'var(--text-muted)', lineHeight:1.4 }}>{sub}</div>}
+      {delta != null && (
+        <div style={{ fontSize:11, fontWeight:700, color:deltaColor, marginTop:1 }}>
+          {delta > 0 ? `↑ +${delta}%` : delta < 0 ? `↓ ${delta}%` : '→ flat'} vs prior 7d
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Momentum widget (full replacement) ───────────────────────────────────────
+// ── Issue Watchlist — replaces useless momentum widget ───────────────────────
+// Ranks issues by current-period volume, signals direction vs prior half
+function IssueWatchlist({ momentum, onRowClick }) {
+  if (!momentum?.length) return (
+    <div style={{ padding:'24px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+      No issue data for selected period.
+    </div>
+  )
+
+  // Sort by total volume (first + second), highest first
+  const ranked = [...momentum]
+    .filter(m => (m.first + m.second) > 0)
+    .sort((a, b) => (b.first + b.second) - (a.first + a.second))
+    .slice(0, 8)
+
+  if (!ranked.length) return (
+    <div style={{ padding:'24px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+      No data for selected period.
+    </div>
+  )
+
+  const maxTotal = ranked[0].first + ranked[0].second
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+      {/* Column headers */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 48px 52px 60px', gap:8, padding:'0 2px 4px', borderBottom:'1px solid var(--border)' }}>
+        <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>Issue</div>
+        <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', textAlign:'right' }}>Total</div>
+        <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', textAlign:'center' }}>Trend</div>
+        <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', textAlign:'right' }}>Signal</div>
+      </div>
+
+      {ranked.map((m, i) => {
+        const total = m.first + m.second
+        const isNew = m.first === 0 && m.second > 0
+        const resolved = m.second === 0 && m.first > 0
+        const rising = !isNew && !resolved && m.change > 0
+        const falling = !isNew && !resolved && m.change < 0
+        const stable = !isNew && !resolved && m.change === 0
+
+        // Signal
+        const signal = isNew    ? { label: 'NEW',       color: '#f97316', bg: 'rgba(249,115,22,0.12)' }
+                     : resolved ? { label: 'RESOLVED',  color: '#22c55e', bg: 'rgba(34,197,94,0.12)'  }
+                     : rising   ? { label: 'RISING ↑',  color: '#ef4444', bg: 'rgba(239,68,68,0.12)'  }
+                     : falling  ? { label: 'FALLING ↓', color: '#22c55e', bg: 'rgba(34,197,94,0.12)'  }
+                     :            { label: 'STABLE →',  color: '#94a3b8', bg: 'rgba(148,163,184,0.08)' }
+
+        // Sparkline-style inline bar
+        const barW = Math.round((total / maxTotal) * 100)
+        const barColor = rising || isNew ? '#ef4444' : falling || resolved ? '#22c55e' : '#60a5fa'
+
+        // Priority badge — top 3 get escalating urgency
+        const priority = i === 0 ? { label: '#1', color: '#ef4444' }
+                        : i === 1 ? { label: '#2', color: '#f97316' }
+                        : i === 2 ? { label: '#3', color: '#fbbf24' }
+                        : null
+
+        return (
+          <div key={m.category}
+            onClick={() => onRowClick && onRowClick(m.category)}
+            style={{
+              display:'grid', gridTemplateColumns:'1fr 48px 52px 60px', gap:8, alignItems:'center',
+              padding:'8px 10px', borderRadius:8,
+              background: i < 3 ? `${signal.color}06` : 'var(--surface2)',
+              border: `1px solid ${i < 3 ? signal.color + '20' : 'transparent'}`,
+              cursor: onRowClick ? 'pointer' : 'default',
+              transition:'filter 0.12s',
+            }}
+            onMouseEnter={e => onRowClick && (e.currentTarget.style.filter='brightness(1.3)')}
+            onMouseLeave={e => (e.currentTarget.style.filter='brightness(1)')}
+          >
+            {/* Name + bar */}
+            <div style={{ display:'flex', flexDirection:'column', gap:4, minWidth:0 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                {priority && (
+                  <span style={{ fontSize:9, fontWeight:700, color:priority.color, flexShrink:0 }}>{priority.label}</span>
+                )}
+                <span style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {m.category}
+                </span>
+              </div>
+              <div style={{ height:4, background:'var(--border)', borderRadius:2, overflow:'hidden' }}>
+                <div style={{ height:'100%', width:`${barW}%`, background:barColor, borderRadius:2, opacity:0.7 }} />
+              </div>
+            </div>
+
+            {/* Total count */}
+            <div style={{ fontSize:13, fontWeight:700, textAlign:'right', color:'var(--text)' }}>{total}</div>
+
+            {/* Recent vs past */}
+            <div style={{ display:'flex', flexDirection:'column', gap:1, alignItems:'flex-end' }}>
+              <div style={{ fontSize:10, color:'var(--text-muted)' }}>
+                <span style={{ color:'rgba(255,255,255,0.3)' }}>{m.first}</span>
+                <span style={{ color:'var(--border)', margin:'0 3px' }}>→</span>
+                <span style={{ color:barColor, fontWeight:700 }}>{m.second}</span>
+              </div>
+              <div style={{ fontSize:9, color:'var(--text-muted)' }}>early → recent</div>
+            </div>
+
+            {/* Signal badge */}
+            <div style={{ textAlign:'right' }}>
+              <span style={{ fontSize:9, fontWeight:700, letterSpacing:'0.06em', color:signal.color, background:signal.bg, border:`1px solid ${signal.color}30`, borderRadius:4, padding:'2px 6px', whiteSpace:'nowrap' }}>
+                {signal.label}
+              </span>
+            </div>
+          </div>
+        )
+      })}
+
+      <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4, fontStyle:'italic', textAlign:'right' }}>
+        Ranked by total volume · early = first half · recent = second half of period
+      </div>
+    </div>
+  )
+}
+
+function Stars({ rating }) {
+  const n = Math.round(parseFloat(rating)||0)
+  const color = n>=4?'#22c55e':n>=3?'#eab308':'#ef4444'
+  return <span style={{ color, fontSize:13 }}>{'★'.repeat(n)}{'☆'.repeat(Math.max(0,5-n))} <span style={{ fontSize:11, color:'var(--text-muted)' }}>{parseFloat(rating||0).toFixed(1)}</span></span>
+}
+
+function Toggle({ value, options, onChange }) {
+  return (
+    <div style={{ display:'flex', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:7, padding:2, gap:2 }}>
+      {options.map(o => (
+        <button key={o.v} onClick={() => onChange(o.v)} style={{
+          padding:'3px 10px', borderRadius:5, border:'none', cursor:'pointer', fontSize:11, fontWeight:600, fontFamily:'DM Sans',
+          background: value===o.v ? 'var(--accent)' : 'transparent',
+          color: value===o.v ? '#fff' : 'var(--text-muted)', transition:'all 0.15s',
+        }}>{o.l}</button>
+      ))}
+    </div>
+  )
+}
+
+function Empty() {
+  return <div style={{ padding:'32px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>No data for selected filters</div>
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN
+// ─────────────────────────────────────────────────────────────────────────────
+export default function TrendsPage({ products: allProducts, reviews, filters }) {
+  const [data, setData]   = useState(null)
   const [loading, setLoading] = useState(true)
-  const [hiddenLines, setHiddenLines] = useState(new Set())
+  const [hasData, setHasData] = useState(false)
+  const [sentMode, setSentMode]   = useState('volume')
+  const [catMode,  setCatMode]    = useState('trend')
+  const [drawerCat, setDrawerCat]  = useState(null)
+  const [hiddenCats,  setHiddenCats]  = useState(new Set())
+  const [hiddenProds, setHiddenProds] = useState(new Set())
 
-  // init: select all products
-  useEffect(() => {
-    if (allProducts?.length) setSelectedProducts(allProducts)
-  }, [allProducts])
+  // Derive selected products from sidebar — fall back to all products
+  const selectedProducts = useMemo(() =>
+    filters?.product?.length ? filters.product : (allProducts || []),
+  [filters?.product, allProducts])
+
+  const dateFrom = filters?.date_from || ''
+  const dateTo   = filters?.date_to   || ''
 
   useEffect(() => {
     if (!allProducts?.length) return
     setLoading(true)
-    setActiveWord(null)
-    const params = { product: selectedProducts, date_from: dateFrom, date_to: dateTo, granularity }
-    Promise.all([
-      fetchTrends(params),
-      fetchWordCloud({ product: selectedProducts, date_from: dateFrom, date_to: dateTo }),
-    ]).then(([trendsData, wc]) => {
-      setData(trendsData)
-      setWcData(Array.isArray(wc) ? wc : [])
-      setLoading(false)
-    }).catch(() => setLoading(false))
-  }, [selectedProducts, dateFrom, dateTo, granularity, allProducts])
+    const p = new URLSearchParams()
+    if (selectedProducts.length) p.set('product', selectedProducts.join('|||'))
+    if (dateFrom) p.set('date_from', dateFrom)
+    if (dateTo)   p.set('date_to',   dateTo)
+    fetch(`/api/trends/cxo?${p}`)
+      .then(r => r.json())
+      .then(d => { setData(d); setLoading(false); setHasData(true) })
+      .catch(() => setLoading(false))
+  }, [JSON.stringify(selectedProducts), dateFrom, dateTo, allProducts?.length])
 
-  // Fetch reviews for the clicked word directly (bypasses sidebar sentiment/rating filters)
-  useEffect(() => {
-    if (!activeWord) { setKeywordReviews([]); return }
-    setKeywordLoading(true)
-    fetchReviewsByKeyword(activeWord, {
-      product: selectedProducts,
-      date_from: dateFrom,
-      date_to: dateTo,
-    }).then(data => {
-      setKeywordReviews(Array.isArray(data) ? data : [])
-      setKeywordLoading(false)
-    }).catch(() => setKeywordLoading(false))
-  }, [activeWord, selectedProducts, dateFrom, dateTo])
+  const toggleCat  = c => setHiddenCats(s  => { const n=new Set(s); n.has(c)?n.delete(c):n.add(c); return n })
+  const toggleProd = p => setHiddenProds(s => { const n=new Set(s); n.has(p)?n.delete(p):n.add(p); return n })
 
-  const toggleProduct = (p) => {
-    setSelectedProducts(prev =>
-      prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
-    )
-  }
+  const kpi            = data?.kpi || {}
+  const dailyTrend     = data?.daily_trend || []
+  const dailyRating    = data?.daily_rating || []
+  const productDaily   = data?.product_daily || []
+  const dailyCats      = data?.daily_categories || []
+  const allCats        = data?.all_categories || []
+  const allProds       = data?.all_products || []
+  const ratingDist     = data?.rating_distribution || []
+  const momentum       = data?.category_momentum || []
+  const productSummary = data?.product_summary || []
+  const weeklyDigest   = data?.weekly_digest || []
 
-  const applyPreset = (preset) => {
-    setActivePreset(preset.label)
-    setDateFrom(preset.from())
-    setDateTo(preset.to())
-  }
+  const starRatioDays = dailyRating.map(d => ({
+    day: d.day, '1★': d.one_star, '5★': d.five_star,
+  }))
 
-  const toggleLine = (key) => {
-    setHiddenLines(prev => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
-  }
+  const healthData = dailyTrend.map(d => ({
+    day: d.day,
+    health: Math.max(0, +(100 - d.rolling_neg).toFixed(1)),
+  }))
 
-  // Compute reviews filtered by Trends page own filters for CSV export
-  const locallyFilteredReviews = useMemo(() => {
-    return reviews.filter(r => {
-      if (selectedProducts.length && !selectedProducts.includes(r.product_name)) return false
-      if (dateFrom && r.scrape_date && r.scrape_date < dateFrom) return false
-      if (dateTo && r.scrape_date && r.scrape_date > dateTo) return false
-      return true
-    })
-  }, [reviews, selectedProducts, dateFrom, dateTo])
+  const thisWeek  = weeklyDigest[weeklyDigest.length-1]
+  const priorWeek = weeklyDigest[weeklyDigest.length-2]
 
-  // Build legend items for trend chart
-  const trendLegendItems = useMemo(() =>
-    (data?.all_categories || []).map((c, i) => ({ key: c, color: PALETTE[i % PALETTE.length] })),
-    [data]
-  )
-
-  // Stacked bar keys
-  const stackKeys = stackMode === 'category'
-    ? (data?.all_categories || [])
-    : ['Positive', 'Neutral', 'Negative']
-
-  const stackData = stackMode === 'category'
-    ? (data?.stacked_category || [])
-    : (data?.stacked_sentiment || [])
-
-  const getStackColor = (key, i) =>
-    stackMode === 'sentiment' ? (SENTIMENT_COLORS[key] || '#666') : PALETTE[i % PALETTE.length]
-
-  const shortProduct = (s) => s?.length > 18 ? s.slice(0, 16) + '…' : s
-
-  // Unique products & subtags from heatmap
-  const heatProducts = [...new Set((data?.heatmap || []).map(d => d.product))]
-  const heatSubtags = [...new Set((data?.heatmap || []).map(d => d.subtag))].slice(0, 20)
+  // Active filter summary for display
+  const filterSummary = [
+    selectedProducts.length < (allProducts||[]).length && `${selectedProducts.length} product${selectedProducts.length!==1?'s':''}`,
+    dateFrom && dateTo && `${fmtDay(dateFrom)} → ${fmtDay(dateTo)}`,
+    dateFrom && !dateTo && `From ${fmtDay(dateFrom)}`,
+    !dateFrom && dateTo && `Until ${fmtDay(dateTo)}`,
+  ].filter(Boolean).join(' · ')
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
 
-      {/* ── Global Controls ── */}
-      <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 12, padding: '16px 20px',
-        display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start',
-      }}>
+      {/* Active filter pill */}
+      {filterSummary && (
+        <div style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', background:'rgba(255,78,26,0.06)', border:'1px solid rgba(255,78,26,0.2)', borderRadius:8, fontSize:11, color:'var(--accent)', width:'fit-content' }}>
+          <span style={{ opacity:0.6 }}>Filters active:</span> {filterSummary}
+        </div>
+      )}
 
-        {/* Date range */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-            Date Range
-          </span>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {PRESETS.map(p => (
-              <DatePreset key={p.label} label={p.label} active={activePreset === p.label} onClick={() => applyPreset(p)} />
-            ))}
+      {(loading && !hasData) ? (
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:260, color:'var(--text-muted)', gap:10, fontSize:14 }}>
+          <span style={{ fontSize:22 }}>⟳</span> Loading trends…
+        </div>
+      ) : !data ? <Empty /> : (
+      <>
+
+      {/* ── SECTION 1: EXECUTIVE SNAPSHOT ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:12 }}>
+        <KPI label="Total Reviews" value={kpi.total?.toLocaleString()} color="#60a5fa"
+          sub={`in selected period`}
+          tip="Total number of reviews scraped from Amazon for the selected products and date range." />
+        <KPI label="Neg Rate" value={`${kpi.neg_pct}%`}
+          color={kpi.neg_pct>50?'#ef4444':kpi.neg_pct>30?'#f97316':'#22c55e'}
+          sub="% of reviews negative"
+          tip="Percentage of reviews tagged as Negative by the AI tagger. Formula: (Negative reviews ÷ Total reviews) × 100." />
+        <KPI label="Pos Rate" value={`${kpi.pos_pct}%`} color="#22c55e"
+          sub="% of reviews positive"
+          tip="Percentage of reviews tagged as Positive. A high positive rate alongside a high negative rate means polarised opinions — worth investigating." />
+        <KPI label="Last 7d Neg Rate" value={`${kpi.last7_neg_rate}%`}
+          color={kpi.last7_neg_rate>50?'#ef4444':kpi.last7_neg_rate>30?'#f97316':'#22c55e'}
+          delta={kpi.wow_delta} deltaInvert={true}
+          sub="vs prior 7 days"
+          tip="Negative rate for the most recent 7 days compared to the 7 days before that. The delta arrow shows if the situation is improving (green ↓) or worsening (red ↑)." />
+        <KPI label="Products" value={allProds.length} color="#a855f7"
+          sub={allProds.slice(0,2).join(', ')+(allProds.length>2?'…':'')}
+          tip="Number of distinct products in the selected filter. Use the Product filter in the sidebar to narrow down to a specific ASIN." />
+      </div>
+
+      {/* WoW digest */}
+      {thisWeek && priorWeek && (
+        <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'14px 20px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:10 }}>
+            <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>📋 Week-on-Week Digest</span>
+            <InfoTip text="Compares the current calendar week vs the prior calendar week. Only available when the selected date range covers at least 14 days." />
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setActivePreset('') }} style={inputStyle()} />
-            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>to</span>
-            <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setActivePreset('') }} style={inputStyle()} />
+          <div style={{ display:'flex', gap:28, flexWrap:'wrap' }}>
+            {[
+              { label:'Reviews',  thisVal:thisWeek.total,    prevVal:priorWeek.total,    fmt:v=>v?.toLocaleString(), invert:false },
+              { label:'Negative', thisVal:thisWeek.Negative, prevVal:priorWeek.Negative, fmt:v=>v,                  invert:true  },
+              { label:'Positive', thisVal:thisWeek.Positive, prevVal:priorWeek.Positive, fmt:v=>v,                  invert:false },
+            ].map(({ label, thisVal, prevVal, fmt, invert }) => {
+              const delta = prevVal > 0 ? Math.round((thisVal-prevVal)/prevVal*100) : null
+              // invert=true means up is bad (e.g. Negative reviews going up = red)
+              // Reviews: always neutral blue regardless of direction
+              const isNeutral = label === 'Reviews'
+              const color = isNeutral
+                ? '#60a5fa'
+                : delta == null ? 'var(--text-muted)'
+                : invert
+                  ? (delta > 0 ? '#ef4444' : '#22c55e')   // Negative: up=red, down=green
+                  : (delta > 0 ? '#22c55e' : '#ef4444')   // Positive: up=green, down=red
+              return (
+                <div key={label} style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>{label}</div>
+                  <div style={{ fontSize:20, fontFamily:'Bebas Neue', color:'var(--text)' }}>{fmt(thisVal)}</div>
+                  {delta!=null && <div style={{ fontSize:11, fontWeight:700, color }}>{delta>0?`↑ +${delta}%`:`↓ ${delta}%`} WoW</div>}
+                </div>
+              )
+            })}
           </div>
         </div>
+      )}
 
-        {/* Granularity */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-            Granularity
-          </span>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <ToggleBtn active={granularity === 'week'} onClick={() => setGranularity('week')}>Weekly</ToggleBtn>
-            <ToggleBtn active={granularity === 'month'} onClick={() => setGranularity('month')}>Monthly</ToggleBtn>
-          </div>
-        </div>
+      {/* ── SECTION 2: BRAND HEALTH SCORE ── */}
+      <Card
+        title="Brand Health Score"
+        tip="Composite score from 0–100. Formula: 100 minus the 7-day rolling negative rate. Below 60 is critical and requires immediate action. 60–75 is a watch zone. Above 75 is healthy. The rolling average smooths out day-to-day noise so you see the real trend."
+        sub="7-day rolling score · 75+ healthy · 60–75 watch · below 60 critical"
+      >
+        {!healthData.length ? <Empty /> : (
+          <>
+            {(() => {
+              const latest = healthData[healthData.length-1]?.health || 0
+              const color = latest>=75?'#22c55e':latest>=60?'#eab308':'#ef4444'
+              const label = latest>=75?'HEALTHY':latest>=60?'WATCH':'CRITICAL'
+              return (
+                <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:4 }}>
+                  <div style={{ fontFamily:'Bebas Neue', fontSize:52, lineHeight:1, color }}>{latest}</div>
+                  <div>
+                    <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.15em', color, padding:'2px 8px', borderRadius:4, border:`1px solid ${color}50`, background:`${color}15`, display:'inline-block' }}>{label}</div>
+                    <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>Based on {healthData.length}-day window</div>
+                  </div>
+                </div>
+              )
+            })()}
+            <ResponsiveContainer width="100%" height={130}>
+              <AreaChart data={healthData} margin={{ top:4, right:4, bottom:0, left:-20 }}>
+                <defs>
+                  <linearGradient id="hg" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+                <YAxis domain={[0,100]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} />
+                <Tooltip content={<CT fmt={v=>`${v} / 100`} />} />
+                <ReferenceLine y={75} stroke="#22c55e" strokeDasharray="4 2" strokeOpacity={0.4} label={{ value:'75', fill:'#22c55e', fontSize:9, position:'right' }} />
+                <ReferenceLine y={60} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.4} label={{ value:'60', fill:'#eab308', fontSize:9, position:'right' }} />
+                <Area type="monotone" dataKey="health" stroke="#22c55e" strokeWidth={2.5} fill="url(#hg)" dot={false} name="Health Score" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </>
+        )}
+      </Card>
 
-        {/* Product filter */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minWidth: 200 }}>
-          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-            Products
-          </span>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {allProducts.map(p => (
-              <button key={p} onClick={() => toggleProduct(p)} style={{
-                padding: '4px 10px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
-                border: `1px solid ${selectedProducts.includes(p) ? 'var(--accent)' : 'var(--border)'}`,
-                background: selectedProducts.includes(p) ? 'var(--accent)20' : 'transparent',
-                color: selectedProducts.includes(p) ? 'var(--accent)' : 'var(--text-muted)',
-                transition: 'all 0.15s',
+      {/* ── SECTION 3: DAILY SENTIMENT TREND ── */}
+      <Card
+        title="Daily Sentiment Trend"
+        tip="Volume mode shows absolute count of Positive / Negative / Neutral reviews per day. Rate mode shows the rolling 7-day negative rate % as a line with daily bars behind it — the line is the signal, the bars are the noise. A rising orange line means sentiment is deteriorating."
+        sub="Toggle between volume and rolling negative rate"
+        controls={<Toggle value={sentMode} onChange={setSentMode} options={[{v:'volume',l:'Volume'},{v:'rate',l:'Neg Rate %'}]} />}
+      >
+        {!dailyTrend.length ? <Empty /> : sentMode==='volume' ? (
+          <ResponsiveContainer width="100%" height={180}>
+            <AreaChart data={dailyTrend} margin={{ top:4, right:4, bottom:0, left:-20 }}>
+              <defs>
+                {Object.entries(SC).map(([s,c]) => (
+                  <linearGradient key={s} id={`sg-${s}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={c} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={c} stopOpacity={0} />
+                  </linearGradient>
+                ))}
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+              <YAxis tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} />
+              <Tooltip content={<CT />} />
+              {['Negative','Positive','Neutral'].map(s => (
+                <Area key={s} type="monotone" dataKey={s} stroke={SC[s]} strokeWidth={2} fill={`url(#sg-${s})`} dot={false} activeDot={{ r:3 }} />
+              ))}
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <ResponsiveContainer width="100%" height={180}>
+            <ComposedChart data={dailyTrend} margin={{ top:4, right:4, bottom:0, left:-20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+              <YAxis domain={[0,100]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`} />
+              <Tooltip content={<CT fmt={v=>`${v}%`} />} />
+              <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.4} />
+              <Bar dataKey="neg_rate" fill="#ef4444" opacity={0.2} name="Daily Neg %" radius={[2,2,0,0]} barSize={4} />
+              <Line type="monotone" dataKey="rolling_neg" stroke="#ff4e1a" strokeWidth={2.5} dot={false} name="7d Rolling Neg %" />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
+
+      {/* ── SECTION 4: RATING + 1★ vs 5★ ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+
+        <Card
+          title="Daily Avg Rating"
+          tip="Daily average star rating (1–5) with a 7-day rolling average line. The rolling line smooths out one-off events. A sustained dip below 3.0 (yellow reference line) is a red flag. The delta at the top shows change from the first day to the last day of the period."
+          sub="With 7-day rolling average"
+        >
+          {!dailyRating.length ? <Empty /> : (
+            <>
+              {(() => {
+                const curr = dailyRating[dailyRating.length-1]?.rolling_rating||0
+                const first = dailyRating[0]?.rolling_rating||0
+                const delta = +(curr-first).toFixed(2)
+                const color = delta<0?'#ef4444':delta>0?'#22c55e':'var(--text-muted)'
+                return <div style={{ fontSize:12, fontWeight:700, color }}>{delta>0?`↑ +${delta}`:delta<0?`↓ ${delta}`:'→ stable'} over period</div>
+              })()}
+              <ResponsiveContainer width="100%" height={160}>
+                <ComposedChart data={dailyRating} margin={{ top:4, right:4, bottom:0, left:-20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+                  <YAxis domain={[1,5]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} />
+                  <Tooltip content={<CT fmt={v=>v?.toFixed?.(2)+' ★'} />} />
+                  <ReferenceLine y={3} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} />
+                  <Bar dataKey="avg_rating" fill="#ff4e1a" opacity={0.15} name="Daily Avg" radius={[2,2,0,0]} barSize={4} />
+                  <Line type="monotone" dataKey="rolling_rating" stroke="#ff4e1a" strokeWidth={2.5} dot={false} name="7d Rolling" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </>
+          )}
+        </Card>
+
+        <Card
+          title="1★ vs 5★ Daily Volume"
+          tip="Daily count of 1-star (worst) and 5-star (best) reviews. When 1★ volume rises above 5★, it signals a product event or quality issue. A widening gap between the two lines is an early warning — often appears here before it shows in the average rating."
+          sub="Divergence signals a product event"
+        >
+          {!starRatioDays.length ? <Empty /> : (
+            <ResponsiveContainer width="100%" height={190}>
+              <AreaChart data={starRatioDays} margin={{ top:4, right:4, bottom:0, left:-20 }}>
+                <defs>
+                  <linearGradient id="sg1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="sg5" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+                <YAxis tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} />
+                <Tooltip content={<CT />} />
+                <Area type="monotone" dataKey="1★" stroke="#ef4444" strokeWidth={2} fill="url(#sg1)" dot={false} />
+                <Area type="monotone" dataKey="5★" stroke="#22c55e" strokeWidth={2} fill="url(#sg5)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
+      </div>
+
+      {/* ── SECTION 5: PRODUCT HEAD-TO-HEAD ── */}
+      <Card
+        title="Product Head-to-Head"
+        tip="Daily negative rate % for each product plotted as separate lines. Use this to compare which products are improving or deteriorating relative to each other. The red dashed line at 50% is a critical threshold — any product above it needs urgent attention. Click legend buttons to isolate a product."
+        sub="Daily negative rate % per product · click legend to isolate"
+        controls={
+          <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+            {allProds.map((p,i) => (
+              <button key={p} onClick={() => toggleProd(p)} style={{
+                display:'flex', alignItems:'center', gap:5, padding:'3px 9px', borderRadius:5, cursor:'pointer', fontFamily:'DM Sans',
+                border:`1px solid ${hiddenProds.has(p)?'var(--border)':PAL[i%PAL.length]+'80'}`,
+                background: hiddenProds.has(p)?'transparent':`${PAL[i%PAL.length]}18`,
+                color: hiddenProds.has(p)?'var(--text-muted)':PAL[i%PAL.length],
+                fontSize:11, fontWeight:600, opacity:hiddenProds.has(p)?0.4:1,
               }}>
-                {shortProduct(p)}
+                <span style={{ width:8, height:8, borderRadius:'50%', background:PAL[i%PAL.length], flexShrink:0 }} />
+                {p.length>20?p.slice(0,18)+'…':p}
               </button>
             ))}
           </div>
-        </div>
+        }
+      >
+        {!productDaily.length ? <Empty /> : (
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={productDaily} margin={{ top:4, right:4, bottom:0, left:-20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+              <YAxis domain={[0,100]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`} />
+              <Tooltip content={<CT fmt={v=>v!=null?`${v}%`:'no data'} />} />
+              <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.3} />
+              {allProds.map((p,i) => !hiddenProds.has(p) && (
+                <Line key={p} type="monotone" dataKey={p} stroke={PAL[i%PAL.length]}
+                  strokeWidth={2} dot={false} activeDot={{ r:4 }} connectNulls />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
 
-        {/* CSV Download */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-            Export
-          </span>
-          <button
-            onClick={() => downloadCSV(locallyFilteredReviews)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 7,
-              padding: '7px 16px', borderRadius: 7,
-              border: '1px solid var(--accent)',
-              background: 'var(--accent)15',
-              color: 'var(--accent)',
-              fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              fontFamily: 'Bebas Neue', letterSpacing: '0.08em', fontSize: 14,
-              transition: 'all 0.15s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--accent)30'}
-            onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)15'}
-          >
-            <Download size={14} />
-            DOWNLOAD CSV
-          </button>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-            {locallyFilteredReviews.length} rows (current filters)
-          </span>
-        </div>
-      </div>
+      {/* ── SECTION 6: ISSUE CATEGORY TRENDS + MOMENTUM ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:16 }}>
 
-      {loading ? (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: 12, color: 'var(--text-muted)' }}>
-          <Loader2 size={22} className="spin" />
-          <span>Loading trends…</span>
-        </div>
-      ) : (
-        <>
-          {/* ── Category Trend Over Time ── */}
-          <Section
-            title="Category Issues Over Time"
-            subtitle="Track how each issue category evolves — click legend to show/hide lines"
-          >
-            <CustomLegend items={trendLegendItems} hidden={hiddenLines} onToggle={toggleLine} />
-            {!data?.category_trend?.length ? <Empty /> : (
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={data.category_trend} margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
-                  <CartesianGrid stroke="#222230" strokeDasharray="4 4" vertical={false} />
-                  <XAxis
-                    dataKey="period"
-                    tick={{ fill: '#666680', fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(v) => formatPeriod(v, granularity)}
-                  />
-                  <YAxis tick={{ fill: '#666680', fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  {(data.all_categories || []).map((cat, i) => (
-                    <Line
-                      key={cat}
-                      type="monotone"
-                      dataKey={cat}
-                      stroke={PALETTE[i % PALETTE.length]}
-                      strokeWidth={hiddenLines.has(cat) ? 0 : 2}
-                      dot={false}
-                      activeDot={{ r: 4 }}
-                      hide={hiddenLines.has(cat)}
-                    />
+        <Card
+          title="Issue Category Daily Trend"
+          tip="Daily count of negative reviews per issue category. Use Daily view to spot when a specific issue spiked. Use Totals view to rank categories by total volume across the period. Click category pills above the chart to isolate a specific issue."
+          sub="Negative reviews by category · click pills to isolate"
+          controls={<Toggle value={catMode} onChange={setCatMode} options={[{v:'trend',l:'Daily'},{v:'total',l:'Totals'}]} />}
+        >
+          <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 8px', marginBottom:4 }}>
+            {allCats.map((c,i) => (
+              <button key={c} onClick={() => toggleCat(c)} style={{
+                display:'flex', alignItems:'center', gap:4, padding:'2px 7px', borderRadius:4,
+                cursor:'pointer', fontFamily:'DM Sans', fontSize:11,
+                border:`1px solid ${hiddenCats.has(c)?'var(--border)':PAL[i%PAL.length]+'60'}`,
+                background: hiddenCats.has(c)?'transparent':`${PAL[i%PAL.length]}15`,
+                color: hiddenCats.has(c)?'var(--text-muted)':PAL[i%PAL.length],
+                opacity: hiddenCats.has(c)?0.4:1,
+              }}>
+                <span style={{ width:6, height:6, borderRadius:'50%', background:PAL[i%PAL.length] }} />{c}
+              </button>
+            ))}
+          </div>
+          {catMode==='trend' ? (
+            !dailyCats.length ? <Empty /> : (
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={dailyCats} margin={{ top:4, right:4, bottom:0, left:-20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+                  <YAxis tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} />
+                  <Tooltip content={<CT />} />
+                  {allCats.map((c,i) => !hiddenCats.has(c) && (
+                    <Line key={c} type="monotone" dataKey={c} stroke={PAL[i%PAL.length]} strokeWidth={1.5} dot={false} activeDot={{ r:3 }} />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
-            )}
-          </Section>
-
-          {/* ── Stacked Bar: Volume by Product ── */}
-          <Section
-            title="Review Volume by Product"
-            subtitle="Stacked by category or sentiment — see which products get hit hardest"
-            controls={
-              <div style={{ display: 'flex', gap: 6 }}>
-                <ToggleBtn active={stackMode === 'category'} onClick={() => setStackMode('category')}>By Category</ToggleBtn>
-                <ToggleBtn active={stackMode === 'sentiment'} onClick={() => setStackMode('sentiment')}>By Sentiment</ToggleBtn>
-              </div>
-            }
-          >
-            {!stackData?.length ? <Empty /> : (
-              <ResponsiveContainer width="100%" height={320}>
-                <BarChart
-                  data={stackData}
-                  margin={{ left: 10, right: 10, top: 16, bottom: 60 }}
-                  barSize={Math.min(64, Math.floor(600 / (stackData.length + 1)))}
-                  barCategoryGap="40%"
-                >
-                  <CartesianGrid stroke="#222230" strokeDasharray="4 4" vertical={false} />
-                  <XAxis
-                    dataKey="product"
-                    tick={{ fill: '#f0ede8', fontSize: 11, fontWeight: 500 }}
-                    axisLine={false} tickLine={false}
-                    angle={-25} textAnchor="end" interval={0}
-                    height={60}
-                  />
-                  <YAxis tick={{ fill: '#666680', fontSize: 11 }} axisLine={false} tickLine={false} width={30} />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    cursor={{ fill: '#ffffff06' }}
-                    formatter={(value, name) => [value, name]}
-                  />
-                  {stackKeys.map((key, i) => (
-                    <Bar
-                      key={key}
-                      dataKey={key}
-                      stackId="a"
-                      fill={getStackColor(key, i)}
-                      radius={i === stackKeys.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+            )
+          ) : (
+            <>
+              <div style={{ display:'flex', flexDirection:'column', gap:0, marginTop:4 }}>
+                {(data?.category_momentum||[]).slice(0,10).map((row,i) => {
+                  const max = Math.max(...(data.category_momentum||[]).map(r=>r.second),1)
+                  return (
+                    <div key={row.category}
+                      onClick={() => setDrawerCat(drawerCat === row.category ? null : row.category)}
+                      style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 6px', borderBottom:'1px solid var(--border)',
+                        cursor:'pointer', borderRadius:4, margin:'0 -6px', transition:'background 0.12s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background='rgba(255,78,26,0.07)'}
+                      onMouseLeave={e => e.currentTarget.style.background='transparent'}
                     >
-                      <LabelList
-                        dataKey={key}
-                        position="center"
-                        style={{ fill: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: 600 }}
-                        formatter={(v) => v > 2 ? v : ''}
-                      />
-                    </Bar>
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-            {/* Legend */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', paddingTop: 4 }}>
-              {stackKeys.map((key, i) => (
-                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 12, height: 12, borderRadius: 3, background: getStackColor(key, i), flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: 'var(--text)' }}>{key}</span>
-                </div>
-              ))}
-            </div>
-          </Section>
-
-          {/* ── Keyword Word Cloud ── */}
-          <Section
-            title="Keyword Cloud"
-            subtitle="Size = review volume · Color = sentiment ratio · Click any word to see reviews"
-          >
-            <WordCloud
-              data={wcData}
-              activeWord={activeWord}
-              onWordClick={setActiveWord}
-            />
-          </Section>
-
-          {/* ── Word Cloud Reviews Drawer ── */}
-          {activeWord && (
-            <Section
-              title={
-                <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <List size={16} />
-                  Reviews tagged &ldquo;{activeWord}&rdquo;
-                  {!keywordLoading && (
-                    <span style={{
-                      fontSize: 13, fontFamily: 'DM Sans', fontWeight: 600,
-                      background: 'var(--accent)20', color: 'var(--accent)',
-                      border: '1px solid var(--accent)40',
-                      borderRadius: 12, padding: '1px 10px',
-                      letterSpacing: 0,
-                    }}>
-                      {keywordReviews.length}
-                    </span>
-                  )}
-                </span>
-              }
-              controls={
-                <button
-                  onClick={() => setActiveWord(null)}
-                  style={{
-                    background: 'none', border: '1px solid var(--border)',
-                    borderRadius: 6, color: 'var(--text-muted)',
-                    fontSize: 12, padding: '5px 12px', cursor: 'pointer',
-                  }}
-                >
-                  Close ✕
-                </button>
-              }
-            >
-              {keywordLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '24px 0', color: 'var(--text-muted)' }}>
-                  <Loader2 size={16} className="spin" />
-                  <span style={{ fontSize: 13 }}>Loading reviews...</span>
-                </div>
-              ) : keywordReviews.length === 0 ? (
-                <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-                  No reviews found for this keyword.
-                </div>
-              ) : (
-                <ReviewsTable data={keywordReviews} />
-              )}
-            </Section>
+                      <div style={{ fontSize:11, color:'var(--text-muted)', width:14, textAlign:'right' }}>{i+1}</div>
+                      <div style={{ fontSize:12, fontWeight:600, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{row.category}</div>
+                      <div style={{ width:80, height:5, background:'var(--border)', borderRadius:2 }}>
+                        <div style={{ height:'100%', width:`${(row.second/max)*100}%`, background:PAL[i%PAL.length], borderRadius:2 }} />
+                      </div>
+                      <div style={{ fontSize:12, fontWeight:700, color:PAL[i%PAL.length], width:28, textAlign:'right' }}>{row.second}</div>
+                    </div>
+                  )
+                })}
+              </div>
+              <ReviewsDrawer category={drawerCat} label={drawerCat} filters={filters} onClose={() => setDrawerCat(null)} />
+            </>
           )}
+        </Card>
 
-          {/* ── Sub-tag Heatmap ── */}
-          <Section
-            title="Sub-tag Heatmap"
-            subtitle="Intensity of specific issues per product — hover cells for exact count"
-          >
-            {/* Heatmap scale legend */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Low</span>
-              <div style={{
-                width: 120, height: 10, borderRadius: 4,
-                background: 'linear-gradient(to right, rgba(255,78,26,0.1), rgba(255,78,26,0.95))',
-                border: '1px solid var(--border)',
-              }} />
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>High</span>
-            </div>
-            <Heatmap data={data?.heatmap || []} products={heatProducts} subtags={heatSubtags} />
-          </Section>
-        </>
+        <Card
+          title="Issue Watchlist"
+          tip="Top negative issues ranked by total volume. The Signal column tells you what to do: RISING means escalate now, NEW means a fresh problem just appeared, FALLING means your fix is working, STABLE means it's chronic. Early → Recent shows count in the first vs second half of the period so you can see direction at a glance."
+          sub="Ranked by volume · signal shows direction · top 3 highlighted"
+        >
+          <IssueWatchlist momentum={momentum} onRowClick={cat => setDrawerCat(drawerCat === cat ? null : cat)} />
+          <ReviewsDrawer category={drawerCat} label={drawerCat} filters={filters} onClose={() => setDrawerCat(null)} />
+        </Card>
+      </div>
+
+      {/* ── SECTION 7: PRODUCT SCORECARD ── */}
+      <Card
+        title="Product Performance Scorecard"
+        tip="Side-by-side health check for all products in the current filter. Health Score = 100 minus negative rate %. Sorted best to worst. The Verdict column gives an instant action signal: ✅ Good means no action needed, ⚠️ Watch means monitor closely, 🔴 Act Now means escalate immediately."
+        sub="All products ranked by health score · green = good · red = act now"
+      >
+        {!productSummary.length ? <Empty /> : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead>
+                <tr>
+                  {['Product','Reviews','Avg Rating','Neg %','Pos %','Health','Verdict'].map(h => (
+                    <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {productSummary.sort((a,b)=>a.neg_pct-b.neg_pct).map((row,i) => {
+                  const health = Math.max(0,100-row.neg_pct)
+                  const hColor = health>=75?'#22c55e':health>=60?'#eab308':'#ef4444'
+                  const verdict = health>=75?'✅ Good':health>=60?'⚠️ Watch':'🔴 Act Now'
+                  return (
+                    <tr key={row.product} style={{ background:i%2===0?'var(--surface)':'var(--surface2)' }}>
+                      <td style={{ padding:'10px 12px', fontSize:13, fontWeight:600 }}>{row.product}</td>
+                      <td style={{ padding:'10px 12px', fontSize:13 }}>{row.total?.toLocaleString()}</td>
+                      <td style={{ padding:'10px 12px' }}><Stars rating={row.avg_rating} /></td>
+                      <td style={{ padding:'10px 12px' }}>
+                        <span style={{ color:row.neg_pct>50?'#ef4444':row.neg_pct>30?'#eab308':'#22c55e', fontWeight:700 }}>{row.neg_pct}%</span>
+                        <div style={{ height:3, width:60, background:'var(--border)', borderRadius:2, marginTop:3 }}>
+                          <div style={{ height:'100%', width:`${row.neg_pct}%`, background:row.neg_pct>50?'#ef4444':row.neg_pct>30?'#eab308':'#22c55e', borderRadius:2 }} />
+                        </div>
+                      </td>
+                      <td style={{ padding:'10px 12px', color:'#22c55e', fontWeight:700 }}>{Math.round((row.positive||0)/Math.max(row.total,1)*100)}%</td>
+                      <td style={{ padding:'10px 12px' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                          <div style={{ fontFamily:'Bebas Neue', fontSize:22, color:hColor }}>{Math.round(health)}</div>
+                          <div style={{ width:40, height:4, background:'var(--border)', borderRadius:2 }}>
+                            <div style={{ height:'100%', width:`${health}%`, background:hColor, borderRadius:2 }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ padding:'10px 12px', fontSize:12, fontWeight:700 }}>{verdict}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* ── SECTION 8: RATING DISTRIBUTION ── */}
+      <Card
+        title="Rating Distribution by Product"
+        tip="Horizontal bar breakdown of 1★ through 5★ reviews per product. A healthy product is top-heavy — most reviews at 4★ and 5★. A bimodal distribution (both 1★ and 5★ are high) means polarised opinions, often a sign of a quality consistency issue."
+        sub="Healthy = top-heavy (4★ + 5★). Bimodal = quality consistency issue."
+      >
+        {!ratingDist.length ? <Empty /> : (
+          <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
+            {ratingDist.map(row => {
+              const total = [1,2,3,4,5].reduce((s,n)=>s+(row[n]||0),0)
+              return (
+                <div key={row.product} style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                  <div style={{ fontSize:12, fontWeight:700 }}>{row.product}</div>
+                  {[5,4,3,2,1].map(star => {
+                    const cnt = row[star]||0
+                    const pct = total>0?(cnt/total*100).toFixed(1):0
+                    const color = star>=4?'#22c55e':star===3?'#eab308':'#ef4444'
+                    return (
+                      <div key={star} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                        <div style={{ width:20, fontSize:11, color:'var(--text-muted)', textAlign:'right' }}>{star}★</div>
+                        <div style={{ flex:1, height:8, background:'var(--border)', borderRadius:4, overflow:'hidden' }}>
+                          <div style={{ height:'100%', width:`${pct}%`, background:color, borderRadius:4, transition:'width 0.4s' }} />
+                        </div>
+                        <div style={{ width:36, fontSize:11, color, fontWeight:700, textAlign:'right' }}>{pct}%</div>
+                        <div style={{ width:24, fontSize:10, color:'var(--text-muted)', textAlign:'right' }}>{cnt}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
+
+      </>
       )}
     </div>
   )

@@ -47,6 +47,8 @@ def get_reviews(
     sentiment: Optional[str] = None,
     rating: Optional[str] = None,
     product: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ):
     conn = get_conn()
     try:
@@ -86,6 +88,14 @@ def get_reviews(
                 placeholders = ",".join(["%s"] * len(products))
                 query += f" AND r.product_name IN ({placeholders})"
                 params.extend(products)
+
+            date_parse = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
+            if date_from:
+                query += f" AND {date_parse} >= %s"
+                params.append(date_from)
+            if date_to:
+                query += f" AND {date_parse} <= %s"
+                params.append(date_to)
 
             cur.execute(query, params)
             rows = cur.fetchall()
@@ -385,12 +395,13 @@ def get_trends(
                 product_filter = f" AND r.product_name IN ({placeholders})"
                 base_params.extend(products)
 
+            _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             date_filter = ""
             if date_from:
-                date_filter += " AND r.scrape_date >= %s"
+                date_filter += f" AND {_rd} >= %s"
                 base_params.append(date_from)
             if date_to:
-                date_filter += " AND r.scrape_date <= %s"
+                date_filter += f" AND {_rd} <= %s"
                 base_params.append(date_to)
 
             fmt = "%%Y-%%u" if granularity == "week" else "%%Y-%%m"
@@ -424,6 +435,28 @@ def get_trends(
             """, list(base_params))
             subtag_rows = cur.fetchall()
 
+            # Rating trend over time
+            cur.execute(f"""
+                SELECT DATE_FORMAT(r.scrape_date, '{fmt}') as period,
+                    ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 2) as avg_rating,
+                    COUNT(*) as count
+                FROM raw_reviews r
+                WHERE 1=1 {product_filter} {date_filter}
+                GROUP BY period ORDER BY period
+            """, list(base_params))
+            rating_rows = cur.fetchall()
+
+            # Sentiment over time (for stacked area)
+            cur.execute(f"""
+                SELECT DATE_FORMAT(r.scrape_date, '{fmt}') as period,
+                    t.sentiment, COUNT(*) as count
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE 1=1 {product_filter} {date_filter}
+                GROUP BY period, t.sentiment ORDER BY period
+            """, list(base_params))
+            sent_time_rows = cur.fetchall()
+
         # Process category trends
         trend_data = defaultdict(lambda: defaultdict(int))
         all_cats = set()
@@ -441,15 +474,62 @@ def get_trends(
 
         # Process stacked bar
         product_cat = defaultdict(lambda: defaultdict(int))
-        product_sentiment = defaultdict(lambda: defaultdict(int))
+        product_neg = defaultdict(lambda: defaultdict(int))
         for row in stack_rows:
             cats = json.loads(row["primary_categories"] or "[]")
             for c in cats:
                 product_cat[row["product_name"]][c] += row["count"]
-            product_sentiment[row["product_name"]][row["sentiment"]] += row["count"]
+            product_neg[row["product_name"]][row["sentiment"]] += row["count"]
 
         stacked_category = [{"product": p, **cats} for p, cats in product_cat.items()]
-        stacked_sentiment = [{"product": p, **sents} for p, sents in product_sentiment.items()]
+
+        # product_sentiment for CXO table: {product, total, negative, positive, neutral, avg_rating, top_issue}
+        cat_totals_map = defaultdict(int)
+        for row in stack_rows:
+            cats = json.loads(row["primary_categories"] or "[]")
+            if row.get("sentiment") == "Negative":
+                for c in cats:
+                    cat_totals_map[c] += row["count"]
+
+        product_sentiment_list = []
+        for p, sents in product_neg.items():
+            total = sum(sents.values())
+            neg = sents.get("Negative", 0)
+            top_cats = sorted(
+                [(c, cnt) for c, cnt in product_cat[p].items()],
+                key=lambda x: -x[1]
+            )
+            product_sentiment_list.append({
+                "product": p,
+                "total": total,
+                "negative": neg,
+                "positive": sents.get("Positive", 0),
+                "neutral": sents.get("Neutral", 0),
+                "avg_rating": None,  # filled below from rating_rows if available
+                "top_issue": top_cats[0][0] if top_cats else None,
+            })
+
+        # Merge avg_rating into product_sentiment from stack_rows avg
+        # (we don't have per-product rating in stack_rows, use separate approach)
+        stacked_sentiment_time = defaultdict(lambda: {"Positive": 0, "Negative": 0, "Neutral": 0})
+        for row in sent_time_rows:
+            stacked_sentiment_time[row["period"]][row["sentiment"]] += row["count"]
+        stacked_sentiment = [
+            {"period": p, **sents}
+            for p, sents in sorted(stacked_sentiment_time.items())
+        ]
+
+        # category_totals: sorted by negative count
+        category_totals = sorted(
+            [{"category": c, "count": cnt} for c, cnt in cat_totals_map.items()],
+            key=lambda x: -x["count"]
+        )
+
+        # rating trend
+        rating_trend = [
+            {"period": str(r["period"]), "avg_rating": float(r["avg_rating"] or 0)}
+            for r in rating_rows
+        ]
 
         # Process heatmap
         heatmap = defaultdict(lambda: defaultdict(int))
@@ -473,9 +553,316 @@ def get_trends(
             "stacked_sentiment": stacked_sentiment,
             "heatmap": heatmap_data,
             "all_subtags": sorted(all_subtags),
+            "rating_trend": rating_trend,
+            "category_totals": category_totals,
+            "product_sentiment": product_sentiment_list,
         }
     finally:
         conn.close()
+
+# ── CXO Trends (comprehensive daily) ─────────────────────────────────────────
+
+@app.get("/api/trends/cxo")
+def get_cxo_trends(
+    product: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            base_params = []
+            product_filter = ""
+            if product:
+                products = product.split("|||")
+                placeholders = ",".join(["%s"] * len(products))
+                product_filter = f" AND r.product_name IN ({placeholders})"
+                base_params.extend(products)
+
+            _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
+            date_filter = ""
+            if date_from:
+                date_filter += f" AND {_rd} >= %s"
+                base_params.append(date_from)
+            if date_to:
+                date_filter += f" AND {_rd} <= %s"
+                base_params.append(date_to)
+
+            # 1. Daily sentiment counts
+            cur.execute(f"""
+                SELECT DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day, t.sentiment, COUNT(*) as count
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE 1=1 {product_filter} {date_filter}
+                  AND {_rd} IS NOT NULL
+                GROUP BY day, t.sentiment
+                ORDER BY day
+            """, list(base_params))
+            daily_sent_rows = cur.fetchall()
+
+            # 2. Daily avg rating
+            cur.execute(f"""
+                SELECT r.scrape_date as day,
+                    ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 3) as avg_rating,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1)) < 1.5 THEN 1 ELSE 0 END) as one_star,
+                    SUM(CASE WHEN CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1)) >= 4.5 THEN 1 ELSE 0 END) as five_star
+                FROM raw_reviews r
+                WHERE 1=1 {product_filter} {date_filter}
+                GROUP BY r.scrape_date ORDER BY r.scrape_date
+            """, list(base_params))
+            daily_rating_rows = cur.fetchall()
+
+            # 3. Daily per-product negative rate
+            cur.execute(f"""
+                SELECT r.scrape_date as day, r.product_name,
+                    t.sentiment, COUNT(*) as count
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE 1=1 {product_filter} {date_filter}
+                GROUP BY r.scrape_date, r.product_name, t.sentiment
+                ORDER BY r.scrape_date
+            """, list(base_params))
+            daily_product_rows = cur.fetchall()
+
+            # 4. Daily category breakdown (negative only)
+            cur.execute(f"""
+                SELECT r.scrape_date as day, t.primary_categories, COUNT(*) as count
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE 1=1 {product_filter} {date_filter}
+                  AND t.sentiment = 'Negative'
+                GROUP BY r.scrape_date, t.primary_categories
+                ORDER BY r.scrape_date
+            """, list(base_params))
+            daily_cat_rows = cur.fetchall()
+
+            # 5. Rating distribution per product (for donut/bar)
+            cur.execute(f"""
+                SELECT r.product_name,
+                    ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) as rating,
+                    COUNT(*) as count
+                FROM raw_reviews r
+                WHERE 1=1 {product_filter} {date_filter}
+                GROUP BY r.product_name, rating
+                ORDER BY r.product_name, r.rating
+            """, list(base_params))
+            rating_dist_rows = cur.fetchall()
+
+            # 6. Weekly digest — this week vs prior week
+            cur.execute(f"""
+                SELECT
+                    YEARWEEK(r.scrape_date, 1) as yw,
+                    t.sentiment, COUNT(*) as count,
+                    ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 2) as avg_rating
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE r.scrape_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+                  {product_filter.replace('AND', 'AND', 1)}
+                GROUP BY yw, t.sentiment
+                ORDER BY yw
+            """, [p for p in base_params if p not in ([date_from] if date_from else []) + ([date_to] if date_to else [])])
+            digest_rows = cur.fetchall()
+
+            # 7. Category momentum — compare first half vs second half of period
+            cur.execute(f"""
+                SELECT
+                    CASE WHEN r.scrape_date < (
+                        SELECT DATE_ADD(MIN(r2.scrape_date),
+                            INTERVAL DATEDIFF(MAX(r2.scrape_date), MIN(r2.scrape_date))/2 DAY)
+                        FROM raw_reviews r2 WHERE 1=1 {product_filter} {date_filter}
+                    ) THEN 'first' ELSE 'second' END as half,
+                    t.primary_categories, COUNT(*) as count
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE 1=1 {product_filter} {date_filter}
+                  AND t.sentiment = 'Negative'
+                GROUP BY half, t.primary_categories
+            """, list(base_params) * 2)
+            momentum_rows = cur.fetchall()
+
+            # 8. Per-product avg rating for comparison
+            cur.execute(f"""
+                SELECT r.product_name,
+                    ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 2) as avg_rating,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN t.sentiment='Negative' THEN 1 ELSE 0 END) as negative,
+                    SUM(CASE WHEN t.sentiment='Positive' THEN 1 ELSE 0 END) as positive,
+                    SUM(CASE WHEN t.sentiment='Neutral' THEN 1 ELSE 0 END) as neutral
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE 1=1 {product_filter} {date_filter}
+                GROUP BY r.product_name
+            """, list(base_params))
+            product_rows = cur.fetchall()
+
+        # ── Process daily sentiment → daily_trend + neg_rate ──
+        days_sent = defaultdict(lambda: {"Positive": 0, "Negative": 0, "Neutral": 0})
+        for row in daily_sent_rows:
+            d = str(row["day"])
+            days_sent[d][row["sentiment"]] += row["count"]
+
+        all_days = sorted(days_sent.keys())
+        daily_trend = []
+        for d in all_days:
+            s = days_sent[d]
+            total = s["Positive"] + s["Negative"] + s["Neutral"]
+            neg_rate = round((s["Negative"] / total * 100), 1) if total else 0
+            pos_rate = round((s["Positive"] / total * 100), 1) if total else 0
+            daily_trend.append({
+                "day": d, "total": total,
+                "Positive": s["Positive"], "Negative": s["Negative"], "Neutral": s["Neutral"],
+                "neg_rate": neg_rate, "pos_rate": pos_rate,
+            })
+
+        # 7-day rolling avg neg_rate
+        for i, pt in enumerate(daily_trend):
+            window = daily_trend[max(0, i-6):i+1]
+            pt["rolling_neg"] = round(sum(w["neg_rate"] for w in window) / len(window), 1)
+
+        # ── Daily rating + rolling ──
+        daily_rating = []
+        rating_map = {str(r["day"]): r for r in daily_rating_rows}
+        for d in all_days:
+            r = rating_map.get(d, {})
+            daily_rating.append({
+                "day": d,
+                "avg_rating": float(r.get("avg_rating") or 0),
+                "total": int(r.get("total") or 0),
+                "one_star": int(r.get("one_star") or 0),
+                "five_star": int(r.get("five_star") or 0),
+            })
+        for i, pt in enumerate(daily_rating):
+            window = daily_rating[max(0, i-6):i+1]
+            vals = [w["avg_rating"] for w in window if w["avg_rating"] > 0]
+            pt["rolling_rating"] = round(sum(vals) / len(vals), 2) if vals else 0
+
+        # ── Per-product daily neg rate ──
+        prod_day = defaultdict(lambda: defaultdict(lambda: {"pos": 0, "neg": 0, "neu": 0}))
+        for row in daily_product_rows:
+            d = str(row["day"]); p = row["product_name"]; s = row["sentiment"]
+            if s == "Positive": prod_day[p][d]["pos"] += row["count"]
+            elif s == "Negative": prod_day[p][d]["neg"] += row["count"]
+            else: prod_day[p][d]["neu"] += row["count"]
+
+        all_products_found = sorted(prod_day.keys())
+        product_daily = []
+        for d in all_days:
+            pt = {"day": d}
+            for p in all_products_found:
+                s = prod_day[p][d]
+                tot = s["pos"] + s["neg"] + s["neu"]
+                pt[p] = round(s["neg"] / tot * 100, 1) if tot else None
+            product_daily.append(pt)
+
+        # ── Daily category breakdown ──
+        day_cats = defaultdict(lambda: defaultdict(int))
+        all_cats = set()
+        for row in daily_cat_rows:
+            d = str(row["day"])
+            cats = json.loads(row["primary_categories"] or "[]")
+            for c in cats:
+                day_cats[d][c] += row["count"]
+                all_cats.add(c)
+
+        daily_categories = [
+            {"day": d, **{c: day_cats[d].get(c, 0) for c in sorted(all_cats)}}
+            for d in all_days
+        ]
+
+        # ── Rating distribution per product ──
+        prod_rating_dist = defaultdict(lambda: defaultdict(int))
+        for row in rating_dist_rows:
+            try:
+                raw_r = str(row["rating"]).strip()
+                star = int(float(raw_r.split()[0]))
+                prod_rating_dist[row["product_name"]][star] += row["count"]
+            except Exception:
+                continue
+
+        rating_distribution = [
+            {"product": p, **{str(s): prod_rating_dist[p].get(s, 0) for s in range(1, 6)}}
+            for p in all_products_found
+        ]
+
+        # ── Weekly digest (last 2 weeks) ──
+        weeks = sorted(set(str(r["yw"]) for r in digest_rows))
+        digest = {}
+        for row in digest_rows:
+            yw = str(row["yw"])
+            if yw not in digest:
+                digest[yw] = {"yw": yw, "Positive": 0, "Negative": 0, "Neutral": 0, "avg_rating": 0, "total": 0}
+            digest[yw][row["sentiment"]] = digest[yw].get(row["sentiment"], 0) + row["count"]
+            digest[yw]["total"] += row["count"]
+        weekly_digest = list(digest.values())[-2:]
+
+        # ── Category momentum (rising vs falling) ──
+        first_cats = defaultdict(int)
+        second_cats = defaultdict(int)
+        for row in momentum_rows:
+            cats = json.loads(row["primary_categories"] or "[]")
+            for c in cats:
+                if row["half"] == "first": first_cats[c] += row["count"]
+                else: second_cats[c] += row["count"]
+
+        momentum = []
+        all_m_cats = set(list(first_cats.keys()) + list(second_cats.keys()))
+        for c in all_m_cats:
+            f = first_cats.get(c, 0); s = second_cats.get(c, 0)
+            change = s - f
+            pct_change = round((change / f * 100)) if f > 0 else (100 if s > 0 else 0)
+            momentum.append({"category": c, "first": f, "second": s, "change": change, "pct_change": pct_change})
+        momentum.sort(key=lambda x: -abs(x["change"]))
+
+        # ── Product summary ──
+        product_summary = [
+            {
+                "product": r["product_name"],
+                "avg_rating": float(r["avg_rating"] or 0),
+                "total": int(r["total"] or 0),
+                "negative": int(r["negative"] or 0),
+                "positive": int(r["positive"] or 0),
+                "neutral": int(r["neutral"] or 0),
+                "neg_pct": round(int(r["negative"] or 0) / int(r["total"] or 1) * 100, 1),
+            }
+            for r in product_rows
+        ]
+
+        # ── Period summary KPIs with WoW delta ──
+        total_all = sum(pt["total"] for pt in daily_trend)
+        total_neg = sum(pt["Negative"] for pt in daily_trend)
+        total_pos = sum(pt["Positive"] for pt in daily_trend)
+        avg_neg_rate = round(total_neg / total_all * 100, 1) if total_all else 0
+
+        # Last 7d vs prior 7d
+        last7 = [pt for pt in daily_trend if pt["day"] >= str(all_days[-7]) ] if len(all_days) >= 7 else daily_trend
+        prior7 = [pt for pt in daily_trend if pt["day"] < str(all_days[-7])][-7:] if len(all_days) >= 14 else []
+        last7_neg = round(sum(p["neg_rate"] for p in last7) / len(last7), 1) if last7 else 0
+        prior7_neg = round(sum(p["neg_rate"] for p in prior7) / len(prior7), 1) if prior7 else None
+
+        return {
+            "daily_trend": daily_trend,
+            "daily_rating": daily_rating,
+            "product_daily": product_daily,
+            "daily_categories": daily_categories,
+            "all_categories": sorted(all_cats),
+            "all_products": all_products_found,
+            "rating_distribution": rating_distribution,
+            "weekly_digest": weekly_digest,
+            "category_momentum": momentum[:10],
+            "product_summary": product_summary,
+            "kpi": {
+                "total": total_all,
+                "neg_pct": avg_neg_rate,
+                "pos_pct": round(total_pos / total_all * 100, 1) if total_all else 0,
+                "last7_neg_rate": last7_neg,
+                "prior7_neg_rate": prior7_neg,
+                "wow_delta": round(last7_neg - prior7_neg, 1) if prior7_neg is not None else None,
+            },
+        }
+    finally:
+        conn.close()
+
 
 # ── Word Cloud ────────────────────────────────────────────────────────────────
 
@@ -497,12 +884,13 @@ def get_wordcloud(
                 product_filter = f" AND r.product_name IN ({placeholders})"
                 base_params.extend(products)
 
+            _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             date_filter = ""
             if date_from:
-                date_filter += " AND r.scrape_date >= %s"
+                date_filter += f" AND {_rd} >= %s"
                 base_params.append(date_from)
             if date_to:
-                date_filter += " AND r.scrape_date <= %s"
+                date_filter += f" AND {_rd} <= %s"
                 base_params.append(date_to)
 
             if category:
@@ -597,12 +985,13 @@ def get_reviews_by_keyword(
                 product_filter = f" AND r.product_name IN ({placeholders})"
                 base_params.extend(products)
 
+            _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             date_filter = ""
             if date_from:
-                date_filter += " AND r.scrape_date >= %s"
+                date_filter += f" AND {_rd} >= %s"
                 base_params.append(date_from)
             if date_to:
-                date_filter += " AND r.scrape_date <= %s"
+                date_filter += f" AND {_rd} <= %s"
                 base_params.append(date_to)
 
             cur.execute(f"""
@@ -614,7 +1003,7 @@ def get_reviews_by_keyword(
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE (t.sub_tags LIKE %s OR t.primary_categories LIKE %s)
                 {product_filter} {date_filter}
-                ORDER BY r.scrape_date DESC
+                ORDER BY {_rd} DESC
                 LIMIT 500
             """, base_params)
 
@@ -787,7 +1176,7 @@ def get_summary(
                     SELECT
                         r.asin,
                         MAX(r.product_name) as product_name,
-                        ROUND(AVG(r.rating), 1) as avg_rating,
+                        ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 1) as avg_rating,
                         COUNT(*) as review_count,
                         SUM(CASE WHEN t.sentiment = 'Negative' THEN 1 ELSE 0 END) as neg_count
                     FROM raw_reviews r
@@ -801,9 +1190,12 @@ def get_summary(
             current = fetch_period(d_from, d_to)
             prior = fetch_period(prior_from, prior_to)
 
-            # Fetch AI summaries
-            cur.execute("SELECT asin, issues, positives, generated_at FROM product_summaries")
-            ai_rows = {row["asin"]: row for row in cur.fetchall()}
+            # Fetch AI summaries — gracefully skip if table missing or no permission
+            try:
+                cur.execute("SELECT asin, issues, positives, generated_at FROM product_summaries")
+                ai_rows = {row["asin"]: row for row in cur.fetchall()}
+            except Exception:
+                ai_rows = {}
 
             result = []
             for asin, row in current.items():

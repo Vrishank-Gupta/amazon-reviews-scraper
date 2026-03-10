@@ -6,6 +6,8 @@ export async function fetchReviews(filters = {}) {
   if (filters.sentiment?.length) params.set('sentiment', filters.sentiment.join(','))
   if (filters.rating?.length) params.set('rating', filters.rating.join(','))
   if (filters.product?.length) params.set('product', filters.product.join('|||'))
+  if (filters.date_from) params.set('date_from', filters.date_from)
+  if (filters.date_to) params.set('date_to', filters.date_to)
   const res = await fetch(`${BASE}/reviews?${params}`)
   return res.json()
 }

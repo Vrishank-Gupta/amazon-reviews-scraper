@@ -1,391 +1,419 @@
+import ReviewsDrawer from './ReviewsDrawer'
+/**
+ * OVERVIEW TAB  — CXO 30-second pulse
+ *
+ * Layout:
+ *  1. Alert banner (auto-verdict)
+ *  2. 4 KPI tiles: Total · Neg Rate · Pos Rate · Avg Rating
+ *  3. Product health cards (one per product, visual urgency)
+ *  4. Top burning issues (ranked horizontal bars)
+ *  5. Sentiment trend (compact, toggle volume/rate)
+ */
 import { useState, useEffect, useCallback } from 'react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, Legend
+  ResponsiveContainer, ComposedChart, Bar, Line, ReferenceLine
 } from 'recharts'
-import { fetchAnalysis, fetchReviewsByKeyword } from '../api'
+import { fetchAnalysis } from '../api'
+import { InfoTip, Card } from './shared'
 
-const SENT_COLORS = { Positive: '#22c55e', Negative: '#ef4444', Neutral: '#eab308' }
-const PIE_NEG_COLORS = ['#ef4444', '#f97316', '#fbbf24', '#a855f7', '#e879f9', '#f43f5e', '#94a3b8', '#64748b']
-const PIE_POS_COLORS = ['#22c55e', '#14b8a6', '#60a5fa', '#a78bfa', '#34d399', '#38bdf8', '#94a3b8', '#64748b']
-
-function kpiPercent(val, total) {
-  if (!total) return '0%'
-  return ((val / total) * 100).toFixed(1) + '%'
+function fmtDay(d) {
+  try { return new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) } catch { return d }
 }
 
-function StarLabel({ rating }) {
-  const n = Math.round(parseFloat(rating)) || 0
-  return (
-    <span style={{ color: n >= 4 ? '#22c55e' : n === 3 ? '#eab308' : '#ef4444', fontSize: 12 }}>
-      {'★'.repeat(n)}{'☆'.repeat(Math.max(0, 5 - n))}
-      <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>{n} star{n !== 1 ? 's' : ''}</span>
-    </span>
-  )
-}
-
-function SentBadge({ s }) {
-  const map = { Negative: ['#ef4444', 'rgba(239,68,68,0.12)', '▼'], Positive: ['#22c55e', 'rgba(34,197,94,0.12)', '▲'], Neutral: ['#eab308', 'rgba(234,179,8,0.12)', '●'] }
-  const [color, bg, icon] = map[s] || ['#94a3b8', 'transparent', '●']
-  return (
-    <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 700, color, background: bg, border: `1px solid ${color}40` }}>
-      {icon} {s}
-    </span>
-  )
-}
-
-function KpiTile({ label, value, sub, color }) {
-  return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{label}</div>
-      <div style={{ fontFamily: 'Bebas Neue', fontSize: 34, lineHeight: 1, letterSpacing: '0.04em', color: color || 'var(--text)' }}>
-        {value?.toLocaleString() ?? '—'}
-      </div>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{sub}</div>
-    </div>
-  )
-}
-
-function PieTooltip({ active, payload }) {
-  if (!active || !payload?.length) return null
-  const { name, value } = payload[0]
-  return (
-    <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
-      <div style={{ fontWeight: 700 }}>{name}</div>
-      <div style={{ color: 'var(--text-muted)' }}>{value} reviews</div>
-    </div>
-  )
-}
-
-// ── Reviews Drawer — opened by word click ─────────────────────────────────────
-function ReviewsDrawer({ keyword, category, sentiment, filters, onClose }) {
-  const [reviews, setReviews] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    if (!keyword) return
-    setLoading(true)
-    fetchReviewsByKeyword(keyword, filters)
-      .then(data => {
-        const filtered = sentiment === 'neg'
-          ? data.filter(r => r.sentiment === 'Negative')
-          : sentiment === 'pos'
-          ? data.filter(r => r.sentiment === 'Positive' || r.sentiment === 'Neutral')
-          : data
-        setReviews(filtered)
-      })
-      .finally(() => setLoading(false))
-  }, [keyword, sentiment, JSON.stringify(filters)])
+// ── Alert banner ──────────────────────────────────────────────────────────────
+function AlertBanner({ kpi, negPie, products }) {
+  if (!kpi?.total) return null
+  const negPct = +((kpi.negative / kpi.total) * 100).toFixed(1)
+  const topIssue = negPie?.[0]
+  const critProds = (products||[]).filter(p => p.neg_pct > 50).length
+  const watchProds = (products||[]).filter(p => p.neg_pct > 30 && p.neg_pct <= 50).length
+  const level = negPct > 50 || critProds > 0 ? 'critical' : negPct > 30 || watchProds > 0 ? 'watch' : 'healthy'
+  const cfg = {
+    critical: { color:'#ef4444', bg:'rgba(239,68,68,0.07)', icon:'🔴', label:'ACTION REQUIRED' },
+    watch:    { color:'#eab308', bg:'rgba(234,179,8,0.07)',  icon:'⚠️', label:'MONITOR CLOSELY' },
+    healthy:  { color:'#22c55e', bg:'rgba(34,197,94,0.07)', icon:'✅', label:'PERFORMING WELL'  },
+  }[level]
 
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--surface2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontFamily: 'Bebas Neue', fontSize: 16, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
-            Reviews — <span style={{ color: 'var(--accent)' }}>{keyword}</span>
-            {category && <span style={{ fontSize: 12, fontWeight: 400, marginLeft: 6 }}>in {category}</span>}
-          </span>
-          {!loading && (
-            <span style={{ background: 'rgba(255,78,26,0.15)', color: 'var(--accent)', border: '1px solid rgba(255,78,26,0.3)', borderRadius: 10, padding: '1px 9px', fontSize: 12, fontWeight: 600 }}>
-              {reviews.length}
-            </span>
-          )}
+    <div style={{ background:cfg.bg, border:`1px solid ${cfg.color}30`, borderRadius:10, padding:'14px 18px', display:'flex', alignItems:'center', gap:14 }}>
+      <span style={{ fontSize:22, flexShrink:0 }}>{cfg.icon}</span>
+      <div style={{ flex:1 }}>
+        <div style={{ fontSize:11, fontWeight:700, color:cfg.color, letterSpacing:'0.1em', marginBottom:4 }}>{cfg.label}</div>
+        <div style={{ fontSize:13, color:'var(--text)', lineHeight:1.6 }}>
+          Portfolio negative rate is <strong style={{ color:cfg.color }}>{negPct}%</strong>.
+          {topIssue && <> Top complaint: <strong>{topIssue.category}</strong> ({topIssue.count} reviews).</>}
+          {critProds > 0 && <> <strong style={{ color:'#ef4444' }}>{critProds} product{critProds>1?'s':''}</strong> in crisis (50%+ negative).</>}
+          {watchProds > 0 && <> <strong style={{ color:'#eab308' }}>{watchProds} product{watchProds>1?'s':''}</strong> in watch zone.</>}
         </div>
-        <button onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 12, padding: '4px 10px', cursor: 'pointer', fontFamily: 'DM Sans' }}>
-          Close ✕
-        </button>
       </div>
-      {loading ? (
-        <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>
-      ) : reviews.length === 0 ? (
-        <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No reviews found.</div>
-      ) : (
-        <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-          {reviews.map((r, i) => (
-            <div key={r.review_id || i} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <SentBadge s={r.sentiment} />
-                <StarLabel rating={r.rating} />
-                <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                  {r.review_date?.replace('Reviewed in India on ', '') || ''}
-                </span>
+    </div>
+  )
+}
+
+// ── KPI tile ──────────────────────────────────────────────────────────────────
+function KpiTile({ label, value, sub, color, tip }) {
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 18px', display:'flex', flexDirection:'column', gap:6, borderLeft:`3px solid ${color}` }}>
+      <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+        <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>{label}</span>
+        <InfoTip text={tip} />
+      </div>
+      <div style={{ fontFamily:'Bebas Neue', fontSize:36, lineHeight:1, color }}>{value ?? '—'}</div>
+      <div style={{ fontSize:11, color:'var(--text-muted)' }}>{sub}</div>
+    </div>
+  )
+}
+
+// ── Product health card grid ──────────────────────────────────────────────────
+function ProductHealthGrid({ summaryRows }) {
+  if (!summaryRows?.length) return null
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px,1fr))', gap:12 }}>
+      {[...summaryRows].sort((a,b) => b.neg_pct - a.neg_pct).map(p => {
+        const health = Math.max(0, 100 - p.neg_pct)
+        const color  = health >= 75 ? '#22c55e' : health >= 60 ? '#eab308' : '#ef4444'
+        const label  = health >= 75 ? 'Good' : health >= 60 ? 'Watch' : 'Act Now'
+        const bg     = health >= 75 ? 'rgba(34,197,94,0.06)' : health >= 60 ? 'rgba(234,179,8,0.06)' : 'rgba(239,68,68,0.06)'
+        const avgRating = parseFloat(p.avg_rating || 0).toFixed(1)
+        return (
+          <div key={p.product} style={{ background:bg, border:`1px solid ${color}30`, borderRadius:10, padding:'14px 16px', display:'flex', flexDirection:'column', gap:10 }}>
+            {/* Name + badge */}
+            <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:8 }}>
+              <div style={{ fontSize:12, fontWeight:700, lineHeight:1.4, flex:1 }}>{p.product}</div>
+              <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color, background:`${color}18`, border:`1px solid ${color}40`, borderRadius:4, padding:'2px 7px', flexShrink:0 }}>{label}</div>
+            </div>
+            {/* Big health score */}
+            <div style={{ display:'flex', alignItems:'flex-end', gap:12 }}>
+              <div>
+                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:2 }}>Health</div>
+                <div style={{ fontFamily:'Bebas Neue', fontSize:38, lineHeight:1, color }}>{Math.round(health)}</div>
               </div>
-              {r.title && <div style={{ fontSize: 12, fontWeight: 600 }}>{r.title}</div>}
-              <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
-                {r.review}
+              <div style={{ flex:1, paddingBottom:6 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                  <span style={{ fontSize:10, color:'#ef4444', fontWeight:600 }}>{p.neg_pct}% neg</span>
+                  <span style={{ fontSize:10, color:'#22c55e', fontWeight:600 }}>{Math.round(p.positive/Math.max(p.total,1)*100)}% pos</span>
+                </div>
+                {/* Stacked bar */}
+                <div style={{ height:6, background:'var(--border)', borderRadius:3, overflow:'hidden', display:'flex' }}>
+                  <div style={{ width:`${Math.round(p.positive/Math.max(p.total,1)*100)}%`, background:'#22c55e', opacity:0.8 }} />
+                  <div style={{ width:`${Math.round(p.neutral/Math.max(p.total,1)*100)}%`, background:'#eab308', opacity:0.7 }} />
+                  <div style={{ width:`${p.neg_pct}%`, background:'#ef4444', opacity:0.8 }} />
+                </div>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+            {/* Stats row */}
+            <div style={{ display:'flex', gap:0, borderTop:`1px solid ${color}20`, paddingTop:8 }}>
+              {[
+                { l:'Reviews', v:p.total?.toLocaleString() },
+                { l:'Avg Rating', v:`${avgRating}★` },
+                { l:'Neg Count', v:p.negative?.toLocaleString() },
+              ].map(({ l, v }) => (
+                <div key={l} style={{ flex:1, display:'flex', flexDirection:'column', gap:2 }}>
+                  <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.07em' }}>{l}</div>
+                  <div style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
 
-// ── Word Cloud — clicking a word opens reviews ────────────────────────────────
-function WordCloud({ words, filteredCategory, pieSentiment, filters, onClose }) {
-  const [activeWord, setActiveWord] = useState(null)
-
-  useEffect(() => { setActiveWord(null) }, [filteredCategory])
-
-  if (!words?.length) return (
-    <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-      {filteredCategory ? 'No sub-tags found for this category.' : 'Click a pie slice to filter the word cloud by category.'}
-    </div>
-  )
-
+// ── Burning issues (horizontal ranked bars) ───────────────────────────────────
+function BurningIssues({ negPie, onRowClick }) {
+  if (!negPie?.length) return <div style={{ padding:'20px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>No data</div>
+  const max = negPie[0].count
+  const total = negPie.reduce((s,r)=>s+r.count,0)
+  const COLS = ['#ef4444','#f97316','#fbbf24','#a855f7','#e879f9','#f43f5e','#94a3b8','#64748b']
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Hint text */}
-      {filteredCategory && !activeWord && (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', fontStyle: 'italic' }}>
-          Click any word to see its reviews
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 14px', alignItems: 'center', justifyContent: 'center', padding: '20px 16px', background: 'var(--surface2)', borderRadius: 10, border: '1px solid var(--border)', minHeight: 100 }}>
-        {words.map(w => {
-          const size = Math.round(11 + (w.count / Math.max(...words.map(x => x.count))) * 28)
-          const negRatio = w.neg_ratio || 0
-          const color = negRatio > 0.6 ? '#ef4444' : negRatio > 0.4 ? '#f97316' : negRatio > 0.2 ? '#eab308' : '#22c55e'
-          const isActive = activeWord === w.word
-          const isDimmed = activeWord && !isActive
-          return (
-            <button
-              key={w.word}
-              onClick={() => setActiveWord(isActive ? null : w.word)}
-              style={{
-                background: isActive ? 'rgba(255,78,26,0.12)' : 'none',
-                border: isActive ? '1px solid rgba(255,78,26,0.4)' : '1px solid transparent',
-                borderRadius: 4, padding: '2px 6px', cursor: 'pointer',
-                fontFamily: 'DM Sans', fontSize: size, color,
-                fontWeight: size > 24 ? 700 : size > 18 ? 600 : 500,
-                opacity: isDimmed ? 0.2 : 1, transition: 'all 0.15s',
-              }}
-            >
-              {w.word}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Reviews drawer — shown below word cloud when a word is clicked */}
-      {activeWord && (
-        <ReviewsDrawer
-          keyword={activeWord}
-          category={filteredCategory}
-          sentiment={pieSentiment}
-          filters={filters}
-          onClose={() => setActiveWord(null)}
-        />
-      )}
+    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+      {negPie.map((item, i) => {
+        const pct = total > 0 ? ((item.count/total)*100).toFixed(0) : 0
+        const w = ((item.count/max)*100).toFixed(1)
+        const c = COLS[i % COLS.length]
+        return (
+          <div key={item.category}
+            onClick={() => onRowClick && onRowClick(item.category)}
+            style={{ display:'flex', alignItems:'center', gap:10, cursor: onRowClick ? 'pointer' : 'default',
+              padding:'4px 6px', borderRadius:6, margin:'0 -6px',
+              transition:'background 0.12s',
+            }}
+            onMouseEnter={e => onRowClick && (e.currentTarget.style.background='rgba(255,78,26,0.07)')}
+            onMouseLeave={e => e.currentTarget.style.background='transparent'}
+          >
+            <div style={{ width:26, fontSize:10, color:'var(--text-muted)', textAlign:'right', flexShrink:0 }}>#{i+1}</div>
+            <div style={{ width:130, fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flexShrink:0 }}>{item.category}</div>
+            <div style={{ flex:1, height:8, background:'var(--border)', borderRadius:4, overflow:'hidden' }}>
+              <div style={{ height:'100%', width:`${w}%`, background:c, borderRadius:4, opacity:0.85 }} />
+            </div>
+            <div style={{ width:28, fontSize:12, fontWeight:700, color:c, textAlign:'right', flexShrink:0 }}>{item.count}</div>
+            <div style={{ width:36, fontSize:11, color:'var(--text-muted)', textAlign:'right', flexShrink:0 }}>{pct}%</div>
+          </div>
+        )
+      })}
     </div>
   )
 }
 
-function TrendTooltip({ active, payload, label }) {
+// ── Trend tooltip ─────────────────────────────────────────────────────────────
+// ── Rich rate tooltip ─────────────────────────────────────────────────────────
+function RateTip({ active, payload, label }) {
   if (!active || !payload?.length) return null
+  const rolling = payload.find(p => p.dataKey === 'rolling_neg')?.value
+  const daily   = payload.find(p => p.dataKey === 'neg_rate')?.value
+  const pt      = payload[0]?.payload || {}
+  const total   = (pt.Positive||0) + (pt.Negative||0) + (pt.Neutral||0)
+
+  const verdict = rolling == null ? null
+    : rolling > 50 ? { label:'Crisis', color:'#ef4444', icon:'🔴' }
+    : rolling > 30 ? { label:'High — watch closely', color:'#f97316', icon:'⚠️' }
+    : rolling > 20 ? { label:'Elevated', color:'#eab308', icon:'⚠️' }
+    :                { label:'Healthy', color:'#22c55e', icon:'✅' }
+
   return (
-    <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
-      <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--text-muted)' }}>{label}</div>
-      {payload.map(p => (
-        <div key={p.dataKey} style={{ color: SENT_COLORS[p.dataKey], display: 'flex', gap: 8 }}>
-          <span>{p.dataKey}:</span><span style={{ fontWeight: 700 }}>{p.value}</span>
+    <div style={{ background:'#16161f', border:'1px solid var(--border)', borderRadius:10, padding:'12px 16px', fontSize:12, minWidth:200, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}>
+      <div style={{ fontWeight:700, marginBottom:8, color:'var(--text-muted)', fontSize:11, letterSpacing:'0.06em' }}>{fmtDay(label)}</div>
+      {verdict && (
+        <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10, padding:'4px 8px', background:`${verdict.color}12`, border:`1px solid ${verdict.color}30`, borderRadius:6 }}>
+          <span>{verdict.icon}</span>
+          <span style={{ color:verdict.color, fontWeight:700, fontSize:12 }}>{verdict.label}</span>
         </div>
+      )}
+      <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+        {rolling != null && (
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:16 }}>
+            <span style={{ color:'var(--text-muted)' }}>7d rolling neg rate</span>
+            <span style={{ fontWeight:700, color:'#ff4e1a', fontSize:14 }}>{rolling}%</span>
+          </div>
+        )}
+        {daily != null && (
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:16 }}>
+            <span style={{ color:'var(--text-muted)' }}>{"Today's neg rate"}</span>
+            <span style={{ fontWeight:600, color:'#ef444490', fontSize:12 }}>{daily}%</span>
+          </div>
+        )}
+        {total > 0 && (
+          <>
+            <div style={{ borderTop:'1px solid var(--border)', margin:'4px 0' }} />
+            <div style={{ display:'flex', justifyContent:'space-between', gap:16 }}>
+              <span style={{ color:'var(--text-muted)' }}>Reviews today</span>
+              <span style={{ fontWeight:600 }}>{total}</span>
+            </div>
+            <div style={{ display:'flex', gap:6 }}>
+              {[['Neg', pt.Negative, '#ef4444'], ['Pos', pt.Positive, '#22c55e'], ['Neu', pt.Neutral, '#eab308']].map(([l,v,c]) => (
+                <div key={l} style={{ flex:1, background:`${c}12`, borderRadius:5, padding:'3px 6px', textAlign:'center' }}>
+                  <div style={{ fontSize:10, color:c, fontWeight:700 }}>{l}</div>
+                  <div style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{v||0}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Volume tooltip ────────────────────────────────────────────────────────────
+function VolumeTip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const total = payload.reduce((s,p) => s + (p.value||0), 0)
+  const neg = payload.find(p=>p.dataKey==='Negative')?.value || 0
+  const negPct = total ? ((neg/total)*100).toFixed(0) : 0
+  return (
+    <div style={{ background:'#16161f', border:'1px solid var(--border)', borderRadius:10, padding:'12px 16px', fontSize:12, minWidth:180, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}>
+      <div style={{ fontWeight:700, marginBottom:8, color:'var(--text-muted)', fontSize:11 }}>{fmtDay(label)}</div>
+      <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+        {payload.map(p => (
+          <div key={p.dataKey} style={{ display:'flex', justifyContent:'space-between', gap:16, alignItems:'center' }}>
+            <span style={{ display:'flex', alignItems:'center', gap:5, color:'var(--text-muted)' }}>
+              <span style={{ width:8, height:8, borderRadius:'50%', background:p.color, flexShrink:0, display:'inline-block' }} />
+              {p.dataKey}
+            </span>
+            <span style={{ fontWeight:700, color:p.color }}>{p.value}</span>
+          </div>
+        ))}
+        <div style={{ borderTop:'1px solid var(--border)', marginTop:4, paddingTop:6, display:'flex', justifyContent:'space-between' }}>
+          <span style={{ color:'var(--text-muted)' }}>Neg rate today</span>
+          <span style={{ fontWeight:700, color: negPct>50?'#ef4444':negPct>30?'#f97316':'#22c55e' }}>{negPct}%</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Toggle({ value, options, onChange }) {
+  return (
+    <div style={{ display:'flex', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:7, padding:2, gap:2 }}>
+      {options.map(o => (
+        <button key={o.v} onClick={()=>onChange(o.v)} style={{
+          padding:'3px 10px', borderRadius:5, border:'none', cursor:'pointer', fontSize:11, fontWeight:600, fontFamily:'DM Sans',
+          background:value===o.v?'var(--accent)':'transparent',
+          color:value===o.v?'#fff':'var(--text-muted)', transition:'all 0.15s',
+        }}>{o.l}</button>
       ))}
     </div>
   )
 }
 
-// ── WcLoader fetches words, passes onWordClick up ─────────────────────────────
-function WcLoader({ category, pieSentiment, filters }) {
-  const [words, setWords] = useState([])
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    setLoading(true)
-    const p = new URLSearchParams()
-    if (filters.product?.length) p.set('product', filters.product.join('|||'))
-    if (filters.date_from) p.set('date_from', filters.date_from)
-    if (filters.date_to) p.set('date_to', filters.date_to)
-    if (category) p.set('category', category)
-    fetch(`/api/wordcloud?${p}`)
-      .then(r => r.json())
-      .then(setWords)
-      .catch(() => setWords([]))
-      .finally(() => setLoading(false))
-  }, [category, JSON.stringify(filters)])
-
-  if (loading) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading…</div>
-  return <WordCloud words={words} filteredCategory={category} pieSentiment={pieSentiment} filters={filters} />
-}
-
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── MAIN ──────────────────────────────────────────────────────────────────────
 export default function AnalysisPage({ filters, allProducts }) {
-  const [data, setData] = useState(null)
+  const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
-  const [sentVisible, setSentVisible] = useState({ Negative: true, Positive: true, Neutral: true })
-  const [wcCategory, setWcCategory] = useState(null)   // category selected via pie
-  const [pieSentiment, setPieSentiment] = useState(null) // 'neg' or 'pos'
+  const [hasData, setHasData] = useState(false)
+  const [trendMode, setTrendMode] = useState('rate')
+  const [drawerCat, setDrawerCat] = useState(null)
+  const [drawerCatPos, setDrawerCatPos] = useState(null)
 
   const apiParams = {
-    product: filters.product?.length ? filters.product : allProducts,
+    product:   filters.product?.length ? filters.product : allProducts,
     date_from: filters.date_from,
-    date_to: filters.date_to,
+    date_to:   filters.date_to,
   }
 
   const load = useCallback(() => {
     if (!allProducts?.length) return
     setLoading(true)
-    fetchAnalysis(apiParams)
-      .then(d => { setData(d); setWcCategory(null); setPieSentiment(null) })
-      .finally(() => setLoading(false))
+    fetchAnalysis(apiParams).then(d => { setData(d); setHasData(true) }).finally(() => setLoading(false))
   }, [JSON.stringify(apiParams), allProducts?.length])
 
   useEffect(() => { load() }, [load])
 
-  // Pie click: set category → word cloud filters. No drawer yet.
-  const handlePieClick = (entry, sentiment) => {
-    const cat = entry?.name || entry?.category
-    if (!cat) return
-    if (wcCategory === cat && pieSentiment === sentiment) {
-      // Toggle off
-      setWcCategory(null)
-      setPieSentiment(null)
-    } else {
-      setWcCategory(cat)
-      setPieSentiment(sentiment)
-    }
-  }
-
-  const clearPieFilter = () => {
-    setWcCategory(null)
-    setPieSentiment(null)
-  }
-
-  if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--text-muted)', gap: 10 }}>
-      <span style={{ fontSize: 20 }}>⟳</span> Loading analysis…
+  if (loading && !hasData) return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:200, color:'var(--text-muted)', gap:10 }}>
+      <span style={{ fontSize:20 }}>⟳</span> Loading overview…
     </div>
   )
 
-  const kpi = data?.kpi || {}
-  const trend = data?.daily_trend || []
-  const negPie = data?.neg_pie || []
-  const posPie = data?.pos_pie || []
+  const kpi     = data?.kpi || {}
+  const trend   = data?.daily_trend || []
+  const negPie  = data?.neg_pie || []
+  const posPie  = data?.pos_pie || []
+  const negPct  = kpi.total ? +((kpi.negative/kpi.total)*100).toFixed(1) : 0
+  const posPct  = kpi.total ? +((kpi.positive/kpi.total)*100).toFixed(1) : 0
+
+  // Build product summary from pie data for health cards
+  // (re-use neg_pie + pos_pie totals; real per-product data comes from /api/summary)
+  // We pass a minimal shape to ProductHealthGrid from what /api/analysis returns
+  const productSummaryFromTrend = [] // populated by per-product breakdown if available
+
+  // For rolling neg rate on trend
+  const trendWithRolling = trend.map((pt, i, arr) => {
+    const window = arr.slice(Math.max(0,i-6), i+1)
+    const total = window.reduce((s,w)=>s+(w.Positive+w.Negative+w.Neutral),0)
+    const neg   = window.reduce((s,w)=>s+w.Negative,0)
+    return { ...pt, rolling_neg: total ? +(neg/total*100).toFixed(1) : 0, neg_rate: pt.Negative ? +(pt.Negative/(pt.Positive+pt.Negative+pt.Neutral)*100).toFixed(1) : 0 }
+  })
+
+  // Autoscale Y for rate chart — compute outside JSX so no IIFE needed
+  const rateVals = trendWithRolling.map(d => d.rolling_neg).filter(v => v > 0)
+  const rateMin  = rateVals.length ? Math.max(0, Math.floor(Math.min(...rateVals) / 5) * 5 - 5) : 0
+  const rateMax  = rateVals.length ? Math.min(100, Math.ceil(Math.max(...rateVals) / 5) * 5 + 10) : 100
+
+  const SC = { Positive:'#22c55e', Negative:'#ef4444', Neutral:'#eab308' }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
 
-      {/* KPI row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-        <KpiTile label="Total Reviews" value={kpi.total} sub={`across ${allProducts?.length || 0} product${allProducts?.length !== 1 ? 's' : ''}`} />
-        <KpiTile label="Negative" value={kpi.negative} sub={kpiPercent(kpi.negative, kpi.total) + ' of total'} color="#ef4444" />
-        <KpiTile label="Positive" value={kpi.positive} sub={kpiPercent(kpi.positive, kpi.total) + ' of total'} color="#22c55e" />
-        <KpiTile label="Neutral" value={kpi.neutral} sub={kpiPercent(kpi.neutral, kpi.total) + ' of total'} color="#eab308" />
+      {/* 1. Alert banner */}
+      <AlertBanner kpi={kpi} negPie={negPie} products={[]} />
+
+      {/* 2. KPI tiles */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
+        <KpiTile label="Total Reviews" value={kpi.total?.toLocaleString()} color="#60a5fa"
+          sub={`${allProducts?.length||0} product${allProducts?.length!==1?'s':''} · selected period`}
+          tip="Total reviews scraped for the selected products and date range." />
+        <KpiTile label="Negative Rate" value={`${negPct}%`}
+          color={negPct>50?'#ef4444':negPct>30?'#f97316':'#22c55e'}
+          sub={negPct>50?'🔴 Crisis — immediate action':negPct>30?'⚠️ High — needs attention':'✅ Healthy'}
+          tip="The most important single metric. Under 20% is good. 20–30% is watch territory. Over 30% needs action. Over 50% is a crisis." />
+        <KpiTile label="Positive Rate" value={`${posPct}%`}
+          color="#22c55e"
+          sub={`${kpi.positive?.toLocaleString()} positive reviews`}
+          tip="Share of reviews tagged Positive. High positive alongside high negative = polarised product (quality inconsistency)." />
+        <KpiTile label="Neutral Rate" value={`${kpi.total?((kpi.neutral/kpi.total)*100).toFixed(1):0}%`}
+          color="#eab308"
+          sub={`${kpi.neutral?.toLocaleString()} neutral reviews`}
+          tip="A large neutral share means customers are indifferent — the product meets expectations but doesn't delight or disappoint." />
       </div>
 
-      {/* Daily sentiment trend */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div>
-          <div style={{ fontFamily: 'Bebas Neue', fontSize: 18, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Daily Sentiment Trend</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Volume of reviews per day by review date</div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Show:</span>
-          {['Negative', 'Positive', 'Neutral'].map(s => {
-            const c = SENT_COLORS[s]; const on = sentVisible[s]
-            return (
-              <button key={s} onClick={() => setSentVisible(v => ({ ...v, [s]: !v[s] }))}
-                style={{ padding: '3px 12px', borderRadius: 20, border: `1px solid ${c}`, color: on ? c : 'var(--text-muted)', background: on ? `${c}18` : 'transparent', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans', transition: 'all 0.15s' }}>
-                ● {s}
-              </button>
-            )
-          })}
-        </div>
+      {/* 3. Burning issues — what to fix RIGHT NOW */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+        <Card
+          title="🔴 Top Negative Issues"
+          tip="Categories driving the most negative reviews, ranked by volume. This is your R&D priority list — fixing #1 has the highest customer impact. Each bar shows count and % share of all negatives."
+          sub="Fix these to move the needle most — ranked by review volume"
+        >
+          <BurningIssues negPie={negPie} onRowClick={cat => setDrawerCat(drawerCat === cat ? null : cat)} />
+          <ReviewsDrawer category={drawerCat} label={drawerCat} filters={filters} onClose={() => setDrawerCat(null)} />
+        </Card>
+
+        <Card
+          title="✅ What Customers Love"
+          tip="Categories appearing most in positive and neutral reviews. Protect these during product changes — they are your brand equity. A category appearing in both pies means it's polarising."
+          sub="Protect these — they are your brand equity"
+        >
+          <BurningIssues negPie={posPie.map(p=>({...p}))} onRowClick={cat => setDrawerCatPos(drawerCatPos === cat ? null : cat)} />
+          <ReviewsDrawer category={drawerCatPos} label={drawerCatPos} filters={filters} onClose={() => setDrawerCatPos(null)} />
+        </Card>
+      </div>
+
+      {/* 4. Sentiment trend — compact with toggle */}
+      <Card
+        title="Sentiment Trend"
+        tip="Volume mode: raw count of Positive/Negative/Neutral per day. Rate mode: 7-day rolling negative rate % — the signal you should track, not daily noise. A sustained rise in the rolling rate is an early warning."
+        sub="Rolling 7-day negative rate is the signal — volume is the context"
+        controls={<Toggle value={trendMode} onChange={setTrendMode} options={[{v:'rate',l:'Neg Rate %'},{v:'volume',l:'Volume'}]} />}
+      >
         {trend.length === 0 ? (
-          <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No trend data — review dates may not be parsed yet.</div>
-        ) : (
-          <ResponsiveContainer width="100%" height={160}>
-            <AreaChart data={trend} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+          <div style={{ padding:'24px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+            No trend data — review dates may not be parsed correctly yet.
+          </div>
+        ) : trendMode === 'rate' ? (
+          <ResponsiveContainer width="100%" height={200}>
+            <ComposedChart data={trendWithRolling} margin={{ top:8, right:40, bottom:0, left:-10 }}>
               <defs>
-                {Object.entries(SENT_COLORS).map(([s, c]) => (
-                  <linearGradient key={s} id={`grad-${s}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={c} stopOpacity={0.3} />
+                <linearGradient id="negGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+              <YAxis domain={[rateMin, rateMax]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`} width={36} />
+              <Tooltip content={<RateTip />} />
+              {rateMax >= 30 && <ReferenceLine y={30} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value:'⚠ 30%', fill:'#eab308', fontSize:10, position:'insideRight' }} />}
+              {rateMax >= 50 && <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value:'🔴 50%', fill:'#ef4444', fontSize:10, position:'insideRight' }} />}
+              <Bar dataKey="neg_rate" fill="#ef4444" opacity={0.12} name="Daily Neg %" radius={[2,2,0,0]} barSize={6} />
+              <Area type="monotone" dataKey="rolling_neg" stroke="#ff4e1a" strokeWidth={2.5} fill="url(#negGrad)" dot={false} activeDot={{ r:5, fill:'#ff4e1a', stroke:'#fff', strokeWidth:2 }} name="7d Rolling" />
+            </ComposedChart>
+          </ResponsiveContainer>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={trend} margin={{ top:8, right:8, bottom:0, left:-10 }}>
+              <defs>
+                {Object.entries(SC).map(([s,c]) => (
+                  <linearGradient key={s} id={`ov-${s}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={c} stopOpacity={0.35} />
                     <stop offset="95%" stopColor={c} stopOpacity={0} />
                   </linearGradient>
                 ))}
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false}
-                tickFormatter={d => { try { return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) } catch { return d } }} />
-              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} />
-              <Tooltip content={<TrendTooltip />} />
-              {['Negative', 'Positive', 'Neutral'].map(s => sentVisible[s] && (
-                <Area key={s} type="monotone" dataKey={s} stroke={SENT_COLORS[s]} strokeWidth={2}
-                  fill={`url(#grad-${s})`} dot={false} activeDot={{ r: 4 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+              <YAxis tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} width={36} />
+              <Tooltip content={<VolumeTip />} />
+              {['Negative','Positive','Neutral'].map(s => (
+                <Area key={s} type="monotone" dataKey={s} stroke={SC[s]} strokeWidth={2}
+                  fill={`url(#ov-${s})`} dot={false} activeDot={{ r:4, stroke:'#fff', strokeWidth:1.5 }} />
               ))}
             </AreaChart>
           </ResponsiveContainer>
         )}
-      </div>
-
-      {/* Dual pie charts */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        {[
-          { title: '⬤ Negative Reviews', sub: 'by category — click a slice to explore sub-tags', data: negPie, colors: PIE_NEG_COLORS, sentiment: 'neg' },
-          { title: '⬤ Positive + Neutral', sub: 'by category — click a slice to explore sub-tags', data: posPie, colors: PIE_POS_COLORS, sentiment: 'pos' },
-        ].map(({ title, sub, data: pieData, colors, sentiment }) => (
-          <div key={sentiment} style={{ background: 'var(--surface)', border: `1px solid ${wcCategory && pieSentiment === sentiment ? 'rgba(255,78,26,0.4)' : 'var(--border)'}`, borderRadius: 12, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12, transition: 'border-color 0.15s' }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: sentiment === 'neg' ? '#ef4444' : '#22c55e' }}>{title}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>
-            </div>
-            {pieData.length === 0 ? (
-              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: '20px 0' }}>No data</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={180}>
-                <PieChart>
-                  <Pie data={pieData} dataKey="count" nameKey="category"
-                    cx="40%" cy="50%" outerRadius={70} innerRadius={36}
-                    cursor="pointer" onClick={(entry) => handlePieClick(entry, sentiment)} stroke="none">
-                    {pieData.map((entry, i) => (
-                      <Cell key={i} fill={colors[i % colors.length]}
-                        opacity={wcCategory === entry.category && pieSentiment === sentiment ? 1 : wcCategory ? 0.4 : 1} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<PieTooltip />} />
-                  <Legend layout="vertical" align="right" verticalAlign="middle"
-                    formatter={(value) => <span style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>{value}</span>}
-                    onClick={(e) => handlePieClick({ name: e.value }, sentiment)} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Word cloud + reviews drawer (word click → drawer below cloud) */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-          <div>
-            <div style={{ fontFamily: 'Bebas Neue', fontSize: 18, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Keyword Cloud</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-              {wcCategory
-                ? `Sub-tags of "${wcCategory}" · click a word to see reviews`
-                : 'Click a pie slice above to filter by category'}
-              {' '} · size = volume · color = sentiment
-            </div>
-          </div>
-          {wcCategory && (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 6, background: 'rgba(255,78,26,0.1)', border: '1px solid rgba(255,78,26,0.3)', fontSize: 11, color: 'var(--accent)' }}>
-              {wcCategory}
-              <button onClick={clearPieFilter} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>✕</button>
-            </div>
-          )}
-        </div>
-        <WcLoader category={wcCategory} pieSentiment={pieSentiment} filters={apiParams} />
-      </div>
+      </Card>
 
     </div>
   )
