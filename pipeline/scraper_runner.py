@@ -17,8 +17,8 @@ from scraper import scrape_reviews_for_asin
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(project_root, ".env"))
 
-CHROMEDRIVER_PATH = r"C:\chromedriver\chromedriver.exe"
-CHROME_PROFILE    = r"C:\amazon_profile"
+CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH", "")  # empty = Selenium auto-manages
+CHROME_PROFILE    = os.getenv("CHROME_PROFILE", r"C:\amazon_profile")
 ASINS_CSV         = os.path.join(project_root, "data", "asins.csv")
 
 # ── DB ────────────────────────────────────────────────────────────────────────
@@ -37,18 +37,27 @@ options = Options()
 options.add_argument("--start-maximized")
 options.add_argument(f"--user-data-dir={CHROME_PROFILE}")
 
-driver = webdriver.Chrome(
-    service=Service(CHROMEDRIVER_PATH),
-    options=options,
-)
+if CHROMEDRIVER_PATH:
+    driver = webdriver.Chrome(service=Service(CHROMEDRIVER_PATH), options=options)
+else:
+    driver = webdriver.Chrome(options=options)  # Selenium 4.6+ auto-downloads chromedriver
 
 # ── Scrape & insert ───────────────────────────────────────────────────────────
+# SCRAPE_ASINS env var = comma-separated list of ASINs to scrape; empty = all
+_asin_filter_raw = os.getenv("SCRAPE_ASINS", "").strip()
+ASIN_FILTER = set(a.strip() for a in _asin_filter_raw.split(",") if a.strip())
+
 try:
     with open(ASINS_CSV, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             asin         = row["asin"]
             product_name = row["product_name"]
+
+            # Skip if not in the requested ASIN list
+            if ASIN_FILTER and asin not in ASIN_FILTER:
+                print(f"  → Skipping {asin} ({product_name}) — not in selected ASINs")
+                continue
             print(f"Scraping ASIN: {asin} — {product_name}")
 
             reviews = scrape_reviews_for_asin(driver, asin, product_name)

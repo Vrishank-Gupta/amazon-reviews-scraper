@@ -165,7 +165,7 @@ def get_pipeline_status():
                 SELECT MAX(scrape_date) as last_scrape, COUNT(*) as total_reviews
                 FROM raw_reviews
             """)
-            row = cur.fetchone()
+            summary_row = cur.fetchone()
 
             # Reviews scraped in the last 7 days
             cur.execute("""
@@ -179,7 +179,21 @@ def get_pipeline_status():
             cur.execute("SELECT COUNT(*) as tagged FROM review_tags")
             tagged = cur.fetchone()
 
-        last_scrape = str(row["last_scrape"]) if row["last_scrape"] else None
+            # Per-ASIN last scrape breakdown — inside with block so cursor is open
+            cur.execute("""
+                SELECT
+                    r.asin,
+                    MAX(r.product_name) as product_name,
+                    MAX(r.scrape_date)  as last_scrape,
+                    COUNT(*)            as total_reviews,
+                    SUM(CASE WHEN r.scrape_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) as recent_reviews
+                FROM raw_reviews r
+                GROUP BY r.asin
+                ORDER BY last_scrape DESC
+            """)
+            asin_rows = cur.fetchall()
+
+        last_scrape = str(summary_row["last_scrape"]) if summary_row and summary_row["last_scrape"] else None
 
         # Days since last scrape
         days_ago = None
@@ -190,20 +204,6 @@ def get_pipeline_status():
                 days_ago = (date.today() - last_date).days
             except Exception:
                 pass
-
-        # Per-ASIN last scrape breakdown — merged with asins.csv so all show up
-        cur.execute("""
-            SELECT
-                r.asin,
-                MAX(r.product_name) as product_name,
-                MAX(r.scrape_date)  as last_scrape,
-                COUNT(*)            as total_reviews,
-                SUM(CASE WHEN r.scrape_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) as recent_reviews
-            FROM raw_reviews r
-            GROUP BY r.asin
-            ORDER BY last_scrape DESC
-        """)
-        asin_rows = cur.fetchall()
 
         # Build lookup from DB results
         db_lookup = { a["asin"]: a for a in asin_rows }
@@ -257,9 +257,9 @@ def get_pipeline_status():
         return {
             "last_scrape": last_scrape,
             "days_ago": days_ago,
-            "total_reviews": row["total_reviews"] or 0,
-            "recent_reviews": recent["recent_count"] or 0,
-            "tagged_reviews": tagged["tagged"] or 0,
+            "total_reviews": summary_row["total_reviews"] if summary_row else 0,
+            "recent_reviews": recent["recent_count"] if recent else 0,
+            "tagged_reviews": tagged["tagged"] if tagged else 0,
             "asin_breakdown": asin_breakdown,
         }
     finally:
@@ -846,17 +846,6 @@ def generate_summaries(product: Optional[str] = None):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # Ensure table exists
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS product_summaries (
-                    asin VARCHAR(20) PRIMARY KEY,
-                    issues JSON,
-                    positives JSON,
-                    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                )
-            """)
-            conn.commit()
-
             product_filter = ""
             params = []
             if product:
@@ -865,13 +854,13 @@ def generate_summaries(product: Optional[str] = None):
                 product_filter = f" AND r.product_name IN ({placeholders})"
                 params.extend(products)
 
+            # Use all reviews, not just last 30 days, so new installs work too
             cur.execute(f"""
                 SELECT r.asin, MAX(r.product_name) as product_name,
-                    GROUP_CONCAT(r.review SEPARATOR ' ||| ') as reviews
+                    GROUP_CONCAT(r.review ORDER BY r.scrape_date DESC SEPARATOR ' ||| ') as reviews
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE r.scrape_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-                {product_filter}
+                WHERE 1=1 {product_filter}
                 GROUP BY r.asin
             """, params)
             asin_rows = cur.fetchall()

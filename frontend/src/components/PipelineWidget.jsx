@@ -58,7 +58,7 @@ export default function PipelineWidget() {
     fetchAsins().then(data => {
       setAsins(Array.isArray(data) ? data : [])
     }).catch(() => {})
-    const id = setInterval(() => load(), 5 * 60 * 1000)
+    const id = setInterval(() => load(), 30 * 1000)
     return () => clearInterval(id)
   }, [])
 
@@ -76,10 +76,22 @@ export default function PipelineWidget() {
       await runPipeline(days, selectedAsins)
       setSuccess(true)
       setTimeout(() => setSuccess(false), 4000)
-      await load()
+      // Pipeline runs in background — poll every 15s until review count grows
+      const startTotal = status?.total_reviews || 0
+      let attempts = 0
+      const poll = setInterval(async () => {
+        attempts++
+        try {
+          const fresh = await fetchPipelineStatus()
+          setStatus(fresh)
+          if (fresh?.total_reviews > startTotal || attempts >= 80) {
+            clearInterval(poll)
+            setRunning(false)
+          }
+        } catch (_) {}
+      }, 15000)
     } catch (e) {
       setError(e.message)
-    } finally {
       setRunning(false)
     }
   }
