@@ -266,6 +266,25 @@ const PRESETS = [
   { label: 'All', from: () => '',            to: () => '' },
 ]
 
+// ── Period label formatter ───────────────────────────────────────────────────
+function formatPeriod(period, granularity) {
+  if (!period) return ''
+  if (granularity === 'month') {
+    // "2026-09" → "Sep 2026"
+    const [year, month] = period.split('-')
+    const d = new Date(+year, +month - 1, 1)
+    return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+  }
+  // "2026-43" → "W43 Oct" (year-weeknumber from MySQL %Y-%u)
+  const [year, week] = period.split('-')
+  // Approximate: week 1 = Jan 1, each week = 7 days
+  const jan1 = new Date(+year, 0, 1)
+  const dayOffset = (+week - 1) * 7
+  const weekStart = new Date(jan1.getTime() + dayOffset * 86400000)
+  const mo = weekStart.toLocaleDateString('en-IN', { month: 'short' })
+  return `W${week} ${mo}`
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function TrendsPage({ products: allProducts, reviews }) {
   const [selectedProducts, setSelectedProducts] = useState([])
@@ -474,7 +493,13 @@ export default function TrendsPage({ products: allProducts, reviews }) {
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={data.category_trend} margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
                   <CartesianGrid stroke="#222230" strokeDasharray="4 4" vertical={false} />
-                  <XAxis dataKey="period" tick={{ fill: '#666680', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <XAxis
+                    dataKey="period"
+                    tick={{ fill: '#666680', fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(v) => formatPeriod(v, granularity)}
+                  />
                   <YAxis tick={{ fill: '#666680', fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={tooltipStyle} />
                   {(data.all_categories || []).map((cat, i) => (

@@ -1,8 +1,10 @@
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import pymysql
 import pymysql.cursors
 import json
+import csv
 import subprocess
 import os
 from typing import Optional
@@ -14,9 +16,13 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 app = FastAPI()
 
+# CORS — reads allowed origins from env so it works both locally and in prod
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -128,8 +134,174 @@ def get_filters():
         conn.close()
 
 
-# ── Pipeline ──────────────────────────────────────────────────────────────────
+# ── ASINs ────────────────────────────────────────────────────────────────────
 
+@app.get("/api/asins")
+def get_asins():
+    """Returns ASINs from data/asins.csv"""
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    asins_path = os.path.join(project_root, "data", "asins.csv")
+    try:
+        with open(asins_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            return [{"asin": r["asin"], "product_name": r["product_name"]} for r in reader]
+    except FileNotFoundError:
+        return []
+
+
+# ── Pipeline status (read-only — scraper runs via Task Scheduler) ─────────────
+
+@app.get("/api/pipeline/status")
+def get_pipeline_status():
+    """
+    Returns last scrape info derived directly from raw_reviews.
+    No dependency on pipeline_runs table or local scraper process.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Last scrape timestamp
+            cur.execute("""
+                SELECT MAX(scrape_date) as last_scrape, COUNT(*) as total_reviews
+                FROM raw_reviews
+            """)
+            row = cur.fetchone()
+
+            # Reviews scraped in the last 7 days
+            cur.execute("""
+                SELECT COUNT(*) as recent_count
+                FROM raw_reviews
+                WHERE scrape_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+            """)
+            recent = cur.fetchone()
+
+            # Tagged reviews total
+            cur.execute("SELECT COUNT(*) as tagged FROM review_tags")
+            tagged = cur.fetchone()
+
+        last_scrape = str(row["last_scrape"]) if row["last_scrape"] else None
+
+        # Days since last scrape
+        days_ago = None
+        if last_scrape:
+            from datetime import date
+            try:
+                last_date = date.fromisoformat(last_scrape[:10])
+                days_ago = (date.today() - last_date).days
+            except Exception:
+                pass
+
+        # Per-ASIN last scrape breakdown — merged with asins.csv so all show up
+        cur.execute("""
+            SELECT
+                r.asin,
+                MAX(r.product_name) as product_name,
+                MAX(r.scrape_date)  as last_scrape,
+                COUNT(*)            as total_reviews,
+                SUM(CASE WHEN r.scrape_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) as recent_reviews
+            FROM raw_reviews r
+            GROUP BY r.asin
+            ORDER BY last_scrape DESC
+        """)
+        asin_rows = cur.fetchall()
+
+        # Build lookup from DB results
+        db_lookup = { a["asin"]: a for a in asin_rows }
+
+        # Read all ASINs from asins.csv as the master list
+        import csv as _csv
+        from datetime import date as _date
+        csv_asins = []
+        csv_path = os.path.join(os.path.dirname(__file__), "..", "data", "asins.csv")
+        try:
+            with open(csv_path, newline="", encoding="utf-8") as f:
+                for row in _csv.DictReader(f):
+                    csv_asins.append({ "asin": row["asin"].strip(), "product_name": row["product_name"].strip() })
+        except Exception:
+            pass
+
+        # Merge: CSV is source of truth for which ASINs exist
+        # Any ASIN in DB but not in CSV is also included
+        seen = set()
+        merged = []
+        for item in csv_asins:
+            seen.add(item["asin"])
+            db = db_lookup.get(item["asin"])
+            merged.append({
+                "asin": item["asin"],
+                "product_name": item["product_name"],
+                "last_scrape": str(db["last_scrape"]) if db and db["last_scrape"] else None,
+                "total_reviews": db["total_reviews"] if db else 0,
+                "recent_reviews": db["recent_reviews"] if db else 0,
+            })
+        for asin, db in db_lookup.items():
+            if asin not in seen:
+                merged.append({
+                    "asin": asin,
+                    "product_name": db["product_name"],
+                    "last_scrape": str(db["last_scrape"]) if db["last_scrape"] else None,
+                    "total_reviews": db["total_reviews"] or 0,
+                    "recent_reviews": db["recent_reviews"] or 0,
+                })
+
+        asin_breakdown = []
+        for a in merged:
+            a_days_ago = None
+            if a["last_scrape"]:
+                try:
+                    a_days_ago = (_date.today() - _date.fromisoformat(a["last_scrape"][:10])).days
+                except Exception:
+                    pass
+            asin_breakdown.append({ **a, "days_ago": a_days_ago })
+
+        return {
+            "last_scrape": last_scrape,
+            "days_ago": days_ago,
+            "total_reviews": row["total_reviews"] or 0,
+            "recent_reviews": recent["recent_count"] or 0,
+            "tagged_reviews": tagged["tagged"] or 0,
+            "asin_breakdown": asin_breakdown,
+        }
+    finally:
+        conn.close()
+
+
+from typing import List as TypingList
+
+class PipelineRunRequest(BaseModel):
+    days: int = 30
+    asins: TypingList[str] = []  # empty = scrape all ASINs in asins.csv
+
+
+@app.post("/api/pipeline/run")
+def run_pipeline(req: PipelineRunRequest = None):
+    if req is None:
+        req = PipelineRunRequest()
+    if req.days < 1 or req.days > 365:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 365")
+
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    start_script = os.path.join(project_root, "pipeline", "start_pipeline.py")
+
+    env = os.environ.copy()
+    env["SCRAPE_DAYS_BACK"] = str(req.days)
+    # Pass selected ASINs as comma-separated string; empty = all
+    if req.asins:
+        env["SCRAPE_ASINS"] = ",".join(req.asins)
+    else:
+        env.pop("SCRAPE_ASINS", None)
+
+    subprocess.Popen(
+        ["python", start_script],
+        cwd=project_root,
+        env=env,
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+    )
+    asin_msg = f"ASINs: {', '.join(req.asins)}" if req.asins else "all ASINs"
+    return {"message": f"Pipeline started — last {req.days} days, {asin_msg}"}
+
+
+# Keep old /api/pipeline endpoint for backward compatibility
 @app.get("/api/pipeline")
 def get_pipeline():
     conn = get_conn()
@@ -148,30 +320,6 @@ def get_pipeline():
         return row
     finally:
         conn.close()
-
-
-@app.post("/api/pipeline/run")
-def run_pipeline():
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT status FROM pipeline_runs WHERE id = 1")
-            row = cur.fetchone()
-        if row and row["status"] == "RUNNING":
-            raise HTTPException(status_code=409, detail="Pipeline already running")
-    finally:
-        conn.close()
-
-    # project root is one level above backend/
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    start_script = os.path.join(project_root, "pipeline", "start_pipeline.py")
-
-    subprocess.Popen(
-        ["python", start_script],
-        cwd=project_root,
-        creationflags=subprocess.CREATE_NEW_CONSOLE,
-    )
-    return {"message": "Pipeline started"}
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -336,6 +484,7 @@ def get_wordcloud(
     product: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    category: Optional[str] = None,
 ):
     conn = get_conn()
     try:
@@ -356,23 +505,32 @@ def get_wordcloud(
                 date_filter += " AND r.scrape_date <= %s"
                 base_params.append(date_to)
 
-            # Fetch sub_tags + sentiment for all matching reviews
-            cur.execute(f"""
-                SELECT t.sub_tags, t.sentiment
-                FROM raw_reviews r
-                JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
-            """, list(base_params))
-            rows = cur.fetchall()
+            if category:
+                cur.execute(f"""
+                    SELECT t.sub_tags, t.sentiment
+                    FROM raw_reviews r
+                    JOIN review_tags t ON r.review_id = t.review_id
+                    WHERE 1=1 {product_filter} {date_filter}
+                    AND JSON_CONTAINS(t.primary_categories, %s)
+                """, list(base_params) + [json.dumps(category)])
+                rows = cur.fetchall()
+                cat_rows = []
+            else:
+                cur.execute(f"""
+                    SELECT t.sub_tags, t.sentiment
+                    FROM raw_reviews r
+                    JOIN review_tags t ON r.review_id = t.review_id
+                    WHERE 1=1 {product_filter} {date_filter}
+                """, list(base_params))
+                rows = cur.fetchall()
 
-            # Also fetch primary_categories
-            cur.execute(f"""
-                SELECT t.primary_categories, t.sentiment
-                FROM raw_reviews r
-                JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
-            """, list(base_params))
-            cat_rows = cur.fetchall()
+                cur.execute(f"""
+                    SELECT t.primary_categories, t.sentiment
+                    FROM raw_reviews r
+                    JOIN review_tags t ON r.review_id = t.review_id
+                    WHERE 1=1 {product_filter} {date_filter}
+                """, list(base_params))
+                cat_rows = cur.fetchall()
 
         from collections import defaultdict
 
@@ -469,5 +627,292 @@ def get_reviews_by_keyword(
                     "sub_tags": json.loads(row["sub_tags"] or "[]"),
                 })
             return result
+    finally:
+        conn.close()
+
+# ── Analysis ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/analysis")
+def get_analysis(
+    product: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            base_params = []
+            product_filter = ""
+            if product:
+                products = product.split("|||")
+                placeholders = ",".join(["%s"] * len(products))
+                product_filter = f" AND r.product_name IN ({placeholders})"
+                base_params.extend(products)
+
+            date_filter = ""
+            if date_from:
+                date_filter += " AND parsed_date >= %s"
+            if date_to:
+                date_filter += " AND parsed_date <= %s"
+
+            # Parse review_date string → actual date
+            date_parse = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
+
+            # ── KPI counts ──
+            kpi_params = list(base_params)
+            if date_from: kpi_params.append(date_from)
+            if date_to: kpi_params.append(date_to)
+
+            cur.execute(f"""
+                SELECT t.sentiment, COUNT(*) as count
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE 1=1 {product_filter}
+                  AND {date_parse} IS NOT NULL
+                  {date_filter.replace('parsed_date', date_parse)}
+                GROUP BY t.sentiment
+            """, kpi_params)
+            sentiment_kpi = {row["sentiment"]: row["count"] for row in cur.fetchall()}
+
+            # ── Daily sentiment trend by review_date ──
+            trend_params = list(base_params)
+            if date_from: trend_params.append(date_from)
+            if date_to: trend_params.append(date_to)
+
+            cur.execute(f"""
+                SELECT
+                    DATE_FORMAT({date_parse}, '%%Y-%%m-%%d') as day,
+                    t.sentiment,
+                    COUNT(*) as count
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE 1=1 {product_filter}
+                  AND {date_parse} IS NOT NULL
+                  {date_filter.replace('parsed_date', date_parse)}
+                GROUP BY day, t.sentiment
+                ORDER BY day
+            """, trend_params)
+            trend_rows = cur.fetchall()
+
+            # Pivot into [{day, Positive, Negative, Neutral}]
+            trend_map = {}
+            for row in trend_rows:
+                d = row["day"]
+                if d not in trend_map:
+                    trend_map[d] = {"day": d, "Positive": 0, "Negative": 0, "Neutral": 0}
+                trend_map[d][row["sentiment"]] = row["count"]
+            daily_trend = sorted(trend_map.values(), key=lambda x: x["day"])
+
+            # ── Pie: negative reviews by category ──
+            pie_params = list(base_params)
+            if date_from: pie_params.append(date_from)
+            if date_to: pie_params.append(date_to)
+
+            cur.execute(f"""
+                SELECT t.primary_categories, t.sentiment
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE 1=1 {product_filter}
+                  AND {date_parse} IS NOT NULL
+                  {date_filter.replace('parsed_date', date_parse)}
+            """, pie_params)
+            pie_rows = cur.fetchall()
+
+            neg_cat = defaultdict(int)
+            pos_cat = defaultdict(int)
+            for row in pie_rows:
+                cats = json.loads(row["primary_categories"] or "[]")
+                for c in cats:
+                    if row["sentiment"] == "Negative":
+                        neg_cat[c] += 1
+                    else:
+                        pos_cat[c] += 1
+
+            neg_pie = sorted([{"category": k, "count": v} for k, v in neg_cat.items()], key=lambda x: -x["count"])[:8]
+            pos_pie = sorted([{"category": k, "count": v} for k, v in pos_cat.items()], key=lambda x: -x["count"])[:8]
+
+        return {
+            "kpi": {
+                "total": sum(sentiment_kpi.values()),
+                "negative": sentiment_kpi.get("Negative", 0),
+                "positive": sentiment_kpi.get("Positive", 0),
+                "neutral": sentiment_kpi.get("Neutral", 0),
+            },
+            "daily_trend": daily_trend,
+            "neg_pie": neg_pie,
+            "pos_pie": pos_pie,
+        }
+    finally:
+        conn.close()
+
+
+# ── Summary (per-ASIN table + delta) ─────────────────────────────────────────
+
+@app.get("/api/summary")
+def get_summary(
+    product: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    from datetime import date as _date, timedelta
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            product_filter = ""
+            base_params = []
+            if product:
+                products = product.split("|||")
+                placeholders = ",".join(["%s"] * len(products))
+                product_filter = f" AND r.product_name IN ({placeholders})"
+                base_params.extend(products)
+
+            # Determine period length for delta
+            if date_from and date_to:
+                d_from = _date.fromisoformat(date_from)
+                d_to = _date.fromisoformat(date_to)
+                period_days = (d_to - d_from).days or 1
+                prior_to = d_from - timedelta(days=1)
+                prior_from = prior_to - timedelta(days=period_days)
+            else:
+                period_days = 30
+                d_to = _date.today()
+                d_from = d_to - timedelta(days=30)
+                prior_to = d_from - timedelta(days=1)
+                prior_from = prior_to - timedelta(days=30)
+
+            def fetch_period(p_from, p_to):
+                params = list(base_params) + [str(p_from), str(p_to)]
+                cur.execute(f"""
+                    SELECT
+                        r.asin,
+                        MAX(r.product_name) as product_name,
+                        ROUND(AVG(r.rating), 1) as avg_rating,
+                        COUNT(*) as review_count,
+                        SUM(CASE WHEN t.sentiment = 'Negative' THEN 1 ELSE 0 END) as neg_count
+                    FROM raw_reviews r
+                    JOIN review_tags t ON r.review_id = t.review_id
+                    WHERE 1=1 {product_filter}
+                      AND r.scrape_date BETWEEN %s AND %s
+                    GROUP BY r.asin
+                """, params)
+                return {row["asin"]: row for row in cur.fetchall()}
+
+            current = fetch_period(d_from, d_to)
+            prior = fetch_period(prior_from, prior_to)
+
+            # Fetch AI summaries
+            cur.execute("SELECT asin, issues, positives, generated_at FROM product_summaries")
+            ai_rows = {row["asin"]: row for row in cur.fetchall()}
+
+            result = []
+            for asin, row in current.items():
+                prev = prior.get(asin, {})
+                prev_count = prev.get("review_count", 0) or 0
+                prev_neg = prev.get("neg_count", 0) or 0
+                prev_rating = prev.get("avg_rating") or 0
+                curr_count = row["review_count"] or 0
+                curr_neg = row["neg_count"] or 0
+                curr_rating = float(row["avg_rating"] or 0)
+                curr_neg_pct = round((curr_neg / curr_count * 100), 1) if curr_count else 0
+                prev_neg_pct = round((prev_neg / prev_count * 100), 1) if prev_count else 0
+                ai = ai_rows.get(asin, {})
+                result.append({
+                    "asin": asin,
+                    "product_name": row["product_name"],
+                    "avg_rating": curr_rating,
+                    "review_count": curr_count,
+                    "neg_pct": curr_neg_pct,
+                    "delta_reviews": curr_count - prev_count,
+                    "delta_rating": round(curr_rating - float(prev_rating), 1),
+                    "delta_neg_pct": round(curr_neg_pct - prev_neg_pct, 1),
+                    "ai_issues": json.loads(ai.get("issues") or "[]"),
+                    "ai_positives": json.loads(ai.get("positives") or "[]"),
+                    "ai_generated_at": str(ai["generated_at"]) if ai.get("generated_at") else None,
+                })
+
+        return sorted(result, key=lambda x: -x["review_count"])
+    finally:
+        conn.close()
+
+
+# ── Generate AI summaries (called by pipeline) ────────────────────────────────
+
+@app.post("/api/summary/generate")
+def generate_summaries(product: Optional[str] = None):
+    import openai, textwrap
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Ensure table exists
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS product_summaries (
+                    asin VARCHAR(20) PRIMARY KEY,
+                    issues JSON,
+                    positives JSON,
+                    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+
+            product_filter = ""
+            params = []
+            if product:
+                products = product.split("|||")
+                placeholders = ",".join(["%s"] * len(products))
+                product_filter = f" AND r.product_name IN ({placeholders})"
+                params.extend(products)
+
+            cur.execute(f"""
+                SELECT r.asin, MAX(r.product_name) as product_name,
+                    GROUP_CONCAT(r.review SEPARATOR ' ||| ') as reviews
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE r.scrape_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                {product_filter}
+                GROUP BY r.asin
+            """, params)
+            asin_rows = cur.fetchall()
+
+        for row in asin_rows:
+            sample = " ||| ".join(row["reviews"].split(" ||| ")[:60]) if row["reviews"] else ""
+            prompt = textwrap.dedent(f"""
+                You are a product analyst. Analyse these Amazon.in customer reviews for "{row['product_name']}".
+                Reviews (sample): {sample[:4000]}
+
+                Return ONLY valid JSON in this exact format, no other text:
+                {{
+                  "issues": ["issue 1 with specific detail", "issue 2", "issue 3"],
+                  "positives": ["positive 1 with specific detail", "positive 2", "positive 3"]
+                }}
+                Each point should be 1 concise sentence with a specific insight. Max 3 points each.
+            """)
+
+            try:
+                resp = openai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=400,
+                    temperature=0.3,
+                )
+                raw = resp.choices[0].message.content.strip()
+                parsed = json.loads(raw.replace("```json", "").replace("```", "").strip())
+                issues = json.dumps(parsed.get("issues", []))
+                positives = json.dumps(parsed.get("positives", []))
+            except Exception as e:
+                issues = json.dumps([f"Error generating summary: {str(e)}"])
+                positives = json.dumps([])
+
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO product_summaries (asin, issues, positives)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE issues=%s, positives=%s, generated_at=NOW()
+                """, (row["asin"], issues, positives, issues, positives))
+                conn.commit()
+
+        return {"message": f"Generated summaries for {len(asin_rows)} products"}
     finally:
         conn.close()

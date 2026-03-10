@@ -1,8 +1,12 @@
+import os
 import time
 import random
 from datetime import date, datetime, timedelta
 
-SCRAPE_DAYS_BACK = 20
+# ── Days back to scrape — can be overridden at runtime via env var ────────────
+# Set SCRAPE_DAYS_BACK env var to override (e.g. from the dashboard UI)
+SCRAPE_DAYS_BACK = int(os.environ.get("SCRAPE_DAYS_BACK", 30))
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def parse_amazon_date(date_str):
