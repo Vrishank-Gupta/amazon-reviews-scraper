@@ -1,11 +1,61 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 // ── Reusable InfoTip ──────────────────────────────────────────────────────────
+// Uses a portal so the tooltip renders into document.body — never clipped by
+// sticky headers, overflow:hidden ancestors, or low stacking contexts.
 export function InfoTip({ text }) {
-  const [show, setShow] = useState(false)
+  const [show, setShow]   = useState(false)
+  const [pos,  setPos]    = useState({ top: 0, left: 0 })
+  const btnRef            = useRef(null)
+
+  useEffect(() => {
+    if (!show || !btnRef.current) return
+    const r = btnRef.current.getBoundingClientRect()
+    setPos({
+      // Place above the ? button; clamp so it never goes off-screen top
+      top:  Math.max(8, r.top + window.scrollY - 8),
+      left: r.left + r.width / 2 + window.scrollX,
+    })
+  }, [show])
+
+  const tooltip = show ? createPortal(
+    <div style={{
+      position: 'absolute',
+      top:  pos.top,
+      left: pos.left,
+      transform: 'translate(-50%, -100%)',
+      background: '#1a1a28',
+      border: '1px solid var(--border)',
+      borderRadius: 8,
+      padding: '10px 12px',
+      fontSize: 11,
+      color: 'var(--text)',
+      lineHeight: 1.6,
+      width: 240,
+      zIndex: 9999,
+      boxShadow: '0 8px 24px rgba(0,0,0,0.7)',
+      pointerEvents: 'none',
+      whiteSpace: 'normal',
+    }}>
+      {text}
+      <div style={{
+        position:'absolute', bottom:-5, left:'50%',
+        transform:'translateX(-50%)',
+        width:8, height:8,
+        background:'#1a1a28',
+        borderRight:'1px solid var(--border)',
+        borderBottom:'1px solid var(--border)',
+        rotate:'45deg',
+      }} />
+    </div>,
+    document.body
+  ) : null
+
   return (
     <span style={{ position:'relative', display:'inline-flex', alignItems:'center' }}>
       <span
+        ref={btnRef}
         onMouseEnter={() => setShow(true)}
         onMouseLeave={() => setShow(false)}
         style={{
@@ -16,18 +66,7 @@ export function InfoTip({ text }) {
           cursor:'help', lineHeight:1, flexShrink:0, fontFamily:'DM Sans',
         }}
       >?</span>
-      {show && (
-        <div style={{
-          position:'absolute', bottom:'calc(100% + 8px)', left:'50%', transform:'translateX(-50%)',
-          background:'#1a1a28', border:'1px solid var(--border)', borderRadius:8,
-          padding:'10px 12px', fontSize:11, color:'var(--text)', lineHeight:1.6,
-          width:240, zIndex:200, boxShadow:'0 8px 24px rgba(0,0,0,0.6)',
-          pointerEvents:'none', whiteSpace:'normal',
-        }}>
-          {text}
-          <div style={{ position:'absolute', bottom:-5, left:'50%', transform:'translateX(-50%)', width:8, height:8, background:'#1a1a28', borderRight:'1px solid var(--border)', borderBottom:'1px solid var(--border)', rotate:'45deg' }} />
-        </div>
-      )}
+      {tooltip}
     </span>
   )
 }
