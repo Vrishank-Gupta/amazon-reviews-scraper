@@ -1,8 +1,3 @@
-"""
-scraper_runner.py
-Reads ASINs from data/asins.csv, scrapes Amazon.in reviews via Selenium,
-and inserts new rows into raw_reviews (duplicates silently ignored).
-"""
 import csv
 import os
 import pymysql
