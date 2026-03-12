@@ -304,20 +304,57 @@ function RatingTrendChart({ filters, allProducts, tree }) {
   const days     = data.days     || []
   const colorMap = Object.fromEntries(prods.map((p, i) => [p, PAL[i % PAL.length]]))
 
-  // Flatten into one array per chart, each day is one object with one key per product
-  const overallRows     = days.map(d => ({ day: d.day, ...Object.fromEntries(prods.map(p => [p, d.products[p]?.overall     ?? null])) }))
-  const dailyAvgRows    = days.map(d => ({ day: d.day, ...Object.fromEntries(prods.map(p => [p, d.products[p]?.daily_avg   ?? null])) }))
-  const totalRatingsRows= days.map(d => ({ day: d.day, ...Object.fromEntries(prods.map(p => [p, d.products[p]?.total_ratings?? null])) }))
+  // ── Build a continuous daily spine from first to last day ──────────────────
+  const addDays = (dateStr, n) => {
+    const d = new Date(dateStr); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10)
+  }
+  const spine = []
+  if (days.length) {
+    let cur = days[0].day
+    const last = days[days.length - 1].day
+    while (cur <= last) { spine.push(cur); cur = addDays(cur, 1) }
+  }
+  // Index the actual data by day
+  const byDay = Object.fromEntries(days.map(d => [d.day, d.products]))
 
-  const hasOverall      = overallRows.some(r => prods.some(p => r[p] != null))
-  const hasDailyAvg     = dailyAvgRows.some(r => prods.some(p => r[p] != null))
-  const hasTotalRatings = totalRatingsRows.some(r => prods.some(p => r[p] != null))
+  // Fill nulls per product: forward then backward so a single known value
+  // becomes a flat line across the whole range
+  const fillPerProd = (rows, field) => {
+    const result = rows.map(r => ({ day: r.day, ...Object.fromEntries(prods.map(p => [p, null])) }))
+    prods.forEach(p => {
+      // forward
+      let last = null
+      result.forEach(r => {
+        const v = byDay[r.day]?.[p]?.[field] ?? null
+        if (v != null) last = v
+        r[p] = last
+      })
+      // backward
+      last = null
+      for (let i = result.length - 1; i >= 0; i--) {
+        if (result[i][p] != null) last = result[i][p]
+        else if (last != null) result[i][p] = last
+      }
+    })
+    return result
+  }
 
-  // When there are few points, show dots so single-point data is visible
-  const overallPointCount = overallRows.filter(r => prods.some(p => r[p] != null)).length
-  const dailyPointCount   = dailyAvgRows.filter(r => prods.some(p => r[p] != null)).length
-  const totalPointCount   = totalRatingsRows.filter(r => prods.some(p => r[p] != null)).length
-  const dotStyle = (count) => count <= 6
+  // Daily avg — no fill, only show actual scraped days (nulls = no scrape that day)
+  const dailyAvgRows = spine.map(day => ({
+    day,
+    ...Object.fromEntries(prods.map(p => [p, byDay[day]?.[p]?.daily_avg ?? null]))
+  }))
+
+  // Overall + total_ratings — fill so flat line shows even with one snapshot
+  const overallRows      = fillPerProd(spine.map(day => ({ day })), 'overall')
+  const totalRatingsRows = fillPerProd(spine.map(day => ({ day })), 'total_ratings')
+
+  const hasOverall      = days.some(d => prods.some(p => d.products[p]?.overall      != null))
+  const hasDailyAvg     = days.some(d => prods.some(p => d.products[p]?.daily_avg    != null))
+  const hasTotalRatings = days.some(d => prods.some(p => d.products[p]?.total_ratings != null))
+
+  const dailyPointCount = dailyAvgRows.filter(r => prods.some(p => r[p] != null)).length
+  const dotStyle = (count) => count <= 8
     ? { r:4, fill:'inherit', stroke:'#fff', strokeWidth:1.5 }
     : false
 
@@ -375,7 +412,7 @@ function RatingTrendChart({ filters, allProducts, tree }) {
               <ReferenceLine y={4} stroke="var(--border)" strokeDasharray="4 2" />
               {prods.map(p => (
                 <Line key={p} type="monotone" dataKey={p} stroke={colorMap[p]} strokeWidth={2.5}
-                  dot={dotStyle(overallPointCount)} activeDot={{ r:5, stroke:'#fff', strokeWidth:1.5 }} connectNulls />
+                  dot={dotStyle(days.length)} activeDot={{ r:5, stroke:'#fff', strokeWidth:1.5 }} connectNulls />
               ))}
             </LineChart>
           </ResponsiveContainer>
@@ -426,7 +463,7 @@ function RatingTrendChart({ filters, allProducts, tree }) {
               <Tooltip content={MkTooltip(v => v.toLocaleString())} />
               {prods.map(p => (
                 <Line key={p} type="monotone" dataKey={p} stroke={colorMap[p]} strokeWidth={2}
-                  dot={dotStyle(totalPointCount)} activeDot={{ r:5, stroke:'#fff', strokeWidth:1.5 }} connectNulls />
+                  dot={dotStyle(days.length)} activeDot={{ r:5, stroke:'#fff', strokeWidth:1.5 }} connectNulls />
               ))}
             </LineChart>
           </ResponsiveContainer>
@@ -808,15 +845,15 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
       {/* ── SECTION 7: PRODUCT SCORECARD ── */}
       <Card
         title="Product Performance Scorecard"
-        tip="Side-by-side health check for all products in the current filter. Health Score = 100 minus negative rate %. Sorted best to worst. The Verdict column gives an instant action signal: ✅ Good means no action needed, ⚠️ Watch means monitor closely, 🔴 Act Now means escalate immediately."
-        sub="All products ranked by health score · green = good · red = act now"
+        tip="Side-by-side health check for all products in the current filter. Review Rating is the average of scraped review star ratings within the selected date range only. It is not Amazon's displayed product-page rating. Health Score = 100 minus negative rate %. Sorted best to worst. The Verdict column gives an instant action signal: ✅ Good means no action needed, ⚠️ Watch means monitor closely, 🔴 Act Now means escalate immediately."
+        sub="Review Rating = avg stars from reviews in selected period · separate from Amazon overall rating trend below"
       >
         {!productSummary.length ? <Empty /> : (
           <div style={{ overflowX:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
                 <tr>
-                  {['Product','Reviews','Avg Rating','Neg %','Pos %','Health','Verdict'].map(h => (
+                  {['Product','Reviews','Review Rating','Neg %','Pos %','Health','Verdict'].map(h => (
                     <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -894,8 +931,8 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
       {/* ── SECTION 9: RATING TRENDS ── */}
       <Card
         title="Rating Trends"
-        tip="Three views of your rating health over time. Top: Amazon's overall displayed rating per product — forward-filled so gaps don't break the line. Middle: daily average of scraped reviews (how recent buyers feel). Bottom: total number of ratings on Amazon — a proxy for product maturity and reach."
-        sub="Overall rating · daily scraped avg · total review volume on Amazon"
+        tip="Three views of rating health over time. Top: Amazon's overall displayed product-page rating per product, sourced from rating snapshots and forward-filled between scrape dates. This is different from the Review Rating shown in the scorecard above, which uses only scraped reviews inside the selected period. Middle: daily average of scraped reviews. Bottom: total number of ratings on Amazon."
+        sub="Top chart = Amazon product-page rating · scorecard above = review-period rating"
       >
         <RatingTrendChart filters={filters} allProducts={allProducts} tree={tree} />
       </Card>

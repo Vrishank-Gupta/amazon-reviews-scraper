@@ -72,12 +72,9 @@ def insert_rating_snapshot(asin: str, product_name: str, snapshot: dict, conn):
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO product_ratings_snapshot
+        INSERT IGNORE INTO product_ratings_snapshot
             (asin, product_name, scraped_date, overall_rating, total_ratings)
         VALUES (%s, %s, CURDATE(), %s, %s)
-        ON DUPLICATE KEY UPDATE
-            overall_rating = VALUES(overall_rating),
-            total_ratings  = VALUES(total_ratings)
         """,
         (asin, product_name, snapshot["overall_rating"], snapshot.get("total_ratings")),
     )
