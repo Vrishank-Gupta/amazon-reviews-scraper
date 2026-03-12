@@ -267,9 +267,183 @@ function Empty() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RATING TREND CHART
+// Shows daily avg rating (bars from scraped reviews) +
+// Amazon overall rating (line from product_ratings_snapshot)
+// ─────────────────────────────────────────────────────────────────────────────
+function RatingTrendChart({ filters, allProducts, tree }) {
+  const [data, setData]     = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  const productCategory = filters?.product_category || null
+  const activeProds     = filters?.product?.length ? filters.product : []
+  const dateFrom        = filters?.date_from || ''
+  const dateTo          = filters?.date_to   || ''
+
+  useEffect(() => {
+    setLoading(true)
+    const p = new URLSearchParams()
+    if (productCategory) p.set('category', productCategory)
+    else if (activeProds.length) p.set('product', activeProds.join('|||'))
+    if (dateFrom) p.set('date_from', dateFrom)
+    if (dateTo)   p.set('date_to',   dateTo)
+    fetch(`/api/trends/rating?${p}`)
+      .then(r => r.json())
+      .then(d => { setData(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [productCategory, JSON.stringify(activeProds), dateFrom, dateTo])
+
+  if (loading) return <div style={{ padding:'32px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>Loading…</div>
+  if (!data?.days?.length) return (
+    <div style={{ padding:'32px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13, fontStyle:'italic' }}>
+      No rating snapshot data yet — will appear after the next scrape run.
+    </div>
+  )
+
+  const prods    = data.products || []
+  const days     = data.days     || []
+  const colorMap = Object.fromEntries(prods.map((p, i) => [p, PAL[i % PAL.length]]))
+
+  // Flatten into one array per chart, each day is one object with one key per product
+  const overallRows     = days.map(d => ({ day: d.day, ...Object.fromEntries(prods.map(p => [p, d.products[p]?.overall     ?? null])) }))
+  const dailyAvgRows    = days.map(d => ({ day: d.day, ...Object.fromEntries(prods.map(p => [p, d.products[p]?.daily_avg   ?? null])) }))
+  const totalRatingsRows= days.map(d => ({ day: d.day, ...Object.fromEntries(prods.map(p => [p, d.products[p]?.total_ratings?? null])) }))
+
+  const hasOverall      = overallRows.some(r => prods.some(p => r[p] != null))
+  const hasDailyAvg     = dailyAvgRows.some(r => prods.some(p => r[p] != null))
+  const hasTotalRatings = totalRatingsRows.some(r => prods.some(p => r[p] != null))
+
+  // When there are few points, show dots so single-point data is visible
+  const overallPointCount = overallRows.filter(r => prods.some(p => r[p] != null)).length
+  const dailyPointCount   = dailyAvgRows.filter(r => prods.some(p => r[p] != null)).length
+  const totalPointCount   = totalRatingsRows.filter(r => prods.some(p => r[p] != null)).length
+  const dotStyle = (count) => count <= 6
+    ? { r:4, fill:'inherit', stroke:'#fff', strokeWidth:1.5 }
+    : false
+
+  const xProps = {
+    dataKey: 'day', tick: { fontSize:10, fill:'var(--text-muted)' },
+    tickLine: false, axisLine: false, tickFormatter: fmtDay, minTickGap: 30,
+  }
+  const gridProps = { strokeDasharray:'3 3', stroke:'var(--border)', vertical:false }
+
+  const MkTooltip = (valueFormatter) => ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null
+    return (
+      <div style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:8, padding:'10px 14px', fontSize:11, minWidth:160 }}>
+        <div style={{ fontWeight:700, color:'var(--text-muted)', marginBottom:6 }}>{fmtDay(label)}</div>
+        {payload.filter(p => p.value != null).map(p => (
+          <div key={p.dataKey} style={{ color:p.color, display:'flex', justifyContent:'space-between', gap:16, marginTop:3 }}>
+            <span style={{ color:'var(--text-muted)', maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.dataKey}</span>
+            <span style={{ fontWeight:700, flexShrink:0 }}>{valueFormatter(p.value)}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // Legend strip
+  const Legend = () => (
+    <div style={{ display:'flex', gap:14, flexWrap:'wrap', marginTop:4 }}>
+      {prods.map(p => (
+        <span key={p} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text-muted)' }}>
+          <span style={{ width:20, height:2.5, borderRadius:2, background:colorMap[p], display:'inline-block' }} />
+          {p}
+        </span>
+      ))}
+    </div>
+  )
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
+
+      {/* ① Overall Amazon rating trend */}
+      {hasOverall && (
+        <div>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>
+            Amazon Overall Rating ★
+            <span style={{ fontWeight:400, marginLeft:8, textTransform:'none', letterSpacing:0 }}>
+              — displayed on product page, forward-filled between scrapes
+            </span>
+          </div>
+          <ResponsiveContainer width="100%" height={160}>
+            <LineChart data={overallRows} margin={{ top:4, right:16, left:-10, bottom:0 }}>
+              <CartesianGrid {...gridProps} />
+              <XAxis {...xProps} />
+              <YAxis domain={([min, max]) => [Math.max(1, Math.floor((min - 0.2) * 2) / 2), Math.min(5, Math.ceil((max + 0.2) * 2) / 2)]} tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={v => v.toFixed(1)} />
+              <Tooltip content={MkTooltip(v => `${v.toFixed(2)} ★`)} />
+              <ReferenceLine y={4} stroke="var(--border)" strokeDasharray="4 2" />
+              {prods.map(p => (
+                <Line key={p} type="monotone" dataKey={p} stroke={colorMap[p]} strokeWidth={2.5}
+                  dot={dotStyle(overallPointCount)} activeDot={{ r:5, stroke:'#fff', strokeWidth:1.5 }} connectNulls />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+          <Legend />
+        </div>
+      )}
+
+      {/* ② Daily scraped avg rating */}
+      {hasDailyAvg && (
+        <div>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>
+            Daily Avg Rating from Scraped Reviews
+            <span style={{ fontWeight:400, marginLeft:8, textTransform:'none', letterSpacing:0 }}>
+              — how recent buyers actually rated on that day
+            </span>
+          </div>
+          <ResponsiveContainer width="100%" height={140}>
+            <LineChart data={dailyAvgRows} margin={{ top:4, right:16, left:-10, bottom:0 }}>
+              <CartesianGrid {...gridProps} />
+              <XAxis {...xProps} />
+              <YAxis domain={[1, 5]} ticks={[1,2,3,4,5]} tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={v => v.toFixed(0)} />
+              <Tooltip content={MkTooltip(v => `${v.toFixed(2)} ★`)} />
+              <ReferenceLine y={4} stroke="var(--border)" strokeDasharray="4 2" />
+              {prods.map(p => (
+                <Line key={p} type="monotone" dataKey={p} stroke={colorMap[p]} strokeWidth={2}
+                  dot={dotStyle(dailyPointCount)} activeDot={{ r:5, stroke:'#fff', strokeWidth:1.5 }} connectNulls />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+          <Legend />
+        </div>
+      )}
+
+      {/* ③ Total ratings volume on Amazon */}
+      {hasTotalRatings && (
+        <div>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>
+            Total Ratings on Amazon
+            <span style={{ fontWeight:400, marginLeft:8, textTransform:'none', letterSpacing:0 }}>
+              — product maturity; a rising line means market reach is growing
+            </span>
+          </div>
+          <ResponsiveContainer width="100%" height={120}>
+            <LineChart data={totalRatingsRows} margin={{ top:4, right:16, left:0, bottom:0 }}>
+              <CartesianGrid {...gridProps} />
+              <XAxis {...xProps} />
+              <YAxis tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} width={36} />
+              <Tooltip content={MkTooltip(v => v.toLocaleString())} />
+              {prods.map(p => (
+                <Line key={p} type="monotone" dataKey={p} stroke={colorMap[p]} strokeWidth={2}
+                  dot={dotStyle(totalPointCount)} activeDot={{ r:5, stroke:'#fff', strokeWidth:1.5 }} connectNulls />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+          <Legend />
+        </div>
+      )}
+
+    </div>
+  )
+}
+
+function RatingTooltip() { return null } // kept for import safety, replaced by inline tooltips above
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN
 // ─────────────────────────────────────────────────────────────────────────────
-export default function TrendsPage({ products: allProducts, reviews, filters }) {
+export default function TrendsPage({ products: allProducts, reviews, filters, tree }) {
   const [data, setData]   = useState(null)
   const [loading, setLoading] = useState(true)
   const [hasData, setHasData] = useState(false)
@@ -279,11 +453,12 @@ export default function TrendsPage({ products: allProducts, reviews, filters }) 
   const [hiddenCats,  setHiddenCats]  = useState(new Set())
   const [hiddenProds, setHiddenProds] = useState(new Set())
 
-  // Derive selected products from sidebar — fall back to all products
+  // Derive selected products from filter state
   const selectedProducts = useMemo(() =>
-    filters?.product?.length ? filters.product : (allProducts || []),
-  [filters?.product, allProducts])
+    filters?.product?.length ? filters.product : [],
+  [filters?.product])
 
+  const productCategory = filters?.product_category || null
   const dateFrom = filters?.date_from || ''
   const dateTo   = filters?.date_to   || ''
 
@@ -291,14 +466,15 @@ export default function TrendsPage({ products: allProducts, reviews, filters }) 
     if (!allProducts?.length) return
     setLoading(true)
     const p = new URLSearchParams()
-    if (selectedProducts.length) p.set('product', selectedProducts.join('|||'))
+    if (productCategory) p.set('category', productCategory)
+    else if (selectedProducts.length) p.set('product', selectedProducts.join('|||'))
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo)   p.set('date_to',   dateTo)
     fetch(`/api/trends/cxo?${p}`)
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); setHasData(true) })
       .catch(() => setLoading(false))
-  }, [JSON.stringify(selectedProducts), dateFrom, dateTo, allProducts?.length])
+  }, [productCategory, JSON.stringify(selectedProducts), dateFrom, dateTo, allProducts?.length])
 
   const toggleCat  = c => setHiddenCats(s  => { const n=new Set(s); n.has(c)?n.delete(c):n.add(c); return n })
   const toggleProd = p => setHiddenProds(s => { const n=new Set(s); n.has(p)?n.delete(p):n.add(p); return n })
@@ -449,48 +625,6 @@ export default function TrendsPage({ products: allProducts, reviews, filters }) 
               </AreaChart>
             </ResponsiveContainer>
           </>
-        )}
-      </Card>
-
-      {/* ── SECTION 3: DAILY SENTIMENT TREND ── */}
-      <Card
-        title="Daily Sentiment Trend"
-        tip="Volume mode shows absolute count of Positive / Negative / Neutral reviews per day. Rate mode shows the rolling 7-day negative rate % as a line with daily bars behind it — the line is the signal, the bars are the noise. A rising orange line means sentiment is deteriorating."
-        sub="Toggle between volume and rolling negative rate"
-        controls={<Toggle value={sentMode} onChange={setSentMode} options={[{v:'volume',l:'Volume'},{v:'rate',l:'Neg Rate %'}]} />}
-      >
-        {!dailyTrend.length ? <Empty /> : sentMode==='volume' ? (
-          <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={dailyTrend} margin={{ top:4, right:4, bottom:0, left:-20 }}>
-              <defs>
-                {Object.entries(SC).map(([s,c]) => (
-                  <linearGradient key={s} id={`sg-${s}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor={c} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={c} stopOpacity={0} />
-                  </linearGradient>
-                ))}
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
-              <YAxis tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} />
-              <Tooltip content={<CT />} />
-              {['Negative','Positive','Neutral'].map(s => (
-                <Area key={s} type="monotone" dataKey={s} stroke={SC[s]} strokeWidth={2} fill={`url(#sg-${s})`} dot={false} activeDot={{ r:3 }} />
-              ))}
-            </AreaChart>
-          </ResponsiveContainer>
-        ) : (
-          <ResponsiveContainer width="100%" height={180}>
-            <ComposedChart data={dailyTrend} margin={{ top:4, right:4, bottom:0, left:-20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
-              <YAxis domain={[0,100]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`} />
-              <Tooltip content={<CT fmt={v=>`${v}%`} />} />
-              <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.4} />
-              <Bar dataKey="neg_rate" fill="#ef4444" opacity={0.2} name="Daily Neg %" radius={[2,2,0,0]} barSize={4} />
-              <Line type="monotone" dataKey="rolling_neg" stroke="#ff4e1a" strokeWidth={2.5} dot={false} name="7d Rolling Neg %" />
-            </ComposedChart>
-          </ResponsiveContainer>
         )}
       </Card>
 
@@ -755,6 +889,15 @@ export default function TrendsPage({ products: allProducts, reviews, filters }) 
             })}
           </div>
         )}
+      </Card>
+
+      {/* ── SECTION 9: RATING TRENDS ── */}
+      <Card
+        title="Rating Trends"
+        tip="Three views of your rating health over time. Top: Amazon's overall displayed rating per product — forward-filled so gaps don't break the line. Middle: daily average of scraped reviews (how recent buyers feel). Bottom: total number of ratings on Amazon — a proxy for product maturity and reach."
+        sub="Overall rating · daily scraped avg · total review volume on Amazon"
+      >
+        <RatingTrendChart filters={filters} allProducts={allProducts} tree={tree} />
       </Card>
 
       </>

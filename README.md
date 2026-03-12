@@ -143,6 +143,14 @@ cd .\frontend
 npm install
 ```
 
+1. in Overview tab, we are showing only % for negative, we must show numbers as well, keep color coding same as now
+2. in sentiment trend widget, switch the default view to "volume" currently its "neg rate %"
+3. in products tab, where we are showing product wise reviews, we can show that in overview tab, towards the top, maybe right below where we are showing number cards, we can get rid of "products" tab
+4. upon clicking any row in "Top negative issues" and "what customers love" we are not showing word cloud of subcategory, we are directly opening reviews, fix that
+5. on applying filter, say i choose "Camera" in products, the filter bar shows "1 product" instead of showing names of the selected filters.
+6. Also, when i put multiple asins in csv, i need a way to group the asins into categories, for example, multiple asins of cameras (bullet camera, 360 camera etc) are essentialy same in category "Camera", i need a provision to define groupings of asins into parent category, same must flow to dashboard in case i want to see category level reviews analysis, then i should have some drilldown on products under that category. Do you understand this?
+before writing code, i want you to clarify anything if required, give me a preview before generating code
+
 ### 6) Run the backend (FastAPI)
 
 From repo root:

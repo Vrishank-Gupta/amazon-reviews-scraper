@@ -1,19 +1,76 @@
 const BASE = '/api'
 
+// ── Shared param builder ──────────────────────────────────────────────────────
+// All API calls use `product_category` (product group) NOT the taxonomy `category`
+function buildParams(filters = {}) {
+  const p = new URLSearchParams()
+  // Product-group filter — server resolves to ASINs
+  if (filters.product_category) p.set('category', filters.product_category)
+  if (filters.product?.length)   p.set('product', filters.product.join('|||'))
+  if (filters.date_from)         p.set('date_from', filters.date_from)
+  if (filters.date_to)           p.set('date_to', filters.date_to)
+  return p
+}
+
 export async function fetchReviews(filters = {}) {
-  const params = new URLSearchParams()
-  if (filters.category && filters.category !== 'All') params.set('category', filters.category)
-  if (filters.sentiment?.length) params.set('sentiment', filters.sentiment.join(','))
-  if (filters.rating?.length) params.set('rating', filters.rating.join(','))
-  if (filters.product?.length) params.set('product', filters.product.join('|||'))
-  if (filters.date_from) params.set('date_from', filters.date_from)
-  if (filters.date_to) params.set('date_to', filters.date_to)
-  const res = await fetch(`${BASE}/reviews?${params}`)
+  const p = buildParams(filters)
+  if (filters.sentiment?.length) p.set('sentiment', filters.sentiment.join(','))
+  if (filters.rating?.length)    p.set('rating', filters.rating.join(','))
+  const res = await fetch(`${BASE}/reviews?${p}`)
   return res.json()
 }
 
 export async function fetchFilters() {
   const res = await fetch(`${BASE}/filters`)
+  return res.json()
+}
+
+export async function fetchAnalysis(filters = {}) {
+  const p = buildParams(filters)
+  const res = await fetch(`${BASE}/analysis?${p}`)
+  return res.json()
+}
+
+export async function fetchSummary(filters = {}) {
+  const p = buildParams(filters)
+  const res = await fetch(`${BASE}/summary?${p}`)
+  return res.json()
+}
+
+export async function fetchCxoTrends(filters = {}) {
+  const p = buildParams(filters)
+  const res = await fetch(`${BASE}/trends/cxo?${p}`)
+  return res.json()
+}
+
+export async function fetchRatingTrends(filters = {}) {
+  const p = buildParams(filters)
+  const res = await fetch(`${BASE}/trends/rating?${p}`)
+  return res.json()
+}
+
+export async function fetchWordCloud(filters = {}, taxonomyCategory = null) {
+  const p = buildParams(filters)
+  // product_category is already set via buildParams as 'category'
+  // rename to product_category for wordcloud endpoint specifically
+  if (p.has('category')) {
+    p.set('product_category', p.get('category'))
+    p.delete('category')
+  }
+  if (taxonomyCategory) p.set('category', taxonomyCategory)
+  const res = await fetch(`${BASE}/wordcloud?${p}`)
+  return res.json()
+}
+
+export async function fetchReviewsByKeyword(keyword, filters = {}) {
+  const p = buildParams(filters)
+  p.set('keyword', keyword)
+  // rename category → product_category for this endpoint
+  if (p.has('category')) {
+    p.set('product_category', p.get('category'))
+    p.delete('category')
+  }
+  const res = await fetch(`${BASE}/reviews/by-keyword?${p}`)
   return res.json()
 }
 
@@ -41,30 +98,9 @@ export async function fetchStats() {
 }
 
 export async function fetchTrends(params = {}) {
-  const p = new URLSearchParams()
-  if (params.product?.length) p.set('product', params.product.join('|||'))
-  if (params.date_from) p.set('date_from', params.date_from)
-  if (params.date_to) p.set('date_to', params.date_to)
+  const p = buildParams(params)
   if (params.granularity) p.set('granularity', params.granularity)
   const res = await fetch(`${BASE}/trends?${p}`)
-  return res.json()
-}
-
-export async function fetchWordCloud(params = {}) {
-  const p = new URLSearchParams()
-  if (params.product?.length) p.set('product', params.product.join('|||'))
-  if (params.date_from) p.set('date_from', params.date_from)
-  if (params.date_to) p.set('date_to', params.date_to)
-  const res = await fetch(`/api/wordcloud?${p}`)
-  return res.json()
-}
-
-export async function fetchReviewsByKeyword(keyword, params = {}) {
-  const p = new URLSearchParams({ keyword })
-  if (params.product?.length) p.set('product', params.product.join('|||'))
-  if (params.date_from) p.set('date_from', params.date_from)
-  if (params.date_to) p.set('date_to', params.date_to)
-  const res = await fetch(`/api/reviews/by-keyword?${p}`)
   return res.json()
 }
 
@@ -75,24 +111,6 @@ export async function fetchPipelineStatus() {
 
 export async function fetchAsins() {
   const res = await fetch(`${BASE}/asins`)
-  return res.json()
-}
-
-export async function fetchAnalysis(params = {}) {
-  const p = new URLSearchParams()
-  if (params.product?.length) p.set('product', params.product.join('|||'))
-  if (params.date_from) p.set('date_from', params.date_from)
-  if (params.date_to) p.set('date_to', params.date_to)
-  const res = await fetch(`${BASE}/analysis?${p}`)
-  return res.json()
-}
-
-export async function fetchSummary(params = {}) {
-  const p = new URLSearchParams()
-  if (params.product?.length) p.set('product', params.product.join('|||'))
-  if (params.date_from) p.set('date_from', params.date_from)
-  if (params.date_to) p.set('date_to', params.date_to)
-  const res = await fetch(`${BASE}/summary?${p}`)
   return res.json()
 }
 

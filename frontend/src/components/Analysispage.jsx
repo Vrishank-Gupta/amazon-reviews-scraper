@@ -1,4 +1,3 @@
-import ReviewsDrawer from './ReviewsDrawer'
 /**
  * OVERVIEW TAB  — CXO 30-second pulse
  *
@@ -122,35 +121,166 @@ function ProductHealthGrid({ summaryRows }) {
   )
 }
 
+// ── Inline sub-tag word cloud (shown after clicking an issue row) ─────────────
+function InlineWordCloud({ category, filters, allProducts }) {
+  const [words, setWords]       = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [activeWord, setActiveWord] = useState(null)
+  const [reviews, setReviews]   = useState([])
+  const [revLoading, setRevLoading] = useState(false)
+
+  useEffect(() => {
+    setLoading(true); setActiveWord(null); setReviews([])
+    const p = new URLSearchParams()
+    if (category) p.set('category', category)  // taxonomy category for drill-down
+    if (filters.product_category) p.set('product_category', filters.product_category)
+    if (filters.product?.length) p.set('product', filters.product.join('|||'))
+    if (filters.date_from) p.set('date_from', filters.date_from)
+    if (filters.date_to)   p.set('date_to',   filters.date_to)
+    fetch(`/api/wordcloud?${p}`)
+      .then(r => r.json()).then(setWords).catch(() => setWords([])).finally(() => setLoading(false))
+  }, [category, JSON.stringify(filters)])
+
+  useEffect(() => {
+    if (!activeWord) { setReviews([]); return }
+    setRevLoading(true)
+    const p = new URLSearchParams({ keyword: activeWord })
+    if (filters.product_category) p.set('product_category', filters.product_category)
+    if (filters.product?.length) p.set('product', filters.product.join('|||'))
+    if (filters.date_from) p.set('date_from', filters.date_from)
+    if (filters.date_to)   p.set('date_to',   filters.date_to)
+    fetch(`/api/reviews/by-keyword?${p}`)
+      .then(r => r.json()).then(setReviews).catch(() => setReviews([])).finally(() => setRevLoading(false))
+  }, [activeWord])
+
+  if (loading) return <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>Loading sub-tags…</div>
+  if (!words.length) return <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12, fontStyle:'italic' }}>No sub-tags found for this category.</div>
+
+  const max = Math.max(...words.map(w => w.count))
+  const sentColor = w => w.neg_ratio > 0.6 ? '#ef4444' : w.neg_ratio > 0.35 ? '#f97316' : w.neg_ratio > 0.15 ? '#eab308' : '#22c55e'
+
+  return (
+    <div style={{ marginTop:8, padding:'12px 14px', background:'var(--surface2)', borderRadius:8, border:'1px solid var(--border)' }}>
+      <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:4 }}>
+        Sub-tags in "{category}"
+        <span style={{ marginLeft:8, fontWeight:400, fontStyle:'italic', textTransform:'none', opacity:0.7 }}>
+          size = frequency · color = sentiment (red=negative, green=positive) · AI-tagged: 1–2★ ≈ Negative, 3★ ≈ Neutral, 4–5★ ≈ Positive
+        </span>
+      </div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 10px', alignItems:'center', padding:'8px 0' }}>
+        {words.slice(0, 40).map(w => {
+          const size = Math.round(11 + (w.count / max) * 14)
+          const col  = sentColor(w)
+          const isAW = activeWord === w.word
+          return (
+            <button key={w.word} onClick={() => setActiveWord(isAW ? null : w.word)}
+              title={`${w.count} reviews · neg: ${Math.round(w.neg_ratio*100)}% · pos: ${Math.round(w.pos_ratio*100)}%`}
+              style={{ background: isAW ? `${col}20` : 'transparent', border: `1px solid ${isAW ? col : 'transparent'}`,
+                borderRadius:4, padding:'1px 6px', cursor:'pointer', fontFamily:'DM Sans',
+                fontSize:size, color:col, fontWeight: size > 20 ? 700 : size > 15 ? 600 : 500,
+                opacity: activeWord && !isAW ? 0.3 : 1, transition:'all 0.12s' }}>
+              {w.word}
+            </button>
+          )
+        })}
+      </div>
+
+      {activeWord && (
+        <div style={{ marginTop:8, borderTop:'1px solid var(--border)', paddingTop:10 }}>
+          <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:8, display:'flex', alignItems:'center', gap:8 }}>
+            Reviews mentioning <span style={{ color:'var(--accent)', fontWeight:700 }}>"{activeWord}"</span>
+            {!revLoading && <span style={{ background:'rgba(255,78,26,0.15)', color:'var(--accent)', border:'1px solid rgba(255,78,26,0.3)', borderRadius:10, padding:'1px 8px', fontSize:11, fontWeight:600 }}>{reviews.length}</span>}
+            <button onClick={() => setActiveWord(null)} style={{ marginLeft:'auto', background:'none', border:'1px solid var(--border)', borderRadius:5, color:'var(--text-muted)', fontSize:11, padding:'2px 8px', cursor:'pointer', fontFamily:'DM Sans' }}>Clear ✕</button>
+          </div>
+          {revLoading ? (
+            <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>Loading…</div>
+          ) : reviews.length === 0 ? (
+            <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>No reviews found.</div>
+          ) : (
+            <div style={{ maxHeight:280, overflowY:'auto' }}>
+              {reviews.map((r, i) => (
+                <ReviewCard key={r.review_id || i} r={r} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Review card (shared between DrillDown and InlineWordCloud) ────────────────
+function ReviewCard({ r }) {
+  const [open, setOpen] = useState(false)
+  const sentColor = r.sentiment === 'Positive' ? '#22c55e' : r.sentiment === 'Negative' ? '#ef4444' : '#eab308'
+  const stars = Math.round(parseFloat(r.rating) || 0)
+  return (
+    <div style={{ padding:'10px 0', borderBottom:'1px solid var(--border)' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:4 }}>
+        <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:4,
+          background:`${sentColor}15`, color:sentColor, border:`1px solid ${sentColor}30` }}>
+          {r.sentiment}
+        </span>
+        <span style={{ fontSize:11, color:'#eab308' }}>{'★'.repeat(stars)}{'☆'.repeat(Math.max(0,5-stars))}</span>
+        <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:'auto' }}>
+          {r.review_date?.replace('Reviewed in India on ','')} · {r.product_name}
+        </span>
+      </div>
+      {r.title && <div style={{ fontSize:12, fontWeight:600, marginBottom:3 }}>{r.title}</div>}
+      <div style={{ fontSize:12, color:'var(--text)', lineHeight:1.5, overflow:'hidden',
+        display: open ? 'block' : '-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical' }}>
+        {r.review}
+      </div>
+      {r.review?.length > 200 && (
+        <button onClick={() => setOpen(o => !o)} style={{ background:'none', border:'none', cursor:'pointer',
+          color:'var(--accent)', fontSize:11, padding:0, textAlign:'left', fontFamily:'DM Sans', marginTop:3 }}>
+          {open ? 'Show less ▲' : 'Read full review ▼'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Burning issues (horizontal ranked bars) ───────────────────────────────────
-function BurningIssues({ negPie, onRowClick }) {
+function BurningIssues({ negPie, activeCat, onRowClick, filters, allProducts }) {
   if (!negPie?.length) return <div style={{ padding:'20px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>No data</div>
   const max = negPie[0].count
   const total = negPie.reduce((s,r)=>s+r.count,0)
   const COLS = ['#ef4444','#f97316','#fbbf24','#a855f7','#e879f9','#f43f5e','#94a3b8','#64748b']
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
       {negPie.map((item, i) => {
         const pct = total > 0 ? ((item.count/total)*100).toFixed(0) : 0
         const w = ((item.count/max)*100).toFixed(1)
         const c = COLS[i % COLS.length]
+        const isActive = activeCat === item.category
         return (
-          <div key={item.category}
-            onClick={() => onRowClick && onRowClick(item.category)}
-            style={{ display:'flex', alignItems:'center', gap:10, cursor: onRowClick ? 'pointer' : 'default',
-              padding:'4px 6px', borderRadius:6, margin:'0 -6px',
-              transition:'background 0.12s',
-            }}
-            onMouseEnter={e => onRowClick && (e.currentTarget.style.background='rgba(255,78,26,0.07)')}
-            onMouseLeave={e => e.currentTarget.style.background='transparent'}
-          >
-            <div style={{ width:26, fontSize:10, color:'var(--text-muted)', textAlign:'right', flexShrink:0 }}>#{i+1}</div>
-            <div style={{ width:130, fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flexShrink:0 }}>{item.category}</div>
-            <div style={{ flex:1, height:8, background:'var(--border)', borderRadius:4, overflow:'hidden' }}>
-              <div style={{ height:'100%', width:`${w}%`, background:c, borderRadius:4, opacity:0.85 }} />
+          <div key={item.category}>
+            <div
+              onClick={() => onRowClick && onRowClick(item.category)}
+              style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer',
+                padding:'4px 6px', borderRadius:6, margin:'0 -6px',
+                background: isActive ? 'rgba(255,78,26,0.08)' : 'transparent',
+                border: `1px solid ${isActive ? 'rgba(255,78,26,0.25)' : 'transparent'}`,
+                transition:'background 0.12s',
+              }}
+              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background='rgba(255,78,26,0.05)' }}
+              onMouseLeave={e => { if (!isActive) e.currentTarget.style.background='transparent' }}
+            >
+              <div style={{ width:26, fontSize:10, color:'var(--text-muted)', textAlign:'right', flexShrink:0 }}>#{i+1}</div>
+              <div style={{ width:130, fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flexShrink:0, color: isActive ? 'var(--accent)' : 'var(--text)' }}>{item.category}</div>
+              <div style={{ flex:1, height:8, background:'var(--border)', borderRadius:4, overflow:'hidden' }}>
+                <div style={{ height:'100%', width:`${w}%`, background:c, borderRadius:4, opacity:0.85 }} />
+              </div>
+              <div style={{ width:28, fontSize:12, fontWeight:700, color:c, textAlign:'right', flexShrink:0 }}>{item.count}</div>
+              <div style={{ width:36, fontSize:11, color:'var(--text-muted)', textAlign:'right', flexShrink:0 }}>{pct}%</div>
+              <div style={{ fontSize:10, color: isActive ? 'var(--accent)' : 'var(--text-muted)', flexShrink:0 }}>{isActive ? '▲' : '▼'}</div>
             </div>
-            <div style={{ width:28, fontSize:12, fontWeight:700, color:c, textAlign:'right', flexShrink:0 }}>{item.count}</div>
-            <div style={{ width:36, fontSize:11, color:'var(--text-muted)', textAlign:'right', flexShrink:0 }}>{pct}%</div>
+            {isActive && (
+              <div style={{ marginLeft:32 }}>
+                <InlineWordCloud category={item.category} filters={filters} allProducts={allProducts} />
+              </div>
+            )}
           </div>
         )
       })}
@@ -264,12 +394,13 @@ export default function AnalysisPage({ filters, allProducts }) {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
   const [hasData, setHasData] = useState(false)
-  const [trendMode, setTrendMode] = useState('rate')
+  const [trendMode, setTrendMode] = useState('volume')
   const [drawerCat, setDrawerCat] = useState(null)
   const [drawerCatPos, setDrawerCatPos] = useState(null)
 
   const apiParams = {
-    product:   filters.product?.length ? filters.product : allProducts,
+    product_category: filters.product_category || null,
+    product:   filters.product?.length ? filters.product : [],
     date_from: filters.date_from,
     date_to:   filters.date_to,
   }
@@ -328,36 +459,34 @@ export default function AnalysisPage({ filters, allProducts }) {
           tip="Total reviews scraped for the selected products and date range." />
         <KpiTile label="Negative Rate" value={`${negPct}%`}
           color={negPct>50?'#ef4444':negPct>30?'#f97316':'#22c55e'}
-          sub={negPct>50?'🔴 Crisis — immediate action':negPct>30?'⚠️ High — needs attention':'✅ Healthy'}
-          tip="The most important single metric. Under 20% is good. 20–30% is watch territory. Over 30% needs action. Over 50% is a crisis." />
+          sub={<span><strong style={{color:'#ef4444'}}>{kpi.negative?.toLocaleString()}</strong> reviews · {negPct>50?'🔴 Crisis':negPct>30?'⚠️ High':'✅ Healthy'}</span>}
+          tip="AI-tagged sentiment. As reference: 1–2★ reviews are almost always Negative, 3★ ≈ Neutral, 4–5★ ≈ Positive. Actual tagging uses GPT on review text." />
         <KpiTile label="Positive Rate" value={`${posPct}%`}
           color="#22c55e"
-          sub={`${kpi.positive?.toLocaleString()} positive reviews`}
-          tip="Share of reviews tagged Positive. High positive alongside high negative = polarised product (quality inconsistency)." />
+          sub={<span><strong style={{color:'#22c55e'}}>{kpi.positive?.toLocaleString()}</strong> reviews · {posPct>60?'✅ Strong':'⚠️ Low'}</span>}
+          tip="AI-tagged. High positive alongside high negative = polarised product (quality inconsistency). 1–2★ ≈ Negative, 3★ ≈ Neutral, 4–5★ ≈ Positive." />
         <KpiTile label="Neutral Rate" value={`${kpi.total?((kpi.neutral/kpi.total)*100).toFixed(1):0}%`}
           color="#eab308"
-          sub={`${kpi.neutral?.toLocaleString()} neutral reviews`}
-          tip="A large neutral share means customers are indifferent — the product meets expectations but doesn't delight or disappoint." />
+          sub={<span><strong style={{color:'#eab308'}}>{kpi.neutral?.toLocaleString()}</strong> reviews · indifferent</span>}
+          tip="A large neutral share means customers are indifferent. 3★ reviews are typically Neutral. 1–2★ ≈ Negative, 4–5★ ≈ Positive." />
       </div>
 
       {/* 3. Burning issues — what to fix RIGHT NOW */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
         <Card
           title="🔴 Top Negative Issues"
-          tip="Categories driving the most negative reviews, ranked by volume. This is your R&D priority list — fixing #1 has the highest customer impact. Each bar shows count and % share of all negatives."
-          sub="Fix these to move the needle most — ranked by review volume"
+          tip="Categories driving the most negative reviews, ranked by volume. This is your R&D priority list — fixing #1 has the highest customer impact. Click a row to see sub-tag cloud, then click a word to read reviews."
+          sub="Click a row → sub-tag cloud → click word → reviews"
         >
-          <BurningIssues negPie={negPie} onRowClick={cat => setDrawerCat(drawerCat === cat ? null : cat)} />
-          <ReviewsDrawer category={drawerCat} label={drawerCat} filters={filters} onClose={() => setDrawerCat(null)} />
+          <BurningIssues negPie={negPie} activeCat={drawerCat} onRowClick={cat => setDrawerCat(drawerCat === cat ? null : cat)} filters={filters} allProducts={allProducts} />
         </Card>
 
         <Card
           title="✅ What Customers Love"
-          tip="Categories appearing most in positive and neutral reviews. Protect these during product changes — they are your brand equity. A category appearing in both pies means it's polarising."
-          sub="Protect these — they are your brand equity"
+          tip="Categories appearing most in positive reviews. Protect these during product changes — they are your brand equity. Click a row to see sub-tag cloud, then click a word to read reviews."
+          sub="Click a row → sub-tag cloud → click word → reviews"
         >
-          <BurningIssues negPie={posPie.map(p=>({...p}))} onRowClick={cat => setDrawerCatPos(drawerCatPos === cat ? null : cat)} />
-          <ReviewsDrawer category={drawerCatPos} label={drawerCatPos} filters={filters} onClose={() => setDrawerCatPos(null)} />
+          <BurningIssues negPie={posPie.map(p=>({...p}))} activeCat={drawerCatPos} onRowClick={cat => setDrawerCatPos(drawerCatPos === cat ? null : cat)} filters={filters} allProducts={allProducts} />
         </Card>
       </div>
 

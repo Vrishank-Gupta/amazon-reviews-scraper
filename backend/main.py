@@ -28,6 +28,54 @@ app.add_middleware(
 )
 
 
+# ── ASIN map — loaded once at startup from asins.csv ─────────────────────────
+# ASIN_MAP  : { asin: { product_name, category } }
+# CAT_MAP   : { category: [product_name, ...] }
+# ALL_PRODS : [product_name, ...]
+
+def _load_asin_map():
+    path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "asins.csv"))
+    asin_map, cat_map, all_prods = {}, defaultdict(list), []
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                asin = row["asin"].strip()
+                name = row["product_name"].strip()
+                cat  = row.get("category", "").strip()
+                asin_map[asin] = {"product_name": name, "category": cat}
+                if name not in all_prods:
+                    all_prods.append(name)
+                if cat and name not in cat_map[cat]:
+                    cat_map[cat].append(name)
+    except FileNotFoundError:
+        pass
+    return asin_map, dict(cat_map), all_prods
+
+ASIN_MAP, CAT_MAP, ALL_PRODS = _load_asin_map()
+
+
+def resolve_products(product: Optional[str], category: Optional[str]) -> Optional[list]:
+    """
+    Resolve the product filter to a flat list of product_names.
+    Priority: explicit product list > category > None (= all products)
+    Returns None if no filter should be applied (all products).
+    """
+    if product:
+        return [p.strip() for p in product.split("|||") if p.strip()]
+    if category:
+        prods = CAT_MAP.get(category, [])
+        return prods if prods else None
+    return None
+
+
+def product_filter_sql(products: Optional[list], table_alias: str = "r") -> tuple:
+    """Returns (sql_fragment, params_list) for product_name IN (...)"""
+    if not products:
+        return "", []
+    placeholders = ",".join(["%s"] * len(products))
+    return f" AND {table_alias}.product_name IN ({placeholders})", list(products)
+
+
 def get_conn():
     return pymysql.connect(
         host=os.getenv("DB_HOST", "localhost"),
@@ -39,7 +87,7 @@ def get_conn():
     )
 
 
-# ── Reviews ──────────────────────────────────────────────────────────────────
+# ── Reviews ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/reviews")
 def get_reviews(
@@ -53,23 +101,22 @@ def get_reviews(
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            products = resolve_products(product, category)
+            pf_sql, pf_params = product_filter_sql(products)
+
             query = """
                 SELECT
-                    r.review_id,
-                    r.asin,
-                    r.product_name,
-                    r.rating,
-                    r.review,
-                    r.review_url,
-                    r.scrape_date,
-                    t.sentiment,
-                    t.primary_categories,
-                    t.sub_tags
+                    r.review_id, r.asin, r.product_name, r.category,
+                    r.rating, r.review, r.title, r.review_date,
+                    r.review_url, r.scrape_date,
+                    t.sentiment, t.primary_categories, t.sub_tags
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE 1=1
             """
             params = []
+
+            query += pf_sql; params.extend(pf_params)
 
             if sentiment:
                 sentiments = sentiment.split(",")
@@ -78,24 +125,16 @@ def get_reviews(
                 params.extend(sentiments)
 
             if rating:
-                ratings = [int(r) for r in rating.split(",")]
-                placeholders = ",".join(["%s"] * len(ratings))
+                ratings_list = [r for r in rating.split(",")]
+                placeholders = ",".join(["%s"] * len(ratings_list))
                 query += f" AND r.rating IN ({placeholders})"
-                params.extend(ratings)
-
-            if product:
-                products = product.split("|||")
-                placeholders = ",".join(["%s"] * len(products))
-                query += f" AND r.product_name IN ({placeholders})"
-                params.extend(products)
+                params.extend(ratings_list)
 
             date_parse = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             if date_from:
-                query += f" AND {date_parse} >= %s"
-                params.append(date_from)
+                query += f" AND {date_parse} >= %s"; params.append(date_from)
             if date_to:
-                query += f" AND {date_parse} <= %s"
-                params.append(date_to)
+                query += f" AND {date_parse} <= %s"; params.append(date_to)
 
             cur.execute(query, params)
             rows = cur.fetchall()
@@ -104,9 +143,6 @@ def get_reviews(
         for row in rows:
             row["primary_categories"] = json.loads(row["primary_categories"] or "[]")
             row["sub_tags"] = json.loads(row["sub_tags"] or "[]")
-            if category and category != "All":
-                if category not in row["primary_categories"]:
-                    continue
             result.append(row)
 
         return result
@@ -122,23 +158,35 @@ def get_filters():
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT DISTINCT product_name FROM raw_reviews WHERE product_name IS NOT NULL ORDER BY product_name")
-            products = [r["product_name"] for r in cur.fetchall()]
+            db_products = [r["product_name"] for r in cur.fetchall()]
 
             cur.execute("SELECT DISTINCT rating FROM raw_reviews WHERE rating IS NOT NULL ORDER BY rating")
             ratings = [r["rating"] for r in cur.fetchall()]
 
-            cur.execute("SELECT primary_categories FROM review_tags")
-            rows = cur.fetchall()
+        # Use ASIN_MAP order for products (preserves asins.csv order)
+        # Fall back to DB order if product not in map
+        map_products = ALL_PRODS if ALL_PRODS else db_products
+        products = [p for p in map_products if p in db_products] or db_products
 
-        all_cats = set()
-        for row in rows:
-            cats = json.loads(row["primary_categories"] or "[]")
-            all_cats.update(cats)
+        # Build category tree from CAT_MAP — only include categories that have
+        # at least one product present in the DB
+        db_product_set = set(db_products)
+        tree = {}
+        for cat, prods in CAT_MAP.items():
+            active = [p for p in prods if p in db_product_set]
+            if active:
+                tree[cat] = active
+
+        # Products with no category go into an "Other" bucket
+        categorised = {p for prods in CAT_MAP.values() for p in prods}
+        uncategorised = [p for p in products if p not in categorised]
+        if uncategorised:
+            tree["Other"] = uncategorised
 
         return {
             "products": products,
-            "ratings": ratings,
-            "categories": sorted(all_cats),
+            "ratings":  ratings,
+            "tree":     tree,      # { category: [product_name, ...] }
         }
     finally:
         conn.close()
@@ -154,7 +202,7 @@ def get_asins():
     try:
         with open(asins_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            return [{"asin": r["asin"], "product_name": r["product_name"]} for r in reader]
+            return [{"asin": r["asin"], "product_name": r["product_name"], "category": r.get("category", "")} for r in reader]
     except FileNotFoundError:
         return []
 
@@ -380,6 +428,7 @@ def get_stats():
 @app.get("/api/trends")
 def get_trends(
     product: Optional[str] = None,
+    category: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     granularity: Optional[str] = "week",
@@ -387,13 +436,8 @@ def get_trends(
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            product_filter = ""
-            base_params = []
-            if product:
-                products = product.split("|||")
-                placeholders = ",".join(["%s"] * len(products))
-                product_filter = f" AND r.product_name IN ({placeholders})"
-                base_params.extend(products)
+            products = resolve_products(product, category)
+            pf_sql, base_params = product_filter_sql(products)
 
             _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             date_filter = ""
@@ -411,7 +455,7 @@ def get_trends(
                     t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                 GROUP BY period, t.primary_categories
                 ORDER BY period
             """, list(base_params))
@@ -421,7 +465,7 @@ def get_trends(
                 SELECT r.product_name, t.primary_categories, t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                 GROUP BY r.product_name, t.primary_categories, t.sentiment
             """, list(base_params))
             stack_rows = cur.fetchall()
@@ -430,7 +474,7 @@ def get_trends(
                 SELECT r.product_name, t.sub_tags, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                 GROUP BY r.product_name, t.sub_tags
             """, list(base_params))
             subtag_rows = cur.fetchall()
@@ -441,7 +485,7 @@ def get_trends(
                     ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 2) as avg_rating,
                     COUNT(*) as count
                 FROM raw_reviews r
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                 GROUP BY period ORDER BY period
             """, list(base_params))
             rating_rows = cur.fetchall()
@@ -452,7 +496,7 @@ def get_trends(
                     t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                 GROUP BY period, t.sentiment ORDER BY period
             """, list(base_params))
             sent_time_rows = cur.fetchall()
@@ -565,19 +609,15 @@ def get_trends(
 @app.get("/api/trends/cxo")
 def get_cxo_trends(
     product: Optional[str] = None,
+    category: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            base_params = []
-            product_filter = ""
-            if product:
-                products = product.split("|||")
-                placeholders = ",".join(["%s"] * len(products))
-                product_filter = f" AND r.product_name IN ({placeholders})"
-                base_params.extend(products)
+            products = resolve_products(product, category)
+            pf_sql, base_params = product_filter_sql(products)
 
             _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             date_filter = ""
@@ -593,7 +633,7 @@ def get_cxo_trends(
                 SELECT DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day, t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY day, t.sentiment
                 ORDER BY day
@@ -608,7 +648,7 @@ def get_cxo_trends(
                     SUM(CASE WHEN CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1)) < 1.5 THEN 1 ELSE 0 END) as one_star,
                     SUM(CASE WHEN CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1)) >= 4.5 THEN 1 ELSE 0 END) as five_star
                 FROM raw_reviews r
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                 GROUP BY r.scrape_date ORDER BY r.scrape_date
             """, list(base_params))
             daily_rating_rows = cur.fetchall()
@@ -619,7 +659,7 @@ def get_cxo_trends(
                     t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                 GROUP BY r.scrape_date, r.product_name, t.sentiment
                 ORDER BY r.scrape_date
             """, list(base_params))
@@ -630,7 +670,7 @@ def get_cxo_trends(
                 SELECT r.scrape_date as day, t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                   AND t.sentiment = 'Negative'
                 GROUP BY r.scrape_date, t.primary_categories
                 ORDER BY r.scrape_date
@@ -643,13 +683,15 @@ def get_cxo_trends(
                     ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) as rating,
                     COUNT(*) as count
                 FROM raw_reviews r
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                 GROUP BY r.product_name, rating
                 ORDER BY r.product_name, r.rating
             """, list(base_params))
             rating_dist_rows = cur.fetchall()
 
             # 6. Weekly digest — this week vs prior week
+            # Strip date params — digest always looks at last 14 days
+            digest_params = [p for p in base_params if p not in ([date_from] if date_from else []) + ([date_to] if date_to else [])]
             cur.execute(f"""
                 SELECT
                     YEARWEEK(r.scrape_date, 1) as yw,
@@ -658,10 +700,10 @@ def get_cxo_trends(
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE r.scrape_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-                  {product_filter.replace('AND', 'AND', 1)}
+                  {pf_sql}
                 GROUP BY yw, t.sentiment
                 ORDER BY yw
-            """, [p for p in base_params if p not in ([date_from] if date_from else []) + ([date_to] if date_to else [])])
+            """, digest_params)
             digest_rows = cur.fetchall()
 
             # 7. Category momentum — compare first half vs second half of period
@@ -670,12 +712,12 @@ def get_cxo_trends(
                     CASE WHEN r.scrape_date < (
                         SELECT DATE_ADD(MIN(r2.scrape_date),
                             INTERVAL DATEDIFF(MAX(r2.scrape_date), MIN(r2.scrape_date))/2 DAY)
-                        FROM raw_reviews r2 WHERE 1=1 {product_filter} {date_filter}
+                        FROM raw_reviews r2 WHERE 1=1 {pf_sql} {date_filter}
                     ) THEN 'first' ELSE 'second' END as half,
                     t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                   AND t.sentiment = 'Negative'
                 GROUP BY half, t.primary_categories
             """, list(base_params) * 2)
@@ -691,7 +733,7 @@ def get_cxo_trends(
                     SUM(CASE WHEN t.sentiment='Neutral' THEN 1 ELSE 0 END) as neutral
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter}
                 GROUP BY r.product_name
             """, list(base_params))
             product_rows = cur.fetchall()
@@ -869,20 +911,16 @@ def get_cxo_trends(
 @app.get("/api/wordcloud")
 def get_wordcloud(
     product: Optional[str] = None,
+    product_category: Optional[str] = None,   # product group filter (Camera/Dashcam)
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    category: Optional[str] = None,
+    category: Optional[str] = None,           # taxonomy category drill-down
 ):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            base_params = []
-            product_filter = ""
-            if product:
-                products = product.split("|||")
-                placeholders = ",".join(["%s"] * len(products))
-                product_filter = f" AND r.product_name IN ({placeholders})"
-                base_params.extend(products)
+            products = resolve_products(product, product_category)
+            pf_sql, base_params = product_filter_sql(products)
 
             _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             date_filter = ""
@@ -898,7 +936,7 @@ def get_wordcloud(
                     SELECT t.sub_tags, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {product_filter} {date_filter}
+                    WHERE 1=1 {pf_sql} {date_filter}
                     AND JSON_CONTAINS(t.primary_categories, %s)
                 """, list(base_params) + [json.dumps(category)])
                 rows = cur.fetchall()
@@ -908,7 +946,7 @@ def get_wordcloud(
                     SELECT t.sub_tags, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {product_filter} {date_filter}
+                    WHERE 1=1 {pf_sql} {date_filter}
                 """, list(base_params))
                 rows = cur.fetchall()
 
@@ -916,11 +954,9 @@ def get_wordcloud(
                     SELECT t.primary_categories, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {product_filter} {date_filter}
+                    WHERE 1=1 {pf_sql} {date_filter}
                 """, list(base_params))
                 cat_rows = cur.fetchall()
-
-        from collections import defaultdict
 
         # word -> {total, negative, positive, neutral}
         word_counts = defaultdict(lambda: {"total": 0, "Negative": 0, "Positive": 0, "Neutral": 0})
@@ -957,7 +993,7 @@ def get_wordcloud(
             })
 
         result.sort(key=lambda x: x["count"], reverse=True)
-        return result[:80]  # top 80 tags
+        return result[:80]
     finally:
         conn.close()
 
@@ -967,23 +1003,19 @@ def get_wordcloud(
 def get_reviews_by_keyword(
     keyword: str,
     product: Optional[str] = None,
+    product_category: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
     """
-    Returns all reviews tagged with a given keyword (sub_tag or primary_category),
-    ignoring sentiment/rating sidebar filters — so word cloud counts always match.
+    Returns all reviews tagged with a given keyword (sub_tag or primary_category).
     """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            base_params = [f'%"{keyword}"%', f'%"{keyword}"%']
-            product_filter = ""
-            if product:
-                products = product.split("|||")
-                placeholders = ",".join(["%s"] * len(products))
-                product_filter = f" AND r.product_name IN ({placeholders})"
-                base_params.extend(products)
+            products = resolve_products(product, product_category)
+            pf_sql, prod_params = product_filter_sql(products)
+            base_params = [f'%"{keyword}"%', f'%"{keyword}"%'] + prod_params
 
             _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             date_filter = ""
@@ -996,13 +1028,13 @@ def get_reviews_by_keyword(
 
             cur.execute(f"""
                 SELECT
-                    r.review_id, r.asin, r.product_name, r.rating,
+                    r.review_id, r.asin, r.product_name, r.category, r.rating,
                     r.title, r.review, r.review_date, r.review_url, r.scrape_date,
                     t.sentiment, t.primary_categories, t.sub_tags
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE (t.sub_tags LIKE %s OR t.primary_categories LIKE %s)
-                {product_filter} {date_filter}
+                {pf_sql} {date_filter}
                 ORDER BY {_rd} DESC
                 LIMIT 500
             """, base_params)
@@ -1024,19 +1056,15 @@ def get_reviews_by_keyword(
 @app.get("/api/analysis")
 def get_analysis(
     product: Optional[str] = None,
+    category: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            base_params = []
-            product_filter = ""
-            if product:
-                products = product.split("|||")
-                placeholders = ",".join(["%s"] * len(products))
-                product_filter = f" AND r.product_name IN ({placeholders})"
-                base_params.extend(products)
+            products = resolve_products(product, category)
+            pf_sql, base_params = product_filter_sql(products)
 
             date_filter = ""
             if date_from:
@@ -1056,7 +1084,7 @@ def get_analysis(
                 SELECT t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter}
+                WHERE 1=1 {pf_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                 GROUP BY t.sentiment
@@ -1075,7 +1103,7 @@ def get_analysis(
                     COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter}
+                WHERE 1=1 {pf_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                 GROUP BY day, t.sentiment
@@ -1101,7 +1129,7 @@ def get_analysis(
                 SELECT t.primary_categories, t.sentiment
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter}
+                WHERE 1=1 {pf_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
             """, pie_params)
@@ -1140,6 +1168,7 @@ def get_analysis(
 @app.get("/api/summary")
 def get_summary(
     product: Optional[str] = None,
+    category: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
@@ -1148,13 +1177,8 @@ def get_summary(
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            product_filter = ""
-            base_params = []
-            if product:
-                products = product.split("|||")
-                placeholders = ",".join(["%s"] * len(products))
-                product_filter = f" AND r.product_name IN ({placeholders})"
-                base_params.extend(products)
+            products = resolve_products(product, category)
+            pf_sql, base_params = product_filter_sql(products)
 
             # Determine period length for delta
             if date_from and date_to:
@@ -1176,12 +1200,13 @@ def get_summary(
                     SELECT
                         r.asin,
                         MAX(r.product_name) as product_name,
+                        MAX(r.category) as category,
                         ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 1) as avg_rating,
                         COUNT(*) as review_count,
                         SUM(CASE WHEN t.sentiment = 'Negative' THEN 1 ELSE 0 END) as neg_count
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {product_filter}
+                    WHERE 1=1 {pf_sql}
                       AND r.scrape_date BETWEEN %s AND %s
                     GROUP BY r.asin
                 """, params)
@@ -1231,28 +1256,22 @@ def get_summary(
 # ── Generate AI summaries (called by pipeline) ────────────────────────────────
 
 @app.post("/api/summary/generate")
-def generate_summaries(product: Optional[str] = None):
+def generate_summaries(product: Optional[str] = None, category: Optional[str] = None):
     import openai, textwrap
     openai.api_key = os.getenv("OPENAI_API_KEY")
 
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            product_filter = ""
-            params = []
-            if product:
-                products = product.split("|||")
-                placeholders = ",".join(["%s"] * len(products))
-                product_filter = f" AND r.product_name IN ({placeholders})"
-                params.extend(products)
+            products = resolve_products(product, category)
+            pf_sql, params = product_filter_sql(products)
 
-            # Use all reviews, not just last 30 days, so new installs work too
             cur.execute(f"""
                 SELECT r.asin, MAX(r.product_name) as product_name,
                     GROUP_CONCAT(r.review ORDER BY r.scrape_date DESC SEPARATOR ' ||| ') as reviews
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {product_filter}
+                WHERE 1=1 {pf_sql}
                 GROUP BY r.asin
             """, params)
             asin_rows = cur.fetchall()
@@ -1297,3 +1316,189 @@ def generate_summaries(product: Optional[str] = None):
         return {"message": f"Generated summaries for {len(asin_rows)} products"}
     finally:
         conn.close()
+
+
+# ── Rating Trends — daily review avg + Amazon overall per product ─────────────
+
+@app.get("/api/trends/rating")
+def get_rating_trends(
+    product: Optional[str] = None,
+    category: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    """
+    Returns per-product daily data for the rating trend chart:
+      - daily_avg: avg rating from scraped reviews on that day
+      - count: number of reviews that day
+      - overall: Amazon overall rating from product_ratings_snapshot
+      - total_ratings: total Amazon ratings count from snapshot
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            products = resolve_products(product, category)
+            pf_sql, base_params = product_filter_sql(products)
+
+            # Daily avg rating — grouped by scrape_date (when we ran the pipeline).
+            # The UI date filter is for review dates, not scrape dates, so we ignore it here.
+            # This ensures snapshot + review-avg data always shows regardless of filter state.
+            cur.execute(f"""
+                SELECT
+                    r.scrape_date as day,
+                    r.product_name,
+                    ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 2) as daily_avg,
+                    COUNT(*) as review_count
+                FROM raw_reviews r
+                WHERE 1=1 {pf_sql}
+                GROUP BY r.scrape_date, r.product_name
+                ORDER BY r.scrape_date
+            """, base_params)
+            daily_rows = cur.fetchall()
+
+            # Amazon overall ratings — join on ASIN so product_name mismatches don't matter
+            # ASIN_MAP is loaded at startup: {asin: {product_name, category}}
+            # Build asin→product_name from the global map, filtered to active products
+            asin_to_prod = {asin: info["product_name"] for asin, info in ASIN_MAP.items()
+                            if products is None or info["product_name"] in products}
+
+            # Snapshot query — no date filter, always return all historical snapshots
+            asin_list = list(asin_to_prod.keys())
+            if asin_list:
+                asin_ph = ",".join(["%s"] * len(asin_list))
+                asin_filter = f" AND s.asin IN ({asin_ph})"
+            else:
+                asin_filter = ""
+
+            cur.execute(f"""
+                SELECT
+                    s.scraped_date  AS day,
+                    s.asin,
+                    s.overall_rating,
+                    s.total_ratings
+                FROM product_ratings_snapshot s
+                WHERE 1=1
+                  {asin_filter}
+                ORDER BY s.scraped_date
+            """, asin_list)
+            snap_rows_raw = cur.fetchall()
+
+            # Map asin → product_name using ASIN_MAP (reliable, no string-matching)
+            snap_rows = [
+                {
+                    "day":            row["day"],
+                    "product_name":   ASIN_MAP.get(row["asin"], {}).get("product_name", row["asin"]),
+                    "overall_rating": row["overall_rating"],
+                    "total_ratings":  row["total_ratings"],
+                }
+                for row in snap_rows_raw
+            ]
+
+        # Build snapshot lookup: {product_name: {day_str: {overall, total_ratings}}}
+        snap_lookup = defaultdict(dict)
+        for row in snap_rows:
+            d = str(row["day"])
+            snap_lookup[row["product_name"]][d] = {
+                "overall":       float(row["overall_rating"]) if row["overall_rating"] else None,
+                "total_ratings": int(row["total_ratings"])    if row["total_ratings"]   else None,
+            }
+
+        # Collect ALL days from both reviews and snapshots
+        all_days = set()
+        for row in daily_rows:
+            all_days.add(str(row["day"]))
+        for p_snaps in snap_lookup.values():
+            all_days.update(p_snaps.keys())
+        sorted_days = sorted(all_days)
+
+        # Raw review data per product per day
+        product_daily = defaultdict(dict)
+        for row in daily_rows:
+            d = str(row["day"])
+            product_daily[row["product_name"]][d] = {
+                "daily_avg": float(row["daily_avg"]) if row["daily_avg"] else None,
+                "count":     int(row["review_count"]),
+            }
+
+        # Full product list
+        all_product_names = sorted(set(product_daily.keys()) | set(snap_lookup.keys()))
+        if products:
+            all_product_names = [p for p in all_product_names if p in products]
+
+        # Forward-fill overall rating per product across all days
+        product_series = {}
+        for p in all_product_names:
+            series = []
+            last_overall       = None
+            last_total_ratings = None
+            for d in sorted_days:
+                snap = snap_lookup.get(p, {}).get(d)
+                if snap:
+                    if snap["overall"]       is not None: last_overall       = snap["overall"]
+                    if snap["total_ratings"] is not None: last_total_ratings = snap["total_ratings"]
+                rev = product_daily.get(p, {}).get(d, {})
+                series.append({
+                    "day":           d,
+                    "daily_avg":     rev.get("daily_avg"),
+                    "count":         rev.get("count", 0),
+                    "overall":       last_overall,
+                    "total_ratings": last_total_ratings,
+                })
+            product_series[p] = series
+
+        result = []
+        for i, d in enumerate(sorted_days):
+            result.append({
+                "day": d,
+                "products": {p: product_series[p][i] for p in all_product_names},
+            })
+
+        return {
+            "days":     result,
+            "products": all_product_names,
+        }
+    finally:
+        conn.close()
+
+
+# ── Stub endpoints — silence 404s from older frontend versions ────────────────
+# These endpoints are called by an older build and can be safely ignored.
+
+@app.get("/api/health-score")
+def stub_health_score(): return {}
+
+@app.get("/api/trend")
+def stub_trend(): return []
+
+@app.get("/api/pulse")
+def stub_pulse(): return {}
+
+@app.get("/api/anomalies")
+def stub_anomalies(): return []
+
+@app.get("/api/channels")
+def stub_channels(): return []
+
+@app.get("/api/products")
+def stub_products(): return []
+
+@app.get("/api/resolution-journey")
+def stub_resolution_journey(): return []
+
+@app.get("/api/voc-mismatch")
+def stub_voc_mismatch(): return []
+
+@app.get("/api/resolution-codes")
+def stub_resolution_codes(): return []
+
+@app.get("/api/firmware-risk")
+def stub_firmware_risk(): return []
+
+@app.get("/api/heatmap")
+def stub_heatmap(): return []
+
+@app.get("/api/pipeline-status")
+def stub_pipeline_status(): return {}
+
+@app.get("/api/replacements")
+def stub_replacements(): return []

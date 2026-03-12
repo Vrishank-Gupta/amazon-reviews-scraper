@@ -335,7 +335,8 @@ export default function SummaryPage({ filters, allProducts }) {
   const [sortDir, setSortDir]   = useState(-1)
 
   const apiParams = {
-    product:   filters.product?.length ? filters.product : allProducts,
+    product_category: filters.product_category || null,
+    product:   filters.product?.length ? filters.product : [],
     date_from: filters.date_from,
     date_to:   filters.date_to,
   }

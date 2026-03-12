@@ -33,16 +33,28 @@ function Stat({ label, value, sub }) {
   )
 }
 
+function Check({ sel }) {
+  return (
+    <span style={{
+      width: 13, height: 13, borderRadius: 3, flexShrink: 0,
+      border: `1.5px solid ${sel ? 'var(--accent)' : 'var(--border)'}`,
+      background: sel ? 'var(--accent)' : 'transparent',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 9, color: '#fff',
+    }}>{sel ? '✓' : ''}</span>
+  )
+}
+
 export default function PipelineWidget() {
-  const [status, setStatus] = useState(null)
-  const [refreshing, setRefreshing] = useState(false)
-  const [days, setDays] = useState(30)
-  const [asins, setAsins] = useState([])           // all available ASINs from CSV
-  const [selectedAsins, setSelectedAsins] = useState([]) // [] = all
-  const [asinOpen, setAsinOpen] = useState(false)
-  const [running, setRunning] = useState(false)
-  const [error, setError] = useState(null)
-  const [success, setSuccess] = useState(false)
+  const [status, setStatus]           = useState(null)
+  const [refreshing, setRefreshing]   = useState(false)
+  const [days, setDays]               = useState(30)
+  const [asins, setAsins]             = useState([])        // [{ asin, product_name, category }]
+  const [selectedAsins, setSelectedAsins] = useState([])   // [] = all
+  const [asinOpen, setAsinOpen]       = useState(false)
+  const [running, setRunning]         = useState(false)
+  const [error, setError]             = useState(null)
+  const [success, setSuccess]         = useState(false)
 
   const load = async (showSpinner = false) => {
     if (showSpinner) setRefreshing(true)
@@ -62,10 +74,38 @@ export default function PipelineWidget() {
     return () => clearInterval(id)
   }, [])
 
+  // Build category → products tree from asins list
+  const categoryTree = asins.reduce((tree, row) => {
+    const cat = row.category || 'Uncategorised'
+    if (!tree[cat]) tree[cat] = []
+    tree[cat].push(row)
+    return tree
+  }, {})
+  const categories = Object.keys(categoryTree)
+
   const toggleAsin = (asin) => {
     setSelectedAsins(prev =>
       prev.includes(asin) ? prev.filter(a => a !== asin) : [...prev, asin]
     )
+  }
+
+  const toggleCategory = (cat) => {
+    const catAsins = categoryTree[cat].map(r => r.asin)
+    const allSelected = catAsins.every(a => selectedAsins.includes(a))
+    if (allSelected) {
+      setSelectedAsins(prev => prev.filter(a => !catAsins.includes(a)))
+    } else {
+      setSelectedAsins(prev => [...new Set([...prev, ...catAsins])])
+    }
+  }
+
+  const isCatSelected = (cat) => {
+    const catAsins = categoryTree[cat].map(r => r.asin)
+    return catAsins.length > 0 && catAsins.every(a => selectedAsins.includes(a))
+  }
+  const isCatPartial = (cat) => {
+    const catAsins = categoryTree[cat].map(r => r.asin)
+    return catAsins.some(a => selectedAsins.includes(a)) && !catAsins.every(a => selectedAsins.includes(a))
   }
 
   const handleRun = async () => {
@@ -76,7 +116,6 @@ export default function PipelineWidget() {
       await runPipeline(days, selectedAsins)
       setSuccess(true)
       setTimeout(() => setSuccess(false), 4000)
-      // Pipeline runs in background — poll every 15s until review count grows
       const startTotal = status?.total_reviews || 0
       let attempts = 0
       const poll = setInterval(async () => {
@@ -105,8 +144,6 @@ export default function PipelineWidget() {
     ? Math.round((status.tagged_reviews / status.total_reviews) * 100) : 0
 
   const asinLabel = selectedAsins.length === 0
-    ? 'All products'
-    : selectedAsins.length === asins.length
     ? 'All products'
     : `${selectedAsins.length} of ${asins.length} selected`
 
@@ -141,7 +178,7 @@ export default function PipelineWidget() {
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, paddingTop: 4, borderTop: '1px solid var(--border)' }}>
-        <Stat label="Total" value={status?.total_reviews?.toLocaleString() ?? '—'} sub="reviews" />
+        <Stat label="Total"  value={status?.total_reviews?.toLocaleString() ?? '—'} sub="reviews" />
         <Stat label="Last 7d" value={status?.recent_reviews?.toLocaleString() ?? '—'} sub="new" />
         <Stat label="Tagged" value={status ? `${coveragePct}%` : '—'} sub={`${status?.tagged_reviews?.toLocaleString() ?? 0}`} />
       </div>
@@ -176,19 +213,17 @@ export default function PipelineWidget() {
               border: `1px solid ${days === d ? 'var(--accent)' : 'var(--border)'}`,
               background: days === d ? 'var(--accent)20' : 'transparent',
               color: days === d ? 'var(--accent)' : 'var(--text-muted)',
-              transition: 'all 0.12s',
             }}>
               {d}d
             </button>
           ))}
         </div>
 
-        {/* ASIN multi-select dropdown */}
+        {/* Product selector — grouped by category */}
         {asins.length > 0 && (
           <div style={{ position: 'relative' }}>
             <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Products</span>
 
-            {/* Trigger */}
             <button
               onClick={() => setAsinOpen(o => !o)}
               style={{
@@ -196,7 +231,7 @@ export default function PipelineWidget() {
                 padding: '6px 10px', borderRadius: 6,
                 background: 'var(--surface)', border: `1px solid ${asinOpen ? 'var(--accent)' : 'var(--border)'}`,
                 color: selectedAsins.length ? 'var(--text)' : 'var(--text-muted)',
-                fontSize: 11, cursor: 'pointer', transition: 'border 0.15s',
+                fontSize: 11, cursor: 'pointer',
               }}
             >
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -205,63 +240,71 @@ export default function PipelineWidget() {
               <ChevronDown size={12} style={{ flexShrink: 0, transform: asinOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
             </button>
 
-            {/* Dropdown */}
             {asinOpen && (
               <div style={{
                 position: 'absolute', bottom: 'calc(100% + 4px)', left: 0, right: 0,
                 background: '#1a1a24', border: '1px solid var(--border)',
-                borderRadius: 8, overflow: 'hidden',
+                borderRadius: 8, overflow: 'hidden', maxHeight: 300, overflowY: 'auto',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 100,
               }}>
-                {/* Select all */}
-                <button
-                  onClick={() => setSelectedAsins([])}
-                  style={{
-                    width: '100%', padding: '8px 12px', textAlign: 'left',
-                    background: selectedAsins.length === 0 ? 'var(--accent)15' : 'transparent',
-                    border: 'none', borderBottom: '1px solid var(--border)',
-                    color: selectedAsins.length === 0 ? 'var(--accent)' : 'var(--text-muted)',
-                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                  }}
-                >
-                  ✓ All products
+
+                {/* All products */}
+                <button onClick={() => setSelectedAsins([])} style={{
+                  width: '100%', padding: '8px 12px', textAlign: 'left',
+                  background: selectedAsins.length === 0 ? 'rgba(255,78,26,0.1)' : 'transparent',
+                  border: 'none', borderBottom: '1px solid var(--border)',
+                  color: selectedAsins.length === 0 ? 'var(--accent)' : 'var(--text-muted)',
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 7,
+                }}>
+                  <Check sel={selectedAsins.length === 0} />
+                  All products
                 </button>
 
-                {/* Individual ASINs */}
-                {asins.map(({ asin, product_name }) => {
-                  const sel = selectedAsins.includes(asin)
-                  return (
-                    <button
-                      key={asin}
-                      onClick={() => toggleAsin(asin)}
-                      style={{
-                        width: '100%', padding: '7px 12px',
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        background: sel ? 'var(--accent)10' : 'transparent',
-                        border: 'none', borderBottom: '1px solid var(--border)',
-                        color: 'var(--text)', fontSize: 11, cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                    >
-                      {/* Checkbox */}
-                      <span style={{
-                        width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                        border: `1.5px solid ${sel ? 'var(--accent)' : 'var(--border)'}`,
-                        background: sel ? 'var(--accent)' : 'transparent',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 9, color: '#fff',
-                      }}>
-                        {sel ? '✓' : ''}
-                      </span>
-                      <span style={{ overflow: 'hidden' }}>
-                        <span style={{ display: 'block', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {product_name}
-                        </span>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{asin}</span>
-                      </span>
+                {/* Category groups */}
+                {categories.map(cat => (
+                  <div key={cat}>
+                    {/* Category header row */}
+                    <button onClick={() => toggleCategory(cat)} style={{
+                      width: '100%', padding: '7px 12px', textAlign: 'left',
+                      background: isCatSelected(cat) ? 'rgba(255,78,26,0.08)' : 'transparent',
+                      border: 'none', borderBottom: '1px solid var(--border)',
+                      color: isCatSelected(cat) ? 'var(--accent)' : 'var(--text)',
+                      fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 7,
+                      textTransform: 'uppercase', letterSpacing: '0.04em',
+                    }}>
+                      <Check sel={isCatSelected(cat)} />
+                      📁 {cat}
+                      {isCatPartial(cat) && (
+                        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>partial</span>
+                      )}
                     </button>
-                  )
-                })}
+
+                    {/* Products under category */}
+                    {categoryTree[cat].map(({ asin, product_name }) => {
+                      const sel = selectedAsins.includes(asin)
+                      return (
+                        <button key={asin} onClick={() => toggleAsin(asin)} style={{
+                          width: '100%', padding: '6px 12px 6px 28px',
+                          display: 'flex', alignItems: 'center', gap: 7,
+                          background: sel ? 'rgba(255,78,26,0.05)' : 'transparent',
+                          border: 'none', borderBottom: '1px solid var(--border)',
+                          color: sel ? 'var(--text)' : 'var(--text-muted)',
+                          fontSize: 11, cursor: 'pointer', textAlign: 'left',
+                        }}>
+                          <Check sel={sel} />
+                          <span style={{ overflow: 'hidden' }}>
+                            <span style={{ display: 'block', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {product_name}
+                            </span>
+                            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{asin}</span>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ))}
               </div>
             )}
           </div>

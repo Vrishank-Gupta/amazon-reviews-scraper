@@ -10,10 +10,10 @@ import PipelineWidget from './components/PipelineWidget'
 import { RefreshCw, Download, Database, X } from 'lucide-react'
 
 const DEFAULT_FILTERS = {
-  category: 'All',
+  product_category: null,  // null = all categories
+  product: [],             // explicit product list (empty = all)
   sentiment: [],
   rating: [],
-  product: [],
   date_from: null,
   date_to: null,
 }
@@ -70,7 +70,7 @@ export default function App() {
   const [tab, setTab]         = useState('analysis')
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
   const [reviews, setReviews] = useState([])
-  const [options, setOptions] = useState({ categories:[], products:[], ratings:[] })
+  const [options, setOptions] = useState({ tree:{}, products:[], ratings:[] })
   const [initialLoading, setInitialLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [pipelineOpen, setPipelineOpen] = useState(false)
@@ -78,7 +78,8 @@ export default function App() {
   useEffect(() => {
     fetchFilters().then(o => {
       setOptions(o)
-      setFilters(f => ({ ...f, product: o.products }))
+      // Default: show all products — no filter applied
+      setFilters(f => ({ ...f, product: [], product_category: null }))
     })
     fetchStats()
   }, [])
@@ -98,8 +99,8 @@ export default function App() {
     loadReviews(filters)
   }, [filters, loadReviews])
 
-  const handleFilterChange = (key, val) => {
-    setFilters(f => ({ ...f, [key]: val }))
+  const handleFilterChange = (updates) => {
+    setFilters(f => ({ ...f, ...updates }))
   }
 
   return (
@@ -152,7 +153,6 @@ export default function App() {
       }}>
         <div style={{ display:'flex', gap:8 }}>
           <TabBtn active={tab==='analysis'} onClick={()=>setTab('analysis')} emoji="🎯" label="Overview" />
-          <TabBtn active={tab==='summary'}  onClick={()=>setTab('summary')}  emoji="📦" label="Products" />
           <TabBtn active={tab==='reviews'}  onClick={()=>setTab('reviews')}  emoji="💬" label="Reviews"  />
           <TabBtn active={tab==='trends'}   onClick={()=>setTab('trends')}   emoji="📈" label="Trends"   />
         </div>
@@ -185,10 +185,10 @@ export default function App() {
           </div>
 
         ) : tab === 'analysis' ? (
-          <AnalysisPage filters={filters} allProducts={options.products} />
-
-        ) : tab === 'summary' ? (
-          <SummaryPage filters={filters} allProducts={options.products} />
+          <>
+            <AnalysisPage filters={filters} allProducts={options.products} />
+            <SummaryPage filters={filters} allProducts={options.products} />
+          </>
 
         ) : tab === 'reviews' ? (
           <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'18px 22px', display:'flex', flexDirection:'column', gap:14 }}>
@@ -208,7 +208,7 @@ export default function App() {
           </div>
 
         ) : (
-          <TrendsPage products={options.products} reviews={reviews} filters={filters} />
+          <TrendsPage products={options.products} reviews={reviews} filters={filters} tree={options.tree} />
         )}
       </main>
 
