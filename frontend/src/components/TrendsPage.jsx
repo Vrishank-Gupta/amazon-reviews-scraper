@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import ProductPerformanceScorecard from './ProductPerformanceScorecard'
 import ReviewsDrawer from './ReviewsDrawer'
 import {
-  AreaChart, Area, LineChart, Line, BarChart, Bar,
+  AreaChart, Area, LineChart, Line, BarChart,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  Cell, ReferenceLine, ComposedChart
+  ReferenceLine
 } from 'recharts'
 
 // ── CSV export (imported by App.jsx) ─────────────────────────────────────────
@@ -266,12 +267,205 @@ function Empty() {
   return <div style={{ padding:'32px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>No data for selected filters</div>
 }
 
+function ExecutiveNarrative({ kpi, productSummary, momentum }) {
+  const topRisk = [...(productSummary || [])].sort((a, b) => b.neg_pct - a.neg_pct)[0]
+  const topStrength = [...(productSummary || [])].sort((a, b) => a.neg_pct - b.neg_pct)[0]
+  const risingIssue = [...(momentum || [])]
+    .filter(m => (m.second || 0) > 0)
+    .sort((a, b) => (b.change || 0) - (a.change || 0))[0]
+
+  if (!kpi?.total && !topRisk && !risingIssue) return null
+
+  return (
+    <div style={{ background:'linear-gradient(135deg, rgba(255,78,26,0.08), rgba(96,165,250,0.05))', border:'1px solid rgba(255,78,26,0.16)', borderRadius:14, padding:'18px 20px', display:'flex', flexDirection:'column', gap:14 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+        <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase', color:'var(--accent)' }}>Executive Readout</span>
+        <span style={{ fontSize:11, color:'var(--text-muted)' }}>What changed, where to act, and what to protect</span>
+      </div>
+      <div style={{ fontSize:15, lineHeight:1.7, color:'var(--text)' }}>
+        Customer pressure is <strong style={{ color:kpi?.neg_pct > 30 ? '#ef4444' : '#22c55e' }}>{kpi?.neg_pct > 30 ? 'elevated' : 'manageable'}</strong>
+        {topRisk && <> and is concentrated in <strong>{topRisk.product}</strong>, where <strong style={{ color:'#ef4444' }}>{topRisk.neg_pct}% </strong>of reviews report problems.</>}
+        {risingIssue && <> The fastest-rising issue is <strong>{risingIssue.category}</strong>{risingIssue.change > 0 ? <> with <strong style={{ color:'#f97316' }}>+{risingIssue.change}</strong> more mentions in the recent half of the period.</> : '.'}</>}
+        {topStrength && <> The strongest product right now is <strong>{topStrength.product}</strong>, which remains the benchmark to protect.</>}
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12 }}>
+        {[
+          { label:'Most At Risk', value: topRisk?.product || '—', meta: topRisk ? `${topRisk.neg_pct}% problem rate` : 'No product data', color:'#ef4444' },
+          { label:'Fastest Rising Issue', value: risingIssue?.category || '—', meta: risingIssue ? `${risingIssue.change > 0 ? '+' : ''}${risingIssue.change || 0} vs prior half` : 'No issue movement', color:'#f97316' },
+          { label:'Strongest Benchmark', value: topStrength?.product || '—', meta: topStrength ? `${topStrength.neg_pct}% problem rate` : 'No product data', color:'#22c55e' },
+        ].map(item => (
+          <div key={item.label} style={{ background:'rgba(10,12,24,0.45)', border:`1px solid ${item.color}25`, borderRadius:10, padding:'12px 14px', display:'flex', flexDirection:'column', gap:5 }}>
+            <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>{item.label}</div>
+            <div style={{ fontSize:14, fontWeight:700, color:'var(--text)' }}>{item.value}</div>
+            <div style={{ fontSize:11, color:'var(--text-muted)' }}>{item.meta}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function EmergingIssues({ momentum, onSelect }) {
+  const items = [...(momentum || [])]
+    .filter(m => (m.second || 0) > 0 && ((m.first === 0 && m.second > 0) || (m.change || 0) > 0))
+    .sort((a, b) => {
+      const aNew = a.first === 0 ? 1 : 0
+      const bNew = b.first === 0 ? 1 : 0
+      if (aNew !== bNew) return bNew - aNew
+      return (b.change || 0) - (a.change || 0)
+    })
+    .slice(0, 5)
+
+  if (!items.length) return <Empty />
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+      {items.map(item => {
+        const isNew = item.first === 0 && item.second > 0
+        const signalColor = isNew ? '#f97316' : '#ef4444'
+        return (
+          <button key={item.category} onClick={() => onSelect?.(item.category)} style={{ background:'rgba(255,255,255,0.03)', border:`1px solid ${signalColor}24`, borderRadius:10, padding:'10px 12px', display:'grid', gridTemplateColumns:'1fr auto auto', gap:10, alignItems:'center', cursor:'pointer', color:'inherit', textAlign:'left' }}>
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{item.category}</div>
+              <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+                {isNew ? 'New issue in the recent half of the period' : `Up from ${item.first} to ${item.second} mentions`}
+              </div>
+            </div>
+            <div style={{ fontSize:11, fontWeight:700, color:signalColor }}>
+              {isNew ? 'NEW' : `${item.change > 0 ? '+' : ''}${item.change}`}
+            </div>
+            <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+              {item.pct_change > 0 ? `+${item.pct_change}%` : `${item.pct_change}%`}
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function ConsistencyWatch({ ratingDist, productSummary }) {
+  const summaryLookup = Object.fromEntries((productSummary || []).map(row => [row.product, row]))
+  const items = (ratingDist || [])
+    .map(row => {
+      const total = [1,2,3,4,5].reduce((sum, star) => sum + (row[String(star)] || 0), 0)
+      const one = row['1'] || 0
+      const five = row['5'] || 0
+      const onePct = total ? +(one / total * 100).toFixed(1) : 0
+      const fivePct = total ? +(five / total * 100).toFixed(1) : 0
+      const polarity = Math.min(onePct, fivePct)
+      return {
+        product: row.product,
+        total,
+        onePct,
+        fivePct,
+        polarity,
+        summary: summaryLookup[row.product],
+      }
+    })
+    .filter(item => item.total > 0)
+    .sort((a, b) => b.polarity - a.polarity)
+    .slice(0, 4)
+
+  if (!items.length) return <Empty />
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+      {items.map(item => {
+        const verdict = item.polarity >= 18 ? 'Highly Polarized' : item.polarity >= 10 ? 'Mixed Experience' : 'More Consistent'
+        const color = item.polarity >= 18 ? '#f97316' : item.polarity >= 10 ? '#eab308' : '#22c55e'
+        return (
+          <div key={item.product} style={{ background:'rgba(255,255,255,0.03)', border:`1px solid ${color}24`, borderRadius:10, padding:'10px 12px', display:'flex', flexDirection:'column', gap:6 }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{item.product}</div>
+              <div style={{ fontSize:10, fontWeight:700, color, textTransform:'uppercase', letterSpacing:'0.08em' }}>{verdict}</div>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
+              <div>
+                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>1★ Share</div>
+                <div style={{ fontSize:13, fontWeight:700, color:'#ef4444' }}>{item.onePct}%</div>
+              </div>
+              <div>
+                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>5★ Share</div>
+                <div style={{ fontSize:13, fontWeight:700, color:'#22c55e' }}>{item.fivePct}%</div>
+              </div>
+              <div>
+                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>Problem Rate</div>
+                <div style={{ fontSize:13, fontWeight:700, color:'var(--text)' }}>{item.summary?.neg_pct ?? 0}%</div>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function IssueHeatmap({ heatmap, onSelect }) {
+  const rows = heatmap?.rows || []
+  const categories = heatmap?.categories || []
+  if (!rows.length || !categories.length) return <Empty />
+
+  const max = Math.max(...rows.flatMap(row => categories.map(cat => row[cat] || 0)), 1)
+
+  const tone = (count) => {
+    if (!count) return 'rgba(255,255,255,0.03)'
+    const opacity = Math.max(0.12, count / max)
+    return `rgba(239,68,68,${Math.min(opacity * 0.9, 0.72)})`
+  }
+
+  return (
+    <div style={{ overflowX:'auto' }}>
+      <div style={{ minWidth:720 }}>
+        <div style={{ display:'grid', gridTemplateColumns:`180px repeat(${categories.length}, minmax(90px, 1fr))`, gap:8, marginBottom:8 }}>
+          <div />
+          {categories.map(cat => (
+            <div key={cat} style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em', textAlign:'center' }}>{cat}</div>
+          ))}
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {rows.map(row => (
+            <div key={row.product} style={{ display:'grid', gridTemplateColumns:`180px repeat(${categories.length}, minmax(90px, 1fr))`, gap:8, alignItems:'stretch' }}>
+              <div style={{ display:'flex', alignItems:'center', fontSize:12, fontWeight:700, color:'var(--text)' }}>{row.product}</div>
+              {categories.map(cat => {
+                const count = row[cat] || 0
+                return (
+                  <button
+                    key={`${row.product}-${cat}`}
+                    onClick={() => count > 0 && onSelect?.(cat, row.product)}
+                    style={{
+                      minHeight:56,
+                      border:'1px solid rgba(239,68,68,0.12)',
+                      borderRadius:10,
+                      background:tone(count),
+                      color: count > 0 ? '#fff' : 'var(--text-muted)',
+                      cursor: count > 0 ? 'pointer' : 'default',
+                      display:'flex',
+                      flexDirection:'column',
+                      alignItems:'center',
+                      justifyContent:'center',
+                      gap:3,
+                    }}
+                  >
+                    <span style={{ fontFamily:'Bebas Neue', fontSize:22, lineHeight:1 }}>{count}</span>
+                    <span style={{ fontSize:10, opacity:0.85 }}>{count > 0 ? 'reviews' : '—'}</span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // RATING TREND CHART
 // Shows daily avg rating (bars from scraped reviews) +
 // Amazon overall rating (line from product_ratings_snapshot)
 // ─────────────────────────────────────────────────────────────────────────────
-function RatingTrendChart({ filters, allProducts, tree }) {
+export function RatingTrendChart({ filters, allProducts, tree }) {
   const [data, setData]     = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -391,11 +585,94 @@ function RatingTrendChart({ filters, allProducts, tree }) {
     </div>
   )
 
+  const combinedRows = spine.map((day, idx) => ({
+    day,
+    ...Object.fromEntries(prods.flatMap(p => ([
+      [`${p}__overall`, overallRows[idx]?.[p] ?? null],
+      [`${p}__total_ratings`, totalRatingsRows[idx]?.[p] ?? null],
+    ]))),
+  }))
+
+  const CombinedTooltip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null
+    const grouped = Object.fromEntries(prods.map(p => [p, {}]))
+    payload.filter(p => p.value != null).forEach(p => {
+      const [productName, metric] = String(p.dataKey).split('__')
+      if (!grouped[productName]) grouped[productName] = {}
+      grouped[productName][metric] = p.value
+    })
+
+    return (
+      <div style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:8, padding:'10px 14px', fontSize:11, minWidth:210 }}>
+        <div style={{ fontWeight:700, color:'var(--text-muted)', marginBottom:8 }}>{fmtDay(label)}</div>
+        {prods.map(productName => {
+          const metrics = grouped[productName] || {}
+          if (metrics.overall == null && metrics.total_ratings == null) return null
+          return (
+            <div key={productName} style={{ marginTop:6, paddingTop:6, borderTop:'1px solid rgba(148,163,184,0.14)' }}>
+              <div style={{ color:colorMap[productName], fontWeight:700, marginBottom:4 }}>{productName}</div>
+              {metrics.overall != null && (
+                <div style={{ display:'flex', justifyContent:'space-between', gap:16 }}>
+                  <span style={{ color:'var(--text-muted)' }}>Amazon rating</span>
+                  <span style={{ fontWeight:700 }}>{metrics.overall.toFixed(2)} ★</span>
+                </div>
+              )}
+              {metrics.total_ratings != null && (
+                <div style={{ display:'flex', justifyContent:'space-between', gap:16, marginTop:2 }}>
+                  <span style={{ color:'var(--text-muted)' }}>Total ratings</span>
+                  <span style={{ fontWeight:700 }}>{Number(metrics.total_ratings).toLocaleString()}</span>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
 
+      {(hasOverall || hasTotalRatings) && (
+        <div>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>
+            Amazon Public Signal
+            <span style={{ fontWeight:400, marginLeft:8, textTransform:'none', letterSpacing:0 }}>
+              - solid line = Amazon rating, dashed line = total Amazon ratings
+            </span>
+          </div>
+          <ResponsiveContainer width="100%" height={190}>
+            <LineChart data={combinedRows} margin={{ top:4, right:18, left:-10, bottom:0 }}>
+              <CartesianGrid {...gridProps} />
+              <XAxis {...xProps} />
+              <YAxis yAxisId="rating" domain={([min, max]) => [Math.max(1, Math.floor((min - 0.2) * 2) / 2), Math.min(5, Math.ceil((max + 0.2) * 2) / 2)]} tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={v => v.toFixed(1)} />
+              <YAxis yAxisId="volume" orientation="right" tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} width={40} />
+              <Tooltip content={<CombinedTooltip />} />
+              {hasOverall && <ReferenceLine yAxisId="rating" y={4} stroke="var(--border)" strokeDasharray="4 2" />}
+              {prods.map(p => (
+                hasOverall ? (
+                  <Line key={`${p}__overall`} yAxisId="rating" type="monotone" dataKey={`${p}__overall`} stroke={colorMap[p]} strokeWidth={2.5}
+                    dot={dotStyle(days.length)} activeDot={{ r:5, stroke:'#fff', strokeWidth:1.5 }} connectNulls />
+                ) : null
+              ))}
+              {prods.map(p => (
+                hasTotalRatings ? (
+                  <Line key={`${p}__total_ratings`} yAxisId="volume" type="monotone" dataKey={`${p}__total_ratings`} stroke={colorMap[p]} strokeWidth={1.8}
+                    strokeDasharray="6 4" opacity={0.7} dot={false} activeDot={{ r:4, stroke:'#fff', strokeWidth:1.2 }} connectNulls />
+                ) : null
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+          <Legend />
+          <div style={{ display:'flex', gap:14, flexWrap:'wrap', marginTop:6, fontSize:11, color:'var(--text-muted)' }}>
+            {hasOverall && <span>Solid line: Amazon overall rating</span>}
+            {hasTotalRatings && <span>Dashed line: total Amazon ratings</span>}
+          </div>
+        </div>
+      )}
+
       {/* ① Overall Amazon rating trend */}
-      {hasOverall && (
+      {false && hasOverall && (
         <div>
           <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>
             Amazon Overall Rating ★
@@ -447,7 +724,7 @@ function RatingTrendChart({ filters, allProducts, tree }) {
       )}
 
       {/* ③ Total ratings volume on Amazon */}
-      {hasTotalRatings && (
+      {false && hasTotalRatings && (
         <div>
           <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>
             Total Ratings on Amazon
@@ -480,13 +757,15 @@ function RatingTooltip() { return null } // kept for import safety, replaced by 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN
 // ─────────────────────────────────────────────────────────────────────────────
-export default function TrendsPage({ products: allProducts, reviews, filters, tree }) {
+export default function TrendsPage({ products: allProducts, filters, tree }) {
   const [data, setData]   = useState(null)
   const [loading, setLoading] = useState(true)
   const [hasData, setHasData] = useState(false)
   const [sentMode, setSentMode]   = useState('volume')
   const [catMode,  setCatMode]    = useState('trend')
+  const [emergingCat, setEmergingCat] = useState(null)
   const [drawerCat, setDrawerCat]  = useState(null)
+  const [heatmapDrill, setHeatmapDrill] = useState(null)
   const [hiddenCats,  setHiddenCats]  = useState(new Set())
   const [hiddenProds, setHiddenProds] = useState(new Set())
 
@@ -518,7 +797,6 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
 
   const kpi            = data?.kpi || {}
   const dailyTrend     = data?.daily_trend || []
-  const dailyRating    = data?.daily_rating || []
   const productDaily   = data?.product_daily || []
   const dailyCats      = data?.daily_categories || []
   const allCats        = data?.all_categories || []
@@ -527,10 +805,7 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
   const momentum       = data?.category_momentum || []
   const productSummary = data?.product_summary || []
   const weeklyDigest   = data?.weekly_digest || []
-
-  const starRatioDays = dailyRating.map(d => ({
-    day: d.day, '1★': d.one_star, '5★': d.five_star,
-  }))
+  const issueHeatmap   = data?.issue_heatmap || { rows: [], categories: [], products: [] }
 
   const healthData = dailyTrend.map(d => ({
     day: d.day,
@@ -542,7 +817,8 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
 
   // Active filter summary for display
   const filterSummary = [
-    selectedProducts.length < (allProducts||[]).length && `${selectedProducts.length} product${selectedProducts.length!==1?'s':''}`,
+    productCategory && `Category: ${productCategory}`,
+    selectedProducts.length > 0 && `Products: ${selectedProducts.slice(0, 2).join(', ')}${selectedProducts.length > 2 ? ` +${selectedProducts.length - 2} more` : ''}`,
     dateFrom && dateTo && `${fmtDay(dateFrom)} → ${fmtDay(dateTo)}`,
     dateFrom && !dateTo && `From ${fmtDay(dateFrom)}`,
     !dateFrom && dateTo && `Until ${fmtDay(dateTo)}`,
@@ -567,22 +843,22 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
 
       {/* ── SECTION 1: EXECUTIVE SNAPSHOT ── */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:12 }}>
-        <KPI label="Total Reviews" value={kpi.total?.toLocaleString()} color="#60a5fa"
+        <KPI label="Feedback Volume" value={kpi.total?.toLocaleString()} color="#60a5fa"
           sub={`in selected period`}
           tip="Total number of reviews scraped from Amazon for the selected products and date range." />
-        <KPI label="Neg Rate" value={`${kpi.neg_pct}%`}
+        <KPI label="Customers Reporting Problems" value={`${kpi.neg_pct}%`}
           color={kpi.neg_pct>50?'#ef4444':kpi.neg_pct>30?'#f97316':'#22c55e'}
-          sub="% of reviews negative"
+          sub="share of reviews classified negative"
           tip="Percentage of reviews tagged as Negative by the AI tagger. Formula: (Negative reviews ÷ Total reviews) × 100." />
-        <KPI label="Pos Rate" value={`${kpi.pos_pct}%`} color="#22c55e"
-          sub="% of reviews positive"
+        <KPI label="Customers Delighted" value={`${kpi.pos_pct}%`} color="#22c55e"
+          sub="share of reviews classified positive"
           tip="Percentage of reviews tagged as Positive. A high positive rate alongside a high negative rate means polarised opinions — worth investigating." />
-        <KPI label="Last 7d Neg Rate" value={`${kpi.last7_neg_rate}%`}
+        <KPI label="Recent Pressure" value={`${kpi.last7_neg_rate}%`}
           color={kpi.last7_neg_rate>50?'#ef4444':kpi.last7_neg_rate>30?'#f97316':'#22c55e'}
           delta={kpi.wow_delta} deltaInvert={true}
-          sub="vs prior 7 days"
+          sub="problem rate in the latest 7 days"
           tip="Negative rate for the most recent 7 days compared to the 7 days before that. The delta arrow shows if the situation is improving (green ↓) or worsening (red ↑)." />
-        <KPI label="Products" value={allProds.length} color="#a855f7"
+        <KPI label="Products In View" value={allProds.length} color="#a855f7"
           sub={allProds.slice(0,2).join(', ')+(allProds.length>2?'…':'')}
           tip="Number of distinct products in the selected filter. Use the Product filter in the sidebar to narrow down to a specific ASIN." />
       </div>
@@ -621,6 +897,27 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
           </div>
         </div>
       )}
+
+      <ExecutiveNarrative kpi={kpi} productSummary={productSummary} momentum={momentum} />
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+        <Card
+          title="Emerging Issues"
+          tip="These are the issues starting to break out now. New means they were absent in the first half of the selected period and have now appeared. Rising means they were already present and are now accelerating."
+          sub="Use this as the early-warning layer before issues become the biggest portfolio drag"
+        >
+          <EmergingIssues momentum={momentum} onSelect={cat => setEmergingCat(emergingCat === cat ? null : cat)} />
+          <ReviewsDrawer category={emergingCat} label={emergingCat} filters={filters} onClose={() => setEmergingCat(null)} />
+        </Card>
+
+        <Card
+          title="Consistency Watch"
+          tip="This highlights products where 1-star and 5-star review shares are both meaningfully present. That usually signals inconsistent customer experience, which average rating alone can hide."
+          sub="High 1★ and high 5★ together = inconsistent experience worth investigating"
+        >
+          <ConsistencyWatch ratingDist={ratingDist} productSummary={productSummary} />
+        </Card>
+      </div>
 
       {/* ── SECTION 2: BRAND HEALTH SCORE ── */}
       <Card
@@ -665,73 +962,81 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
         )}
       </Card>
 
-      {/* ── SECTION 4: RATING + 1★ vs 5★ ── */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+      {/* ── SECTION 4: PRODUCT SCORECARD ── */}
+      <ProductPerformanceScorecard Card={Card} productSummary={productSummary} />
+      {false && <Card
+        title="Product Performance Scorecard"
+        tip="This is the core filtered comparison view for leadership and analysts. Review Rating is the average of scraped review stars within the selected period only, so it reflects the exact filter window being analyzed here. Health Score = 100 minus negative rate %. Sorted best to worst. The Verdict column gives an instant action signal: ✅ Good means no action needed, ⚠️ Watch means monitor closely, 🔴 Act Now means escalate immediately."
+        sub="Review Rating = avg stars from reviews in the selected period"
+      >
+        {!productSummary.length ? <Empty /> : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead>
+                <tr>
+                  {['Product','Reviews','Review Rating','Neg %','Pos %','Health','Verdict'].map(h => (
+                    <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {productSummary.sort((a,b)=>a.neg_pct-b.neg_pct).map((row,i) => {
+                  const health = Math.max(0,100-row.neg_pct)
+                  const hColor = health>=75?'#22c55e':health>=60?'#eab308':'#ef4444'
+                  const verdict = health>=75?'✅ Good':health>=60?'⚠️ Watch':'🔴 Act Now'
+                  return (
+                    <tr key={row.product} style={{ background:i%2===0?'var(--surface)':'var(--surface2)' }}>
+                      <td style={{ padding:'10px 12px', fontSize:13, fontWeight:600 }}>{row.product}</td>
+                      <td style={{ padding:'10px 12px', fontSize:13 }}>{row.total?.toLocaleString()}</td>
+                      <td style={{ padding:'10px 12px' }}><Stars rating={row.avg_rating} /></td>
+                      <td style={{ padding:'10px 12px' }}>
+                        <span style={{ color:row.neg_pct>50?'#ef4444':row.neg_pct>30?'#eab308':'#22c55e', fontWeight:700 }}>{row.neg_pct}%</span>
+                        <div style={{ height:3, width:60, background:'var(--border)', borderRadius:2, marginTop:3 }}>
+                          <div style={{ height:'100%', width:`${row.neg_pct}%`, background:row.neg_pct>50?'#ef4444':row.neg_pct>30?'#eab308':'#22c55e', borderRadius:2 }} />
+                        </div>
+                      </td>
+                      <td style={{ padding:'10px 12px', color:'#22c55e', fontWeight:700 }}>{Math.round((row.positive||0)/Math.max(row.total,1)*100)}%</td>
+                      <td style={{ padding:'10px 12px' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                          <div style={{ fontFamily:'Bebas Neue', fontSize:22, color:hColor }}>{Math.round(health)}</div>
+                          <div style={{ width:40, height:4, background:'var(--border)', borderRadius:2 }}>
+                            <div style={{ height:'100%', width:`${health}%`, background:hColor, borderRadius:2 }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ padding:'10px 12px', fontSize:12, fontWeight:700 }}>{verdict}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>}
 
-        <Card
-          title="Daily Avg Rating"
-          tip="Daily average star rating (1–5) with a 7-day rolling average line. The rolling line smooths out one-off events. A sustained dip below 3.0 (yellow reference line) is a red flag. The delta at the top shows change from the first day to the last day of the period."
-          sub="With 7-day rolling average"
-        >
-          {!dailyRating.length ? <Empty /> : (
-            <>
-              {(() => {
-                const curr = dailyRating[dailyRating.length-1]?.rolling_rating||0
-                const first = dailyRating[0]?.rolling_rating||0
-                const delta = +(curr-first).toFixed(2)
-                const color = delta<0?'#ef4444':delta>0?'#22c55e':'var(--text-muted)'
-                return <div style={{ fontSize:12, fontWeight:700, color }}>{delta>0?`↑ +${delta}`:delta<0?`↓ ${delta}`:'→ stable'} over period</div>
-              })()}
-              <ResponsiveContainer width="100%" height={160}>
-                <ComposedChart data={dailyRating} margin={{ top:4, right:4, bottom:0, left:-20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
-                  <YAxis domain={[1,5]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} />
-                  <Tooltip content={<CT fmt={v=>v?.toFixed?.(2)+' ★'} />} />
-                  <ReferenceLine y={3} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} />
-                  <Bar dataKey="avg_rating" fill="#ff4e1a" opacity={0.15} name="Daily Avg" radius={[2,2,0,0]} barSize={4} />
-                  <Line type="monotone" dataKey="rolling_rating" stroke="#ff4e1a" strokeWidth={2.5} dot={false} name="7d Rolling" />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </>
-          )}
-        </Card>
-
-        <Card
-          title="1★ vs 5★ Daily Volume"
-          tip="Daily count of 1-star (worst) and 5-star (best) reviews. When 1★ volume rises above 5★, it signals a product event or quality issue. A widening gap between the two lines is an early warning — often appears here before it shows in the average rating."
-          sub="Divergence signals a product event"
-        >
-          {!starRatioDays.length ? <Empty /> : (
-            <ResponsiveContainer width="100%" height={190}>
-              <AreaChart data={starRatioDays} margin={{ top:4, right:4, bottom:0, left:-20 }}>
-                <defs>
-                  <linearGradient id="sg1" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="sg5" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
-                <YAxis tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} />
-                <Tooltip content={<CT />} />
-                <Area type="monotone" dataKey="1★" stroke="#ef4444" strokeWidth={2} fill="url(#sg1)" dot={false} />
-                <Area type="monotone" dataKey="5★" stroke="#22c55e" strokeWidth={2} fill="url(#sg5)" dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
-      </div>
+      <Card
+        title="Product-Issue Heatmap"
+        tip="This matrix shows where negative feedback is concentrated. Darker cells mean more negative reviews for that product-issue combination. Use it to separate portfolio-wide issues from product-specific ones."
+        sub="Click a hot cell to open the underlying review evidence for that product and issue"
+      >
+        <IssueHeatmap
+          heatmap={issueHeatmap}
+          onSelect={(category, productName) => setHeatmapDrill({ category, productName })}
+        />
+        <ReviewsDrawer
+          category={heatmapDrill?.category}
+          productName={heatmapDrill?.productName}
+          label={heatmapDrill ? `${heatmapDrill.category} — ${heatmapDrill.productName}` : null}
+          filters={filters}
+          onClose={() => setHeatmapDrill(null)}
+        />
+      </Card>
 
       {/* ── SECTION 5: PRODUCT HEAD-TO-HEAD ── */}
       <Card
-        title="Product Head-to-Head"
+        title="Problem Rate by Product Over Time"
         tip="Daily negative rate % for each product plotted as separate lines. Use this to compare which products are improving or deteriorating relative to each other. The red dashed line at 50% is a critical threshold — any product above it needs urgent attention. Click legend buttons to isolate a product."
-        sub="Daily negative rate % per product · click legend to isolate"
+        sub="Tracks which product is driving portfolio pressure"
         controls={
           <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
             {allProds.map((p,i) => (
@@ -770,9 +1075,9 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
       <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:16 }}>
 
         <Card
-          title="Issue Category Daily Trend"
+          title="Issue Pressure Over Time"
           tip="Daily count of negative reviews per issue category. Use Daily view to spot when a specific issue spiked. Use Totals view to rank categories by total volume across the period. Click category pills above the chart to isolate a specific issue."
-          sub="Negative reviews by category · click pills to isolate"
+          sub="Shows which problems are persistent versus episodic"
           controls={<Toggle value={catMode} onChange={setCatMode} options={[{v:'trend',l:'Daily'},{v:'total',l:'Totals'}]} />}
         >
           <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 8px', marginBottom:4 }}>
@@ -833,65 +1138,14 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
         </Card>
 
         <Card
-          title="Issue Watchlist"
+          title="Issues That Need Attention"
           tip="Top negative issues ranked by total volume. The Signal column tells you what to do: RISING means escalate now, NEW means a fresh problem just appeared, FALLING means your fix is working, STABLE means it's chronic. Early → Recent shows count in the first vs second half of the period so you can see direction at a glance."
-          sub="Ranked by volume · signal shows direction · top 3 highlighted"
+          sub="Ranked by impact · signal shows whether pressure is rising or easing"
         >
           <IssueWatchlist momentum={momentum} onRowClick={cat => setDrawerCat(drawerCat === cat ? null : cat)} />
           <ReviewsDrawer category={drawerCat} label={drawerCat} filters={filters} onClose={() => setDrawerCat(null)} />
         </Card>
       </div>
-
-      {/* ── SECTION 7: PRODUCT SCORECARD ── */}
-      <Card
-        title="Product Performance Scorecard"
-        tip="Side-by-side health check for all products in the current filter. Review Rating is the average of scraped review star ratings within the selected date range only. It is not Amazon's displayed product-page rating. Health Score = 100 minus negative rate %. Sorted best to worst. The Verdict column gives an instant action signal: ✅ Good means no action needed, ⚠️ Watch means monitor closely, 🔴 Act Now means escalate immediately."
-        sub="Review Rating = avg stars from reviews in selected period · separate from Amazon overall rating trend below"
-      >
-        {!productSummary.length ? <Empty /> : (
-          <div style={{ overflowX:'auto' }}>
-            <table style={{ width:'100%', borderCollapse:'collapse' }}>
-              <thead>
-                <tr>
-                  {['Product','Reviews','Review Rating','Neg %','Pos %','Health','Verdict'].map(h => (
-                    <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {productSummary.sort((a,b)=>a.neg_pct-b.neg_pct).map((row,i) => {
-                  const health = Math.max(0,100-row.neg_pct)
-                  const hColor = health>=75?'#22c55e':health>=60?'#eab308':'#ef4444'
-                  const verdict = health>=75?'✅ Good':health>=60?'⚠️ Watch':'🔴 Act Now'
-                  return (
-                    <tr key={row.product} style={{ background:i%2===0?'var(--surface)':'var(--surface2)' }}>
-                      <td style={{ padding:'10px 12px', fontSize:13, fontWeight:600 }}>{row.product}</td>
-                      <td style={{ padding:'10px 12px', fontSize:13 }}>{row.total?.toLocaleString()}</td>
-                      <td style={{ padding:'10px 12px' }}><Stars rating={row.avg_rating} /></td>
-                      <td style={{ padding:'10px 12px' }}>
-                        <span style={{ color:row.neg_pct>50?'#ef4444':row.neg_pct>30?'#eab308':'#22c55e', fontWeight:700 }}>{row.neg_pct}%</span>
-                        <div style={{ height:3, width:60, background:'var(--border)', borderRadius:2, marginTop:3 }}>
-                          <div style={{ height:'100%', width:`${row.neg_pct}%`, background:row.neg_pct>50?'#ef4444':row.neg_pct>30?'#eab308':'#22c55e', borderRadius:2 }} />
-                        </div>
-                      </td>
-                      <td style={{ padding:'10px 12px', color:'#22c55e', fontWeight:700 }}>{Math.round((row.positive||0)/Math.max(row.total,1)*100)}%</td>
-                      <td style={{ padding:'10px 12px' }}>
-                        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                          <div style={{ fontFamily:'Bebas Neue', fontSize:22, color:hColor }}>{Math.round(health)}</div>
-                          <div style={{ width:40, height:4, background:'var(--border)', borderRadius:2 }}>
-                            <div style={{ height:'100%', width:`${health}%`, background:hColor, borderRadius:2 }} />
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ padding:'10px 12px', fontSize:12, fontWeight:700 }}>{verdict}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
 
       {/* ── SECTION 8: RATING DISTRIBUTION ── */}
       <Card
@@ -929,13 +1183,13 @@ export default function TrendsPage({ products: allProducts, reviews, filters, tr
       </Card>
 
       {/* ── SECTION 9: RATING TRENDS ── */}
-      <Card
+      {false && <Card
         title="Rating Trends"
         tip="Three views of rating health over time. Top: Amazon's overall displayed product-page rating per product, sourced from rating snapshots and forward-filled between scrape dates. This is different from the Review Rating shown in the scorecard above, which uses only scraped reviews inside the selected period. Middle: daily average of scraped reviews. Bottom: total number of ratings on Amazon."
         sub="Top chart = Amazon product-page rating · scorecard above = review-period rating"
       >
         <RatingTrendChart filters={filters} allProducts={allProducts} tree={tree} />
-      </Card>
+      </Card>}
 
       </>
       )}

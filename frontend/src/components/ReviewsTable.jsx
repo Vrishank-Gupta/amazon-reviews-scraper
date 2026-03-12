@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ExternalLink, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ExternalLink, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Search } from 'lucide-react'
 
 const PAGE_SIZE = 15
 
@@ -47,9 +47,10 @@ function SentimentBadge({ sentiment }) {
 }
 
 function Stars({ rating }) {
+  const n = Math.round(parseFloat(rating) || 0)
   return (
-    <span style={{ color: rating >= 4 ? '#22c55e' : rating === 3 ? '#eab308' : '#ef4444', fontSize: 13 }}>
-      {'★'.repeat(rating)}{'☆'.repeat(5 - rating)}
+    <span style={{ color: n >= 4 ? '#22c55e' : n === 3 ? '#eab308' : '#ef4444', fontSize: 13 }}>
+      {'★'.repeat(n)}{'☆'.repeat(Math.max(0, 5 - n))}
     </span>
   )
 }
@@ -59,8 +60,29 @@ export default function ReviewsTable({ data }) {
   const [expanded, setExpanded] = useState(null)
   const [sortKey, setSortKey] = useState('scrape_date')
   const [sortDir, setSortDir] = useState('desc')
+  const [query, setQuery] = useState('')
 
-  const sorted = [...data].sort((a, b) => {
+  const normalizedQuery = query.trim().toLowerCase()
+
+  const filtered = useMemo(() => {
+    if (!normalizedQuery) return data
+    return data.filter(row => {
+      const haystack = [
+        row.product_name,
+        row.review,
+        row.title,
+        row.sentiment,
+        ...(row.primary_categories || []),
+        ...(row.sub_tags || []),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(normalizedQuery)
+    })
+  }, [data, normalizedQuery])
+
+  const sorted = [...filtered].sort((a, b) => {
     let av = a[sortKey], bv = b[sortKey]
     if (typeof av === 'string') av = av.toLowerCase()
     if (typeof bv === 'string') bv = bv.toLowerCase()
@@ -72,9 +94,35 @@ export default function ReviewsTable({ data }) {
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
   const pageData = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 
+  useEffect(() => {
+    if (page > 0 && page >= totalPages) setPage(Math.max(0, totalPages - 1))
+  }, [page, totalPages])
+
+  const evidenceStats = useMemo(() => {
+    const total = filtered.length
+    const negative = filtered.filter(r => r.sentiment === 'Negative').length
+    const positive = filtered.filter(r => r.sentiment === 'Positive').length
+    const neutral = filtered.filter(r => r.sentiment === 'Neutral').length
+    const avgStars = filtered.length
+      ? (filtered.reduce((sum, row) => sum + (parseFloat(row.rating) || 0), 0) / filtered.length).toFixed(1)
+      : '0.0'
+    return { total, negative, positive, neutral, avgStars }
+  }, [filtered])
+
+  const topCategory = useMemo(() => {
+    const counts = {}
+    filtered.forEach(row => {
+      ;(row.primary_categories || []).forEach(cat => {
+        counts[cat] = (counts[cat] || 0) + 1
+      })
+    })
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+  }, [filtered])
+
   const toggleSort = (key) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('desc') }
+    setPage(0)
   }
 
   const SortIcon = ({ k }) => {
@@ -99,6 +147,42 @@ export default function ReviewsTable({ data }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1.1fr 1fr', gap:12 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10 }}>
+          {[
+            { label:'Evidence Set', value:evidenceStats.total, color:'var(--accent)' },
+            { label:'Negative', value:evidenceStats.negative, color:'#ef4444' },
+            { label:'Positive', value:evidenceStats.positive, color:'#22c55e' },
+            { label:'Neutral', value:evidenceStats.neutral, color:'#eab308' },
+            { label:'Avg Stars', value:evidenceStats.avgStars, color:'#60a5fa' },
+          ].map(item => (
+            <div key={item.label} style={{ background:'rgba(255,255,255,0.03)', border:`1px solid ${item.color}22`, borderRadius:10, padding:'10px 12px', display:'flex', flexDirection:'column', gap:4 }}>
+              <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)' }}>{item.label}</div>
+              <div style={{ fontFamily:'Bebas Neue', fontSize:24, lineHeight:1, color:item.color }}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:10, justifyContent:'space-between', background:'rgba(255,255,255,0.03)', border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px' }}>
+          <div>
+            <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:4 }}>Evidence Narrative</div>
+            <div style={{ fontSize:12, color:'var(--text)', lineHeight:1.65 }}>
+              {evidenceStats.total
+                ? <>This filtered set contains <strong>{evidenceStats.total}</strong> reviews with <strong style={{ color:'#ef4444' }}>{evidenceStats.negative}</strong> negative and <strong style={{ color:'#22c55e' }}>{evidenceStats.positive}</strong> positive signals. {topCategory ? <>The most frequent tagged issue/theme is <strong>{topCategory[0]}</strong>.</> : null}</>
+                : 'No reviews match the current filters yet.'}
+            </div>
+          </div>
+          <div style={{ position:'relative' }}>
+            <Search size={14} style={{ position:'absolute', left:10, top:10, color:'var(--text-muted)' }} />
+            <input
+              value={query}
+              onChange={e => { setQuery(e.target.value); setPage(0) }}
+              placeholder="Search review text, titles, categories, or tags"
+              style={{ width:'100%', background:'rgba(255,255,255,0.02)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text)', padding:'8px 10px 8px 32px', fontSize:12, outline:'none', fontFamily:'DM Sans' }}
+            />
+          </div>
+        </div>
+      </div>
+
       <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--border)' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -208,7 +292,7 @@ export default function ReviewsTable({ data }) {
             {pageData.length === 0 && (
               <tr>
                 <td colSpan={7} style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-                  No reviews match your filters.
+                  No reviews match your filters or search.
                 </td>
               </tr>
             )}
@@ -225,7 +309,7 @@ export default function ReviewsTable({ data }) {
           padding: '8px 4px',
         }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
+            Showing {sorted.length ? page * PAGE_SIZE + 1 : 0}–{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button

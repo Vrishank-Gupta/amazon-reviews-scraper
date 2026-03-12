@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { fetchPipelineStatus, runPipeline, fetchAsins } from '../api'
-import { CheckCircle2, AlertCircle, Clock, Database, RefreshCw, Play, Loader2, ChevronDown } from 'lucide-react'
+import { fetchPipelineStatus, runPipeline, fetchAsins, saveAsin, fetchCategories, saveCategory, deleteCategory } from '../api'
+import { CheckCircle2, AlertCircle, Clock, Database, RefreshCw, Play, Loader2, ChevronDown, Plus, Trash2 } from 'lucide-react'
 
 function StatusPill({ daysAgo }) {
   if (daysAgo === null || daysAgo === undefined)
@@ -55,6 +55,28 @@ export default function PipelineWidget() {
   const [running, setRunning]         = useState(false)
   const [error, setError]             = useState(null)
   const [success, setSuccess]         = useState(false)
+  const [asinForm, setAsinForm]       = useState({ asin: '', product_name: '', category: '' })
+  const [savingAsin, setSavingAsin]   = useState(false)
+  const [asinMessage, setAsinMessage] = useState(null)
+  const [categories, setCategories]   = useState([])
+  const [newCategory, setNewCategory] = useState('')
+  const [savingCategory, setSavingCategory] = useState(false)
+  const [categoryMessage, setCategoryMessage] = useState(null)
+  const [deletingCategory, setDeletingCategory] = useState(null)
+
+  const loadAsins = async () => {
+    try {
+      const data = await fetchAsins()
+      setAsins(Array.isArray(data) ? data : [])
+    } catch (_) {}
+  }
+
+  const loadCategories = async () => {
+    try {
+      const data = await fetchCategories()
+      setCategories(Array.isArray(data) ? data : [])
+    } catch (_) {}
+  }
 
   const load = async (showSpinner = false) => {
     if (showSpinner) setRefreshing(true)
@@ -67,9 +89,8 @@ export default function PipelineWidget() {
 
   useEffect(() => {
     load()
-    fetchAsins().then(data => {
-      setAsins(Array.isArray(data) ? data : [])
-    }).catch(() => {})
+    loadAsins()
+    loadCategories()
     const id = setInterval(() => load(), 30 * 1000)
     return () => clearInterval(id)
   }, [])
@@ -81,7 +102,8 @@ export default function PipelineWidget() {
     tree[cat].push(row)
     return tree
   }, {})
-  const categories = Object.keys(categoryTree)
+  const groupedCategories = Object.keys(categoryTree)
+  const managedCategories = categories
 
   const toggleAsin = (asin) => {
     setSelectedAsins(prev =>
@@ -132,6 +154,86 @@ export default function PipelineWidget() {
     } catch (e) {
       setError(e.message)
       setRunning(false)
+    }
+  }
+
+  const handleSaveAsin = async () => {
+    setError(null)
+    setAsinMessage(null)
+    const payload = {
+      asin: asinForm.asin.trim().toUpperCase(),
+      product_name: asinForm.product_name.trim(),
+      category: asinForm.category.trim(),
+    }
+    if (!payload.asin) {
+      setError('Please enter an ASIN before saving.')
+      return
+    }
+    if (!payload.product_name) {
+      setError('Please enter a product name before saving.')
+      return
+    }
+    if (!payload.category) {
+      setError('Please select a category before saving.')
+      return
+    }
+
+    setSavingAsin(true)
+    try {
+      const saved = await saveAsin(payload)
+      await loadAsins()
+      await loadCategories()
+      setSelectedAsins(prev => prev.includes(saved.asin) ? prev : [...prev, saved.asin])
+      setAsinForm({ asin: '', product_name: '', category: payload.category })
+      setAsinMessage(saved.message)
+      setTimeout(() => setAsinMessage(null), 4000)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSavingAsin(false)
+    }
+  }
+
+  const handleSaveCategory = async () => {
+    setError(null)
+    setCategoryMessage(null)
+    const category = newCategory.trim()
+    if (!category) {
+      setError('Please enter a category name before saving.')
+      return
+    }
+
+    setSavingCategory(true)
+    try {
+      const saved = await saveCategory(category)
+      await loadCategories()
+      setAsinForm(f => ({ ...f, category: saved.category }))
+      setNewCategory('')
+      setCategoryMessage(saved.message)
+      setTimeout(() => setCategoryMessage(null), 4000)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSavingCategory(false)
+    }
+  }
+
+  const handleDeleteCategory = async (categoryName) => {
+    setError(null)
+    setCategoryMessage(null)
+    setDeletingCategory(categoryName)
+    try {
+      const removed = await deleteCategory(categoryName)
+      await loadCategories()
+      if (asinForm.category === categoryName) {
+        setAsinForm(f => ({ ...f, category: '' }))
+      }
+      setCategoryMessage(removed.message)
+      setTimeout(() => setCategoryMessage(null), 4000)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setDeletingCategory(null)
     }
   }
 
@@ -262,7 +364,7 @@ export default function PipelineWidget() {
                 </button>
 
                 {/* Category groups */}
-                {categories.map(cat => (
+                {groupedCategories.map(cat => (
                   <div key={cat}>
                     {/* Category header row */}
                     <button onClick={() => toggleCategory(cat)} style={{
@@ -309,6 +411,139 @@ export default function PipelineWidget() {
             )}
           </div>
         )}
+
+        {/* Quick add ASIN */}
+        <div style={{ display:'flex', flexDirection:'column', gap:6, padding:'10px 0 2px', borderTop:'1px solid var(--border)' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block' }}>Add ASIN to list</span>
+          <div style={{ display:'flex', gap:6 }}>
+            <input
+              value={newCategory}
+              onChange={e => setNewCategory(e.target.value)}
+              placeholder="Add new category"
+              style={{
+                flex:1, padding: '7px 10px',
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: 6, color: 'var(--text)', fontSize: 12, outline: 'none',
+              }}
+            />
+            <button
+              onClick={handleSaveCategory}
+              disabled={savingCategory}
+              style={{
+                display:'flex', alignItems:'center', justifyContent:'center', gap:6,
+                padding:'0 10px', borderRadius:8, cursor:savingCategory ? 'not-allowed' : 'pointer',
+                border:'1px solid rgba(96,165,250,0.28)', background:'rgba(96,165,250,0.08)',
+                color:savingCategory ? 'var(--text-muted)' : '#60a5fa', fontFamily:'DM Sans', fontSize:11, fontWeight:700,
+              }}
+            >
+              {savingCategory ? <Loader2 size={12} className="spin" /> : <Plus size={12} />}
+              CATEGORY
+            </button>
+          </div>
+          {categoryMessage && <span style={{ fontSize: 11, color: '#60a5fa', lineHeight: 1.4 }}>{categoryMessage}</span>}
+          {managedCategories.length > 0 && (
+            <div style={{
+              display: 'flex', flexDirection: 'column', gap: 6,
+              padding: '8px 10px', borderRadius: 8,
+              background: 'rgba(148,163,184,0.06)', border: '1px solid var(--border)',
+            }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                Unused categories can be deleted here. If one was mis-added and is already assigned to ASINs,
+                re-save those ASINs under the correct category first, then remove it.
+              </span>
+              {managedCategories.map(cat => {
+                const deleting = deletingCategory === cat.name
+                return (
+                  <div key={cat.name} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                    padding: '6px 0', borderTop: '1px solid rgba(148,163,184,0.12)',
+                  }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {cat.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {cat.usage_count === 0 ? 'Unused' : `Used by ${cat.usage_count} ASIN${cat.usage_count === 1 ? '' : 's'}`}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteCategory(cat.name)}
+                      disabled={!cat.can_delete || deleting}
+                      title={cat.can_delete ? 'Delete unused category' : 'Reassign ASINs before deleting this category'}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                        padding: '6px 9px', borderRadius: 8,
+                        border: `1px solid ${cat.can_delete ? 'rgba(239,68,68,0.28)' : 'rgba(148,163,184,0.18)'}`,
+                        background: cat.can_delete ? 'rgba(239,68,68,0.08)' : 'rgba(148,163,184,0.08)',
+                        color: cat.can_delete ? '#f87171' : 'var(--text-muted)',
+                        cursor: (!cat.can_delete || deleting) ? 'not-allowed' : 'pointer',
+                        opacity: deleting ? 0.8 : 1,
+                      }}
+                    >
+                      {deleting ? <Loader2 size={12} className="spin" /> : <Trash2 size={12} />}
+                      <span style={{ fontSize: 11, fontWeight: 700 }}>{cat.can_delete ? 'Delete' : 'In use'}</span>
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <input
+            value={asinForm.asin}
+            onChange={e => setAsinForm(f => ({ ...f, asin: e.target.value.toUpperCase() }))}
+            placeholder="ASIN"
+            maxLength={20}
+            style={{
+              width: '100%', padding: '7px 10px',
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 6, color: 'var(--text)', fontSize: 12, outline: 'none',
+            }}
+          />
+          <input
+            value={asinForm.product_name}
+            onChange={e => setAsinForm(f => ({ ...f, product_name: e.target.value }))}
+            placeholder="Product name"
+            style={{
+              width: '100%', padding: '7px 10px',
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 6, color: 'var(--text)', fontSize: 12, outline: 'none',
+            }}
+          />
+          <select
+            value={asinForm.category}
+            onChange={e => setAsinForm(f => ({ ...f, category: e.target.value }))}
+            style={{
+              width: '100%', padding: '7px 10px',
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 6, color: 'var(--text)', fontSize: 12, outline: 'none',
+              fontFamily: 'DM Sans',
+            }}
+          >
+            <option value="">Select category</option>
+            {managedCategories.map(cat => (
+              <option key={cat.name} value={cat.name}>{cat.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleSaveAsin}
+            disabled={savingAsin || managedCategories.length === 0}
+            style={{
+              display:'flex', alignItems:'center', justifyContent:'center', gap:7,
+              padding:'8px 0', borderRadius:8, cursor:(savingAsin || managedCategories.length === 0) ? 'not-allowed' : 'pointer',
+              border:'1px solid rgba(255,78,26,0.28)',
+              background:'rgba(255,78,26,0.08)', color:(savingAsin || managedCategories.length === 0) ? 'var(--text-muted)' : 'var(--accent)',
+              fontFamily:'DM Sans', fontSize:12, fontWeight:700,
+            }}
+          >
+            {savingAsin ? <><Loader2 size={13} className="spin" /> SAVING…</> : <><Plus size={13} /> ADD TO CSV</>}
+          </button>
+          {managedCategories.length === 0 && (
+            <span style={{ fontSize: 11, color: '#eab308', lineHeight: 1.4 }}>
+              Add a category first, then assign the new ASIN to it.
+            </span>
+          )}
+          {asinMessage && <span style={{ fontSize: 11, color: '#22c55e', lineHeight: 1.4 }}>{asinMessage}</span>}
+        </div>
 
         {/* Run button */}
         <button

@@ -50,6 +50,30 @@ function HealthBadge({ negPct }) {
   )
 }
 
+function OpportunityStrip({ rows }) {
+  const rankedRisk = [...rows].sort((a, b) => b.neg_pct - a.neg_pct)[0]
+  const rankedScale = [...rows].sort((a, b) => b.review_count - a.review_count)[0]
+  const benchmark = [...rows].sort((a, b) => a.neg_pct - b.neg_pct)[0]
+  const volatile = [...rows].sort((a, b) => Math.abs(b.delta_neg_pct || 0) - Math.abs(a.delta_neg_pct || 0))[0]
+
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
+      {[
+        { label:'Greatest Risk', value:rankedRisk?.product_name, meta:rankedRisk ? `${rankedRisk.neg_pct}% problem rate` : 'No data', color:'#ef4444' },
+        { label:'Largest Volume', value:rankedScale?.product_name, meta:rankedScale ? `${rankedScale.review_count} reviews in period` : 'No data', color:'#60a5fa' },
+        { label:'Best Benchmark', value:benchmark?.product_name, meta:benchmark ? `${benchmark.neg_pct}% problem rate` : 'No data', color:'#22c55e' },
+        { label:'Biggest Shift', value:volatile?.product_name, meta:volatile ? `${volatile.delta_neg_pct > 0 ? '+' : ''}${volatile.delta_neg_pct}% change in problem rate` : 'No data', color:'#f97316' },
+      ].map(item => (
+        <div key={item.label} style={{ background:'rgba(255,255,255,0.03)', border:`1px solid ${item.color}22`, borderRadius:12, padding:'12px 14px', display:'flex', flexDirection:'column', gap:5 }}>
+          <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>{item.label}</div>
+          <div style={{ fontSize:14, fontWeight:700, color:'var(--text)' }}>{item.value || '—'}</div>
+          <div style={{ fontSize:11, color:'var(--text-muted)' }}>{item.meta}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── AI Brief ──────────────────────────────────────────────────────────────────
 function AiBrief({ row }) {
   const hasData = row.ai_issues?.length || row.ai_positives?.length
@@ -377,20 +401,28 @@ export default function SummaryPage({ filters, allProducts }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
 
+      <Card
+        title="Product Lens"
+        sub="Use this section to move from portfolio pressure to product-level diagnosis"
+        tip="This layer helps both leadership and analysts see which products are driving the story. Start with the top strip, then compare products in the table, then expand a row for issue and review drill-down."
+      >
+        <OpportunityStrip rows={rows} />
+      </Card>
+
       {/* Portfolio strip */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
         {[
-          { label:'Portfolio Neg Rate', value:`${avgNeg}%`, color:avgNeg>50?'#ef4444':avgNeg>30?'#f97316':'#22c55e',
-            sub:`Avg across ${rows.length} products`,
+          { label:'Portfolio Problem Rate', value:`${avgNeg}%`, color:avgNeg>50?'#ef4444':avgNeg>30?'#f97316':'#22c55e',
+            sub:`Average across ${rows.length} products`,
             tip:'Average negative rate across all products in the filter. A portfolio-level health signal.' },
-          { label:'Total Reviews', value:totalReviews.toLocaleString(), color:'#60a5fa',
+          { label:'Review Volume', value:totalReviews.toLocaleString(), color:'#60a5fa',
             sub:'In selected period',
             tip:'Total reviews for all selected products in the date range.' },
           { label:'Needs Attention', value:worst?.product_name?.split(' ').slice(0,2).join(' '), color:'#ef4444',
-            sub:`${worst?.neg_pct}% neg rate · click to drill down`,
+            sub:`${worst?.neg_pct}% problem rate · click to drill down`,
             tip:'Worst performing product by negative rate. Click its row in the table to investigate.' },
           { label:'Best Performer', value:best?.product_name?.split(' ').slice(0,2).join(' '), color:'#22c55e',
-            sub:`${best?.neg_pct}% neg rate`,
+            sub:`${best?.neg_pct}% problem rate`,
             tip:'Best performing product by negative rate. Study what it does right.' },
         ].map(({ label, value, color, sub, tip }) => (
           <div key={label} style={{ background:'var(--surface)', border:`1px solid ${color}25`, borderRadius:10, padding:'12px 14px', display:'flex', flexDirection:'column', gap:4, borderLeft:`3px solid ${color}` }}>
@@ -409,11 +441,11 @@ export default function SummaryPage({ filters, allProducts }) {
         <div style={{ padding:'14px 16px', borderBottom:'1px solid var(--border)', background:'var(--surface2)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <div>
             <div style={{ display:'flex', alignItems:'center', gap:7 }}>
-              <span style={{ fontFamily:'Bebas Neue', fontSize:17, letterSpacing:'0.06em', color:'var(--text-muted)' }}>Product Breakdown</span>
+              <span style={{ fontFamily:'Bebas Neue', fontSize:17, letterSpacing:'0.06em', color:'var(--text-muted)' }}>Compare Products</span>
               <InfoTip text="Per-product metrics vs prior equivalent period. Click a row to expand: AI brief + category pies + keyword cloud + actual reviews. Sort by any column." />
             </div>
             <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>
-              Click any row to expand → AI brief + issue categories + keyword drill-down + reviews
+              Start with the comparison row, then expand any product for AI brief, issue mix, and review proof
             </div>
           </div>
           <div style={{ fontSize:11, color:'var(--text-muted)', display:'flex', gap:10 }}>

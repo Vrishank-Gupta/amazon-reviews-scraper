@@ -66,7 +66,7 @@ function ReviewCard({ r }) {
   )
 }
 
-export default function ReviewsDrawer({ category, label, filters, onClose }) {
+export default function ReviewsDrawer({ category, label, filters, onClose, productName = null }) {
   const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(false)
 
@@ -74,7 +74,8 @@ export default function ReviewsDrawer({ category, label, filters, onClose }) {
     if (!category) { setReviews([]); return }
     setLoading(true)
     const p = new URLSearchParams({ keyword: category })
-    if (filters?.product?.length) p.set('product', filters.product.join('|||'))
+    if (productName) p.set('product', productName)
+    else if (filters?.product?.length) p.set('product', filters.product.join('|||'))
     if (filters?.date_from) p.set('date_from', filters.date_from)
     if (filters?.date_to)   p.set('date_to',   filters.date_to)
     fetch(`/api/reviews/by-keyword?${p}`)
@@ -82,7 +83,7 @@ export default function ReviewsDrawer({ category, label, filters, onClose }) {
       .then(setReviews)
       .catch(() => setReviews([]))
       .finally(() => setLoading(false))
-  }, [category, filters?.product?.join(','), filters?.date_from, filters?.date_to])
+  }, [category, productName, filters?.product?.join(','), filters?.date_from, filters?.date_to])
 
   if (!category) return null
 
@@ -105,6 +106,11 @@ export default function ReviewsDrawer({ category, label, filters, onClose }) {
           <span style={{ fontFamily:'Bebas Neue', fontSize:14, letterSpacing:'0.06em', color:'var(--text-muted)' }}>
             Reviews — <span style={{ color:'var(--accent)' }}>{label || category}</span>
           </span>
+          {productName && (
+            <span style={{ fontSize:10, color:'var(--text-muted)', background:'var(--surface)', padding:'1px 7px', borderRadius:4, border:'1px solid var(--border)' }}>
+              {productName}
+            </span>
+          )}
           {!loading && (
             <span style={{
               background:'rgba(255,78,26,0.15)', color:'var(--accent)',

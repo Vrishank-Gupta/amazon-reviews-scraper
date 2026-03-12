@@ -114,6 +114,42 @@ export async function fetchAsins() {
   return res.json()
 }
 
+export async function fetchCategories() {
+  const res = await fetch(`${BASE}/categories`)
+  return res.json()
+}
+
+export async function saveCategory(category) {
+  const res = await fetch(`${BASE}/categories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || 'Failed to save category')
+  return data
+}
+
+export async function deleteCategory(categoryName) {
+  const res = await fetch(`${BASE}/categories/${encodeURIComponent(categoryName)}`, {
+    method: 'DELETE',
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || 'Failed to delete category')
+  return data
+}
+
+export async function saveAsin({ asin, product_name = '', category = '' }) {
+  const res = await fetch(`${BASE}/asins`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ asin, product_name, category }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || 'Failed to save ASIN')
+  return data
+}
+
 export async function generateSummaries() {
   const res = await fetch(`${BASE}/summary/generate`, { method: 'POST' })
   return res.json()

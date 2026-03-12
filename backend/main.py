@@ -54,6 +54,46 @@ def _load_asin_map():
 ASIN_MAP, CAT_MAP, ALL_PRODS = _load_asin_map()
 
 
+def _refresh_asin_globals():
+    global ASIN_MAP, CAT_MAP, ALL_PRODS
+    ASIN_MAP, CAT_MAP, ALL_PRODS = _load_asin_map()
+
+
+def _categories_path():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "categories.json"))
+
+
+def _load_categories():
+    cats = set(c for c in CAT_MAP.keys() if c)
+    path = _categories_path()
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                cats.update(str(x).strip() for x in data if str(x).strip())
+        except Exception:
+            pass
+    return sorted(cats)
+
+
+def _category_usage():
+    usage = defaultdict(int)
+    for meta in ASIN_MAP.values():
+        cat = (meta.get("category") or "").strip()
+        if cat:
+            usage[cat] += 1
+    return usage
+
+
+def _save_categories(categories):
+    path = _categories_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    cleaned = sorted({str(c).strip() for c in categories if str(c).strip()})
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cleaned, f, ensure_ascii=True, indent=2)
+
+
 def resolve_products(product: Optional[str], category: Optional[str]) -> Optional[list]:
     """
     Resolve the product filter to a flat list of product_names.
@@ -205,6 +245,143 @@ def get_asins():
             return [{"asin": r["asin"], "product_name": r["product_name"], "category": r.get("category", "")} for r in reader]
     except FileNotFoundError:
         return []
+
+
+class AsinUpsertRequest(BaseModel):
+    asin: str
+    product_name: str
+    category: str
+
+
+class CategoryRequest(BaseModel):
+    category: str
+
+
+@app.post("/api/asins")
+def upsert_asin(req: AsinUpsertRequest):
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    asins_path = os.path.join(project_root, "data", "asins.csv")
+
+    asin = (req.asin or "").strip().upper()
+    product_name = (req.product_name or "").strip()
+    category = (req.category or "").strip()
+
+    if not asin:
+        raise HTTPException(status_code=400, detail="asin is required")
+    if not product_name:
+        raise HTTPException(status_code=400, detail="product_name is required")
+    if not category:
+        raise HTTPException(status_code=400, detail="category is required")
+
+    fieldnames = ["asin", "product_name", "category"]
+    rows = []
+    found = False
+    action = "added"
+
+    if os.path.exists(asins_path):
+        with open(asins_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                row_asin = (row.get("asin") or "").strip().upper()
+                if row_asin == asin:
+                    found = True
+                    row["asin"] = asin
+                    row["product_name"] = product_name
+                    row["category"] = category
+                    action = "updated"
+                rows.append({
+                    "asin": row_asin,
+                    "product_name": (row.get("product_name") or "").strip(),
+                    "category": (row.get("category") or "").strip(),
+                })
+
+    if not found:
+        rows.append({
+            "asin": asin,
+            "product_name": product_name,
+            "category": category,
+        })
+
+    os.makedirs(os.path.dirname(asins_path), exist_ok=True)
+    with open(asins_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    _refresh_asin_globals()
+
+    saved = next((r for r in rows if r["asin"] == asin), {"asin": asin, "product_name": product_name, "category": category})
+    return {
+        "message": f"ASIN {action} successfully",
+        "action": action,
+        "asin": saved["asin"],
+        "product_name": saved["product_name"],
+        "category": saved["category"],
+    }
+
+
+@app.get("/api/categories")
+def get_categories():
+    usage = _category_usage()
+    return [
+        {
+            "name": cat,
+            "usage_count": usage.get(cat, 0),
+            "can_delete": usage.get(cat, 0) == 0,
+        }
+        for cat in _load_categories()
+    ]
+
+
+@app.post("/api/categories")
+def add_category(req: CategoryRequest):
+    category = (req.category or "").strip()
+    if not category:
+        raise HTTPException(status_code=400, detail="category is required")
+
+    categories = _load_categories()
+    exists = any(c.lower() == category.lower() for c in categories)
+    if not exists:
+        categories.append(category)
+        _save_categories(categories)
+        action = "added"
+    else:
+        action = "exists"
+
+    final = _load_categories()
+    saved = next((c for c in final if c.lower() == category.lower()), category)
+    return {
+        "message": f"Category {action} successfully",
+        "action": action,
+        "category": saved,
+        "categories": final,
+    }
+
+
+@app.delete("/api/categories/{category_name}")
+def delete_category(category_name: str):
+    target = category_name.strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="category is required")
+
+    usage = _category_usage()
+    matched_usage_name = next((name for name in usage.keys() if name.lower() == target.lower()), None)
+    if matched_usage_name and usage.get(matched_usage_name, 0) > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Category is in use by {usage[matched_usage_name]} ASIN(s). Reassign them before deleting."
+        )
+
+    existing = _load_categories()
+    kept = [cat for cat in existing if cat.lower() != target.lower()]
+    if len(kept) == len(existing):
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    _save_categories(kept)
+    return {
+        "message": "Category deleted successfully",
+        "category": target,
+    }
 
 
 # ── Pipeline status (read-only — scraper runs via Task Scheduler) ─────────────
@@ -738,6 +915,17 @@ def get_cxo_trends(
             """, list(base_params))
             product_rows = cur.fetchall()
 
+            # 9. Negative issue heatmap by product x category
+            cur.execute(f"""
+                SELECT r.product_name, t.primary_categories, COUNT(*) as count
+                FROM raw_reviews r
+                JOIN review_tags t ON r.review_id = t.review_id
+                WHERE 1=1 {pf_sql} {date_filter}
+                  AND t.sentiment = 'Negative'
+                GROUP BY r.product_name, t.primary_categories
+            """, list(base_params))
+            heatmap_rows = cur.fetchall()
+
         # ── Process daily sentiment → daily_trend + neg_rate ──
         days_sent = defaultdict(lambda: {"Positive": 0, "Negative": 0, "Neutral": 0})
         for row in daily_sent_rows:
@@ -870,6 +1058,31 @@ def get_cxo_trends(
             for r in product_rows
         ]
 
+        # ── Product x issue heatmap ──
+        heatmap_counts = defaultdict(lambda: defaultdict(int))
+        cat_totals = defaultdict(int)
+        for row in heatmap_rows:
+            product_name = row["product_name"]
+            cats = json.loads(row["primary_categories"] or "[]")
+            for cat in cats:
+                heatmap_counts[product_name][cat] += row["count"]
+                cat_totals[cat] += row["count"]
+
+        top_heatmap_categories = [
+            cat for cat, _ in sorted(cat_totals.items(), key=lambda item: item[1], reverse=True)[:6]
+        ]
+        issue_heatmap = {
+            "products": all_products_found,
+            "categories": top_heatmap_categories,
+            "rows": [
+                {
+                    "product": product_name,
+                    **{cat: heatmap_counts[product_name].get(cat, 0) for cat in top_heatmap_categories}
+                }
+                for product_name in all_products_found
+            ],
+        }
+
         # ── Period summary KPIs with WoW delta ──
         total_all = sum(pt["total"] for pt in daily_trend)
         total_neg = sum(pt["Negative"] for pt in daily_trend)
@@ -893,6 +1106,7 @@ def get_cxo_trends(
             "weekly_digest": weekly_digest,
             "category_momentum": momentum[:10],
             "product_summary": product_summary,
+            "issue_heatmap": issue_heatmap,
             "kpi": {
                 "total": total_all,
                 "neg_pct": avg_neg_rate,

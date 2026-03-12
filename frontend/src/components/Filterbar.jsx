@@ -344,16 +344,23 @@ export default function FilterBar({ filters, options, onChange, tab }) {
     return `${prods.slice(0,2).join(' · ')} +${prods.length-2} more`
   })()
 
+  const helperText = tab === 'analysis'
+    ? 'Shape the story by product group and date range.'
+    : tab === 'trends'
+    ? 'Narrow the trend story to a product, category, or time window.'
+    : 'Filter down to the exact review evidence you want to inspect or export.'
+
   return (
     <div style={{
       display:'flex', alignItems:'center', gap:8, flexWrap:'wrap',
       padding:'10px 14px',
-      background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10,
+      background:'rgba(255,255,255,0.03)', border:'1px solid var(--border)', borderRadius:12,
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:5, marginRight:4 }}>
         <SlidersHorizontal size={13} style={{ color:'var(--text-muted)' }} />
         <span style={{ fontSize:11, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)' }}>Filters</span>
       </div>
+      <span style={{ fontSize:11, color:'var(--text-muted)' }}>{helperText}</span>
       <div style={{ width:1, height:20, background:'var(--border)', flexShrink:0 }} />
 
       <DateDropdown filters={filters} onChange={onChange} />

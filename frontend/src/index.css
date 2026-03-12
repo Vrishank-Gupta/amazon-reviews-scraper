@@ -3,29 +3,42 @@
 @tailwind utilities;
 
 :root {
-  --bg: #0a0a0f;
-  --surface: #111118;
-  --surface2: #18181f;
-  --border: #222230;
+  --bg: #090b13;
+  --surface: rgba(15, 18, 31, 0.86);
+  --surface2: rgba(24, 28, 44, 0.9);
+  --border: rgba(120, 131, 167, 0.16);
   --accent: #ff4e1a;
   --accent2: #ff8c42;
-  --text: #f0ede8;
-  --text-muted: #666680;
+  --accent-soft: rgba(255, 78, 26, 0.14);
+  --text: #f3efe7;
+  --text-muted: #8b92ad;
   --green: #22c55e;
   --yellow: #eab308;
   --red: #ef4444;
+  --shadow-lg: 0 24px 60px rgba(3, 6, 20, 0.45);
 }
 
 * { box-sizing: border-box; }
 
+html {
+  background:
+    radial-gradient(circle at top left, rgba(255,140,66,0.12), transparent 30%),
+    radial-gradient(circle at top right, rgba(96,165,250,0.12), transparent 28%),
+    linear-gradient(180deg, #0b0f1d 0%, #090b13 28%, #080a11 100%);
+}
+
 body {
   margin: 0;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at top left, rgba(255,140,66,0.12), transparent 30%),
+    radial-gradient(circle at top right, rgba(96,165,250,0.12), transparent 28%),
+    linear-gradient(180deg, #0b0f1d 0%, #090b13 28%, #080a11 100%);
   color: var(--text);
   font-family: 'DM Sans', sans-serif;
   font-size: 14px;
   line-height: 1.5;
   min-height: 100vh;
+  background-attachment: fixed;
 }
 
 h1, h2, h3, .display {
@@ -60,3 +73,30 @@ h1, h2, h3, .display {
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 1s linear infinite; }
 @keyframes progressSlide { from { transform: translateX(-100%) scaleX(3); } to { transform: translateX(400%) scaleX(1); } }
+
+@keyframes shimmer {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(220%); }
+}
+
+.glass-panel {
+  background: linear-gradient(180deg, rgba(16, 20, 34, 0.88), rgba(11, 14, 26, 0.9));
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(14px);
+}
+
+.story-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 78, 26, 0.22);
+  background: rgba(255, 78, 26, 0.08);
+  color: #ffb08f;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}

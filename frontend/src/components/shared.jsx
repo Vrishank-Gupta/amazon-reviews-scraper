@@ -88,12 +88,14 @@ export function SentBadge({ s }) {
 
 // ── StarLabel ─────────────────────────────────────────────────────────────────
 export function StarLabel({ rating }) {
-  const n = Math.round(parseFloat(rating))||0
+  const numericRating = parseFloat(rating)
+  const safeRating = Number.isFinite(numericRating) ? Math.max(0, Math.min(5, numericRating)) : 0
+  const n = Math.round(safeRating)
   const color = n>=4?'#22c55e':n===3?'#eab308':'#ef4444'
   return (
     <span style={{ color, fontSize:12 }}>
       {'★'.repeat(n)}{'☆'.repeat(Math.max(0,5-n))}
-      <span style={{ color:'var(--text-muted)', marginLeft:4 }}>{n} star{n!==1?'s':''}</span>
+      <span style={{ color:'var(--text-muted)', marginLeft:4 }}>{safeRating.toFixed(1)}</span>
     </span>
   )
 }
@@ -110,7 +112,7 @@ export function Delta({ val, invertColor=false }) {
 // ── Card ──────────────────────────────────────────────────────────────────────
 export function Card({ title, sub, tip, children, controls, accent, style: extraStyle }) {
   return (
-    <div style={{ background:'var(--surface)', border:`1px solid ${accent||'var(--border)'}`, borderRadius:12, padding:'18px 20px', display:'flex', flexDirection:'column', gap:14, ...extraStyle }}>
+    <div className="glass-panel" style={{ border:`1px solid ${accent||'var(--border)'}`, borderRadius:14, padding:'18px 20px', display:'flex', flexDirection:'column', gap:14, ...extraStyle }}>
       {(title||controls) && (
         <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
           <div style={{ display:'flex', flexDirection:'column', gap:3 }}>

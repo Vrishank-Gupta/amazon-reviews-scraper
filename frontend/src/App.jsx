@@ -18,18 +18,43 @@ const DEFAULT_FILTERS = {
   date_to: null,
 }
 
+const TAB_META = {
+  analysis: {
+    label: 'Overview',
+    emoji: 'Overview',
+    eyebrow: 'Executive Brief',
+    title: 'Portfolio Overview',
+    subtitle: 'Start with the headline, product pressure, customer pain, and strengths worth protecting.',
+  },
+  trends: {
+    label: 'Trends',
+    emoji: 'Trends',
+    eyebrow: 'Diagnostic View',
+    title: 'Trend Diagnostics',
+    subtitle: 'Trace problem-rate movement, issue acceleration, and rating shifts over time.',
+  },
+  reviews: {
+    label: 'Reviews',
+    emoji: 'Reviews',
+    eyebrow: 'Evidence Layer',
+    title: 'Review Evidence',
+    subtitle: 'Validate every signal with the underlying customer language, tags, ratings, and exports.',
+  },
+}
+
 function TabBtn({ active, onClick, label, emoji }) {
   return (
     <button onClick={onClick} style={{
       display:'flex', alignItems:'center', gap:7,
-      padding:'8px 18px', borderRadius:8,
-      border:`1px solid ${active?'var(--accent)':'var(--border)'}`,
-      background: active?'rgba(255,78,26,0.1)':'transparent',
-      color: active?'var(--accent)':'var(--text-muted)',
+      padding:'9px 16px', borderRadius:10,
+      border:`1px solid ${active?'rgba(255,78,26,0.35)':'var(--border)'}`,
+      background: active?'linear-gradient(180deg, rgba(255,78,26,0.16), rgba(255,78,26,0.06))':'rgba(255,255,255,0.02)',
+      color: active?'#ffd7ca':'var(--text-muted)',
       fontFamily:'Bebas Neue', fontSize:15, letterSpacing:'0.08em',
       cursor:'pointer', transition:'all 0.15s',
+      boxShadow: active?'0 10px 24px rgba(255,78,26,0.12)':'none',
     }}>
-      {emoji} {label}
+      {emoji}
     </button>
   )
 }
@@ -103,6 +128,8 @@ export default function App() {
     setFilters(f => ({ ...f, ...updates }))
   }
 
+  const currentTab = TAB_META[tab]
+
   return (
     <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', flexDirection:'column' }}>
 
@@ -110,7 +137,8 @@ export default function App() {
       <header style={{
         display:'flex', alignItems:'center', justifyContent:'space-between',
         padding:'0 28px', height:56,
-        background:'var(--surface)', borderBottom:'1px solid var(--border)',
+        background:'rgba(10,12,24,0.74)', borderBottom:'1px solid var(--border)',
+        backdropFilter:'blur(16px)',
         position:'sticky', top:0, zIndex:100, flexShrink:0,
       }}>
         {/* Logo */}
@@ -129,7 +157,7 @@ export default function App() {
           <button onClick={() => loadReviews(filters)} disabled={refreshing} style={{
             display:'flex', alignItems:'center', gap:5,
             padding:'6px 12px', borderRadius:7, fontFamily:'DM Sans',
-            border:'1px solid var(--border)', background:'transparent',
+            border:'1px solid var(--border)', background:'rgba(255,255,255,0.02)',
             color:'var(--text-muted)', fontSize:12, cursor:refreshing?'not-allowed':'pointer',
           }}>
             <RefreshCw size={12} className={refreshing?'spin':''} /> Refresh
@@ -137,8 +165,8 @@ export default function App() {
           <button onClick={() => setPipelineOpen(true)} style={{
             display:'flex', alignItems:'center', gap:5,
             padding:'6px 12px', borderRadius:7, fontFamily:'DM Sans',
-            border:'1px solid var(--border)', background:'transparent',
-            color:'var(--text-muted)', fontSize:12, cursor:'pointer',
+            border:'1px solid rgba(255,78,26,0.26)', background:'rgba(255,78,26,0.08)',
+            color:'#ffb08f', fontSize:12, cursor:'pointer',
           }}>
             <Database size={12} /> Pipeline
           </button>
@@ -148,13 +176,14 @@ export default function App() {
       {/* ── Sticky sub-header: tabs + filters ── */}
       <div style={{
         position:'sticky', top:56, zIndex:90, flexShrink:0,
-        background:'var(--bg)', borderBottom:'1px solid var(--border)',
+        background:'rgba(9,11,19,0.82)', borderBottom:'1px solid var(--border)',
+        backdropFilter:'blur(14px)',
         padding:'10px 28px', display:'flex', flexDirection:'column', gap:10,
       }}>
         <div style={{ display:'flex', gap:8 }}>
-          <TabBtn active={tab==='analysis'} onClick={()=>setTab('analysis')} emoji="🎯" label="Overview" />
-          <TabBtn active={tab==='reviews'}  onClick={()=>setTab('reviews')}  emoji="💬" label="Reviews"  />
-          <TabBtn active={tab==='trends'}   onClick={()=>setTab('trends')}   emoji="📈" label="Trends"   />
+          <TabBtn active={tab==='analysis'} onClick={()=>setTab('analysis')} emoji={TAB_META.analysis.emoji} label={TAB_META.analysis.label} />
+          <TabBtn active={tab==='reviews'}  onClick={()=>setTab('reviews')}  emoji={TAB_META.reviews.emoji} label={TAB_META.reviews.label}  />
+          <TabBtn active={tab==='trends'}   onClick={()=>setTab('trends')}   emoji={TAB_META.trends.emoji} label={TAB_META.trends.label}   />
         </div>
         <FilterBar filters={filters} options={options} onChange={handleFilterChange} tab={tab} />
         {/* Thin progress bar — shows refresh without blocking scroll */}
@@ -168,14 +197,34 @@ export default function App() {
       {/* ── Main content ── */}
       <main style={{ flex:1, padding:'20px 28px', display:'flex', flexDirection:'column', gap:14, minWidth:0 }}>
 
-        {/* Page title */}
-        <div>
-          <h1 style={{ margin:0, fontSize:38, lineHeight:1, color:'var(--text)', fontFamily:'Bebas Neue', letterSpacing:'0.02em' }}>
-            CUSTOMER <span style={{ color:'var(--accent)' }}>INTELLIGENCE</span>
-          </h1>
-          <p style={{ margin:'4px 0 0', color:'var(--text-muted)', fontSize:12 }}>
-            Voice of Customer · Amazon review analytics
-          </p>
+        {/* Page header */}
+        <div className="glass-panel" style={{ borderRadius:14, padding:'16px 20px' }}>
+          <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16, flexWrap:'wrap' }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>
+                {currentTab.eyebrow}
+              </div>
+              <h1 style={{ margin:0, fontSize:28, lineHeight:1.05, color:'var(--text)', fontFamily:'Bebas Neue', letterSpacing:'0.02em' }}>
+                {currentTab.title}
+              </h1>
+              <p style={{ margin:0, color:'var(--text-muted)', fontSize:12, lineHeight:1.6, maxWidth:760 }}>
+                {currentTab.subtitle}
+              </p>
+            </div>
+
+            <div style={{ minWidth:280, maxWidth:420, padding:'10px 12px', borderRadius:10, background:'rgba(255,255,255,0.03)', border:'1px solid var(--border)' }}>
+              <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:4 }}>
+                Reading Guide
+              </div>
+              <div style={{ fontSize:12, color:'var(--text)', lineHeight:1.6 }}>
+                {tab === 'analysis'
+                  ? 'Start with the top metrics, then scan product and issue priorities to see what is driving the overall story.'
+                  : tab === 'trends'
+                  ? 'Use this page to confirm whether pressure is rising, persistent, or isolated to a specific product or issue.'
+                  : 'Use this page to validate patterns with review text, tags, and exports.'}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Tab content */}
@@ -184,18 +233,23 @@ export default function App() {
             <span style={{ fontSize:24 }}>⟳</span><span>Loading…</span>
           </div>
 
-        ) : tab === 'analysis' ? (
-          <>
-            <AnalysisPage filters={filters} allProducts={options.products} />
-            <SummaryPage filters={filters} allProducts={options.products} />
-          </>
+          ) : tab === 'analysis' ? (
+            <>
+              <AnalysisPage filters={filters} allProducts={options.products} tree={options.tree} />
+              <SummaryPage filters={filters} allProducts={options.products} />
+            </>
 
         ) : tab === 'reviews' ? (
-          <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'18px 22px', display:'flex', flexDirection:'column', gap:14 }}>
+          <div className="glass-panel" style={{ borderRadius:14, padding:'18px 22px', display:'flex', flexDirection:'column', gap:14 }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-              <h3 style={{ margin:0, fontFamily:'Bebas Neue', fontSize:18, letterSpacing:'0.06em', color:'var(--text-muted)' }}>
-                Tagged Reviews <span style={{ color:'var(--accent)' }}>({reviews.length})</span>
-              </h3>
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                <h3 style={{ margin:0, fontFamily:'Bebas Neue', fontSize:18, letterSpacing:'0.06em', color:'var(--text-muted)' }}>
+                  Evidence Explorer <span style={{ color:'var(--accent)' }}>({reviews.length})</span>
+                </h3>
+                <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+                  Tagged customer reviews, ready for proof, export, and analyst handoff.
+                </div>
+              </div>
               <button onClick={() => downloadCSV(reviews)} style={{
                 display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:7,
                 border:'1px solid var(--accent)', background:'rgba(255,78,26,0.08)', color:'var(--accent)',
@@ -208,7 +262,7 @@ export default function App() {
           </div>
 
         ) : (
-          <TrendsPage products={options.products} reviews={reviews} filters={filters} tree={options.tree} />
+          <TrendsPage products={options.products} filters={filters} tree={options.tree} />
         )}
       </main>
 

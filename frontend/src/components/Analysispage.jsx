@@ -13,8 +13,9 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ComposedChart, Bar, Line, ReferenceLine
 } from 'recharts'
-import { fetchAnalysis } from '../api'
+import { fetchAnalysis, fetchSummary } from '../api'
 import { InfoTip, Card } from './shared'
+import RatingTrendChart from './RatingTrendChart'
 
 function fmtDay(d) {
   try { return new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) } catch { return d }
@@ -60,6 +61,53 @@ function KpiTile({ label, value, sub, color, tip }) {
       </div>
       <div style={{ fontFamily:'Bebas Neue', fontSize:36, lineHeight:1, color }}>{value ?? '—'}</div>
       <div style={{ fontSize:11, color:'var(--text-muted)' }}>{sub}</div>
+    </div>
+  )
+}
+
+function PriorityStrip({ kpi, negPie, posPie, summaryRows }) {
+  if (!kpi?.total) return null
+  const topRisk = [...(summaryRows || [])].sort((a, b) => b.neg_pct - a.neg_pct)[0]
+  const topStrength = [...(summaryRows || [])].sort((a, b) => a.neg_pct - b.neg_pct)[0]
+  const topIssue = negPie?.[0]
+  const topLove = posPie?.[0]
+
+  const items = [
+    {
+      label: 'Priority Product',
+      title: topRisk?.product_name || 'No product data',
+      meta: topRisk ? `${topRisk.neg_pct}% problem rate · ${topRisk.review_count} reviews` : 'Waiting for review data',
+      color: '#ef4444',
+    },
+    {
+      label: 'Strongest Product',
+      title: topStrength?.product_name || 'No product data',
+      meta: topStrength ? `${topStrength.neg_pct}% problem rate · ${topStrength.avg_rating?.toFixed?.(1) || topStrength.avg_rating}★ review rating` : 'Waiting for review data',
+      color: '#22c55e',
+    },
+    {
+      label: 'Biggest Customer Pain',
+      title: topIssue?.category || 'No issue data',
+      meta: topIssue ? `${topIssue.count} negative reviews tagged here` : 'Waiting for issue data',
+      color: '#f97316',
+    },
+    {
+      label: 'Equity To Protect',
+      title: topLove?.category || 'No positive signal yet',
+      meta: topLove ? `${topLove.count} positive reviews mention this` : 'Waiting for positive signal',
+      color: '#60a5fa',
+    },
+  ]
+
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
+      {items.map(item => (
+        <div key={item.label} style={{ background:'var(--surface)', border:`1px solid ${item.color}25`, borderRadius:12, padding:'14px 16px', display:'flex', flexDirection:'column', gap:6, borderTop:`2px solid ${item.color}` }}>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>{item.label}</div>
+          <div style={{ fontSize:15, fontWeight:700, color:'var(--text)', lineHeight:1.35 }}>{item.title}</div>
+          <div style={{ fontSize:11, color:'var(--text-muted)', lineHeight:1.45 }}>{item.meta}</div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -390,8 +438,9 @@ function Toggle({ value, options, onChange }) {
 }
 
 // ── MAIN ──────────────────────────────────────────────────────────────────────
-export default function AnalysisPage({ filters, allProducts }) {
+export default function AnalysisPage({ filters, allProducts, tree }) {
   const [data, setData]       = useState(null)
+  const [summaryRows, setSummaryRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [hasData, setHasData] = useState(false)
   const [trendMode, setTrendMode] = useState('volume')
@@ -408,7 +457,16 @@ export default function AnalysisPage({ filters, allProducts }) {
   const load = useCallback(() => {
     if (!allProducts?.length) return
     setLoading(true)
-    fetchAnalysis(apiParams).then(d => { setData(d); setHasData(true) }).finally(() => setLoading(false))
+    Promise.all([
+      fetchAnalysis(apiParams),
+      fetchSummary(apiParams),
+    ])
+      .then(([analysis, summary]) => {
+        setData(analysis)
+        setSummaryRows(summary || [])
+        setHasData(true)
+      })
+      .finally(() => setLoading(false))
   }, [JSON.stringify(apiParams), allProducts?.length])
 
   useEffect(() => { load() }, [load])
@@ -450,51 +508,62 @@ export default function AnalysisPage({ filters, allProducts }) {
     <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
 
       {/* 1. Alert banner */}
-      <AlertBanner kpi={kpi} negPie={negPie} products={[]} />
+      <AlertBanner kpi={kpi} negPie={negPie} products={summaryRows} />
 
       {/* 2. KPI tiles */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
-        <KpiTile label="Total Reviews" value={kpi.total?.toLocaleString()} color="#60a5fa"
+        <KpiTile label="Feedback Volume" value={kpi.total?.toLocaleString()} color="#60a5fa"
           sub={`${allProducts?.length||0} product${allProducts?.length!==1?'s':''} · selected period`}
-          tip="Total reviews scraped for the selected products and date range." />
-        <KpiTile label="Negative Rate" value={`${negPct}%`}
+          tip="Total scraped reviews inside the selected date range. This is the size of the voice-of-customer sample behind the dashboard." />
+        <KpiTile label="Customers Reporting Problems" value={`${negPct}%`}
           color={negPct>50?'#ef4444':negPct>30?'#f97316':'#22c55e'}
-          sub={<span><strong style={{color:'#ef4444'}}>{kpi.negative?.toLocaleString()}</strong> reviews · {negPct>50?'🔴 Crisis':negPct>30?'⚠️ High':'✅ Healthy'}</span>}
-          tip="AI-tagged sentiment. As reference: 1–2★ reviews are almost always Negative, 3★ ≈ Neutral, 4–5★ ≈ Positive. Actual tagging uses GPT on review text." />
-        <KpiTile label="Positive Rate" value={`${posPct}%`}
+          sub={<span><strong style={{color:'#ef4444'}}>{kpi.negative?.toLocaleString()}</strong> reviews · {negPct>50?'🔴 Needs immediate action':negPct>30?'⚠️ Watch closely':'✅ In control'}</span>}
+          tip="Share of reviews the model classified as Negative. This is the clearest early warning signal for customer pain in the selected period." />
+        <KpiTile label="Customers Delighted" value={`${posPct}%`}
           color="#22c55e"
-          sub={<span><strong style={{color:'#22c55e'}}>{kpi.positive?.toLocaleString()}</strong> reviews · {posPct>60?'✅ Strong':'⚠️ Low'}</span>}
-          tip="AI-tagged. High positive alongside high negative = polarised product (quality inconsistency). 1–2★ ≈ Negative, 3★ ≈ Neutral, 4–5★ ≈ Positive." />
-        <KpiTile label="Neutral Rate" value={`${kpi.total?((kpi.neutral/kpi.total)*100).toFixed(1):0}%`}
+          sub={<span><strong style={{color:'#22c55e'}}>{kpi.positive?.toLocaleString()}</strong> reviews · {posPct>60?'✅ Strong brand equity':'⚠️ Room to improve'}</span>}
+          tip="Share of reviews classified as Positive. This helps identify what the brand should protect while fixing the negatives." />
+        <KpiTile label="Undecided / Neutral" value={`${kpi.total?((kpi.neutral/kpi.total)*100).toFixed(1):0}%`}
           color="#eab308"
-          sub={<span><strong style={{color:'#eab308'}}>{kpi.neutral?.toLocaleString()}</strong> reviews · indifferent</span>}
-          tip="A large neutral share means customers are indifferent. 3★ reviews are typically Neutral. 1–2★ ≈ Negative, 4–5★ ≈ Positive." />
+          sub={<span><strong style={{color:'#eab308'}}>{kpi.neutral?.toLocaleString()}</strong> reviews · not strongly positive or negative</span>}
+          tip="Neutral reviews usually reflect acceptable but unremarkable experiences. A large share here can mean customers are not yet impressed." />
       </div>
 
-      {/* 3. Burning issues — what to fix RIGHT NOW */}
+      {/* 3. Executive priorities */}
+      <PriorityStrip kpi={kpi} negPie={negPie} posPie={posPie} summaryRows={summaryRows} />
+
+      <Card
+        title="Amazon Rating Signal"
+        tip="This is the external market-facing rating view. It uses Amazon product-page rating snapshots over time, alongside scraped daily review averages and total rating count. Use this in Overview because it shows how public product perception is moving beyond just the current filtered review slice."
+        sub="Public Amazon rating trend first · filtered review-period ratings live in Trends"
+      >
+        <RatingTrendChart filters={filters} allProducts={allProducts} tree={tree} />
+      </Card>
+
+      {/* 4. Burning issues — what to fix RIGHT NOW */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
         <Card
-          title="🔴 Top Negative Issues"
-          tip="Categories driving the most negative reviews, ranked by volume. This is your R&D priority list — fixing #1 has the highest customer impact. Click a row to see sub-tag cloud, then click a word to read reviews."
-          sub="Click a row → sub-tag cloud → click word → reviews"
+          title="🔴 What Needs Attention"
+          tip="Issue areas driving the most negative reviews, ranked by volume. This is the action queue for leadership: what is hurting customer experience most right now. Click a row to see the sub-topics, then click a word to read the underlying reviews."
+          sub="Prioritized by negative review volume"
         >
           <BurningIssues negPie={negPie} activeCat={drawerCat} onRowClick={cat => setDrawerCat(drawerCat === cat ? null : cat)} filters={filters} allProducts={allProducts} />
         </Card>
 
         <Card
-          title="✅ What Customers Love"
-          tip="Categories appearing most in positive reviews. Protect these during product changes — they are your brand equity. Click a row to see sub-tag cloud, then click a word to read reviews."
-          sub="Click a row → sub-tag cloud → click word → reviews"
+          title="✅ What We Must Protect"
+          tip="Categories appearing most in positive reviews. These are the strengths customers consistently value, and they should be preserved while teams fix pain points. Click a row to see the sub-topics, then click a word to read the underlying reviews."
+          sub="Highest positive review concentration"
         >
           <BurningIssues negPie={posPie.map(p=>({...p}))} activeCat={drawerCatPos} onRowClick={cat => setDrawerCatPos(drawerCatPos === cat ? null : cat)} filters={filters} allProducts={allProducts} />
         </Card>
       </div>
 
-      {/* 4. Sentiment trend — compact with toggle */}
+      {/* 5. Sentiment trend — compact with toggle */}
       <Card
-        title="Sentiment Trend"
-        tip="Volume mode: raw count of Positive/Negative/Neutral per day. Rate mode: 7-day rolling negative rate % — the signal you should track, not daily noise. A sustained rise in the rolling rate is an early warning."
-        sub="Rolling 7-day negative rate is the signal — volume is the context"
+        title="Customer Signal Over Time"
+        tip="Volume mode shows how many positive, negative, and neutral reviews came in each day. Neg Rate mode shows the rolling problem rate, which is the cleaner executive signal because it smooths out daily noise. Use Volume to understand scale and Neg Rate to understand pressure."
+        sub="Volume shows scale · Neg Rate shows sustained pressure"
         controls={<Toggle value={trendMode} onChange={setTrendMode} options={[{v:'rate',l:'Neg Rate %'},{v:'volume',l:'Volume'}]} />}
       >
         {trend.length === 0 ? (
