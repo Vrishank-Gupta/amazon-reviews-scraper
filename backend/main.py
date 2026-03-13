@@ -7,12 +7,17 @@ import json
 import csv
 import subprocess
 import os
+import sys
 from typing import Optional
-from dotenv import load_dotenv
 from collections import defaultdict
 
-# Load .env from project root
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from shared.env import load_project_env
+
+load_project_env()
 
 app = FastAPI()
 
@@ -125,6 +130,231 @@ def get_conn():
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
     )
+
+
+PIPELINE_JOB_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS pipeline_jobs (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+  days INT NOT NULL,
+  asins_json JSON DEFAULT NULL,
+  requested_via VARCHAR(32) NOT NULL DEFAULT 'ui',
+  requested_by VARCHAR(255) DEFAULT NULL,
+  worker_id VARCHAR(255) DEFAULT NULL,
+  message TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  claimed_at DATETIME DEFAULT NULL,
+  started_at DATETIME DEFAULT NULL,
+  finished_at DATETIME DEFAULT NULL,
+  PRIMARY KEY (id),
+  KEY idx_pipeline_jobs_status_created (status, created_at),
+  KEY idx_pipeline_jobs_worker (worker_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+"""
+
+PIPELINE_WORKER_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS pipeline_workers (
+  worker_id VARCHAR(255) NOT NULL,
+  host_name VARCHAR(255) DEFAULT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'IDLE',
+  message TEXT,
+  capabilities_json JSON DEFAULT NULL,
+  last_heartbeat DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (worker_id),
+  KEY idx_pipeline_workers_last_heartbeat (last_heartbeat)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+"""
+
+
+def ensure_pipeline_queue_tables(conn):
+    try:
+        with conn.cursor() as cur:
+            cur.execute(PIPELINE_JOB_TABLE_SQL)
+            cur.execute(PIPELINE_WORKER_TABLE_SQL)
+        conn.commit()
+        return True
+    except pymysql.err.OperationalError as exc:
+        if exc.args and exc.args[0] == 1142:
+            conn.rollback()
+            return False
+        raise
+
+
+def is_missing_pipeline_table_error(exc) -> bool:
+    return bool(getattr(exc, "args", None)) and exc.args[0] == 1146
+
+
+def is_pipeline_table_permission_error(exc) -> bool:
+    return bool(getattr(exc, "args", None)) and exc.args[0] == 1142
+
+
+def get_pipeline_execution_mode() -> str:
+    mode = os.getenv("PIPELINE_EXECUTION_MODE", "auto").strip().lower()
+    if mode not in {"auto", "direct", "worker"}:
+        mode = "auto"
+    if mode == "auto":
+        return "direct" if os.name == "nt" else "worker"
+    return mode
+
+
+def get_pipeline_worker_timeout_seconds() -> int:
+    try:
+        return max(30, int(os.getenv("PIPELINE_WORKER_TIMEOUT_SECONDS", "180")))
+    except ValueError:
+        return 180
+
+
+def get_healthy_worker_count(conn) -> int:
+    ensure_pipeline_queue_tables(conn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS healthy_workers
+                FROM pipeline_workers
+                WHERE last_heartbeat >= DATE_SUB(NOW(), INTERVAL %s SECOND)
+                """,
+                (get_pipeline_worker_timeout_seconds(),),
+            )
+            row = cur.fetchone() or {}
+    except pymysql.err.OperationalError as exc:
+        if is_missing_pipeline_table_error(exc) or is_pipeline_table_permission_error(exc):
+            return 0
+        raise
+    return int(row.get("healthy_workers") or 0)
+
+
+def enqueue_pipeline_job(conn, days: int, asins: list, requested_via: str = "ui", requested_by: Optional[str] = None):
+    ensure_pipeline_queue_tables(conn)
+    payload = json.dumps(asins or [])
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO pipeline_jobs (status, days, asins_json, requested_via, requested_by, message)
+                VALUES ('PENDING', %s, %s, %s, %s, %s)
+                """,
+                (days, payload, requested_via, requested_by, "Queued"),
+            )
+            job_id = cur.lastrowid
+    except pymysql.err.OperationalError as exc:
+        if is_missing_pipeline_table_error(exc) or is_pipeline_table_permission_error(exc):
+            raise HTTPException(
+                status_code=503,
+                detail="Pipeline queue tables are not available to this DB user. Run ops/mysql/mysql_setup.sql and grant access before using worker mode.",
+            )
+        raise
+    conn.commit()
+    return job_id
+
+
+def get_recent_pipeline_jobs(conn, limit: int = 10):
+    ensure_pipeline_queue_tables(conn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, status, days, asins_json, requested_via, requested_by, worker_id, message,
+                       created_at, claimed_at, started_at, finished_at
+                FROM pipeline_jobs
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall() or []
+    except pymysql.err.OperationalError as exc:
+        if is_missing_pipeline_table_error(exc) or is_pipeline_table_permission_error(exc):
+            return []
+        raise
+
+    jobs = []
+    for row in rows:
+        row["asins"] = json.loads(row.get("asins_json") or "[]")
+        row.pop("asins_json", None)
+        for key in ["created_at", "claimed_at", "started_at", "finished_at"]:
+            if row.get(key):
+                row[key] = str(row[key])
+        jobs.append(row)
+    return jobs
+
+
+def get_pipeline_job(conn, job_id: int):
+    ensure_pipeline_queue_tables(conn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, status, days, asins_json, requested_via, requested_by, worker_id, message,
+                       created_at, claimed_at, started_at, finished_at
+                FROM pipeline_jobs
+                WHERE id = %s
+                """,
+                (job_id,),
+            )
+            row = cur.fetchone()
+    except pymysql.err.OperationalError as exc:
+        if is_missing_pipeline_table_error(exc) or is_pipeline_table_permission_error(exc):
+            return None
+        raise
+
+    if not row:
+        return None
+
+    row["asins"] = json.loads(row.get("asins_json") or "[]")
+    row.pop("asins_json", None)
+    for key in ["created_at", "claimed_at", "started_at", "finished_at"]:
+        if row.get(key):
+            row[key] = str(row[key])
+    return row
+
+
+def get_recent_pipeline_workers(conn, limit: int = 5):
+    ensure_pipeline_queue_tables(conn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT worker_id, host_name, status, message, capabilities_json, last_heartbeat, updated_at
+                FROM pipeline_workers
+                ORDER BY last_heartbeat DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall() or []
+    except pymysql.err.OperationalError as exc:
+        if is_missing_pipeline_table_error(exc) or is_pipeline_table_permission_error(exc):
+            return []
+        raise
+
+    workers = []
+    for row in rows:
+        row["capabilities"] = json.loads(row.get("capabilities_json") or "{}")
+        row.pop("capabilities_json", None)
+        for key in ["last_heartbeat", "updated_at"]:
+            if row.get(key):
+                row[key] = str(row[key])
+        workers.append(row)
+    return workers
+
+
+def get_pipeline_queue_issue(conn) -> Optional[str]:
+    ensure_pipeline_queue_tables(conn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT worker_id FROM pipeline_workers LIMIT 1")
+            cur.fetchone()
+            cur.execute("SELECT id FROM pipeline_jobs LIMIT 1")
+            cur.fetchone()
+        return None
+    except pymysql.err.OperationalError as exc:
+        if is_missing_pipeline_table_error(exc):
+            return "Pipeline queue tables are missing. Run ops/mysql/mysql_setup.sql on the database before using worker mode."
+        if is_pipeline_table_permission_error(exc):
+            return "This DB user does not have access to pipeline queue tables. Grant access to pipeline_jobs and pipeline_workers before using worker mode."
+        raise
 
 
 # ── Reviews ───────────────────────────────────────────────────────────────────
@@ -508,6 +738,38 @@ class PipelineRunRequest(BaseModel):
     asins: TypingList[str] = []  # empty = scrape all ASINs in asins.csv
 
 
+@app.get("/api/pipeline/capabilities")
+def get_pipeline_capabilities():
+    mode = get_pipeline_execution_mode()
+    if mode == "direct":
+        return {
+            "can_run_pipeline": True,
+            "mode": "direct",
+            "healthy_workers": 0,
+            "reason": None,
+        }
+
+    conn = get_conn()
+    try:
+        queue_issue = get_pipeline_queue_issue(conn)
+        healthy_workers = get_healthy_worker_count(conn)
+    finally:
+        conn.close()
+
+    if queue_issue:
+        reason = queue_issue
+    elif healthy_workers > 0:
+        reason = None
+    else:
+        reason = "No active Windows pipeline worker is connected. Start the worker on the browser-capable Windows machine to enable runs from this page."
+    return {
+        "can_run_pipeline": healthy_workers > 0 and not queue_issue,
+        "mode": "worker",
+        "healthy_workers": healthy_workers,
+        "reason": reason,
+    }
+
+
 @app.post("/api/pipeline/run")
 def run_pipeline(req: PipelineRunRequest = None):
     if req is None:
@@ -515,25 +777,82 @@ def run_pipeline(req: PipelineRunRequest = None):
     if req.days < 1 or req.days > 365:
         raise HTTPException(status_code=400, detail="days must be between 1 and 365")
 
+    mode = get_pipeline_execution_mode()
+    asin_msg = f"ASINs: {', '.join(req.asins)}" if req.asins else "all ASINs"
+
+    if mode == "worker":
+        conn = get_conn()
+        try:
+            healthy_workers = get_healthy_worker_count(conn)
+            if healthy_workers < 1:
+                raise HTTPException(
+                    status_code=503,
+                    detail="No active Windows pipeline worker is connected. Start the worker on the browser-capable Windows machine to enable queued runs.",
+                )
+            job_id = enqueue_pipeline_job(conn, req.days, req.asins)
+        finally:
+            conn.close()
+
+        return {
+            "message": f"Pipeline queued - last {req.days} days, {asin_msg}",
+            "job_id": job_id,
+            "mode": "worker",
+        }
+
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     start_script = os.path.join(project_root, "pipeline", "start_pipeline.py")
 
     env = os.environ.copy()
     env["SCRAPE_DAYS_BACK"] = str(req.days)
-    # Pass selected ASINs as comma-separated string; empty = all
     if req.asins:
         env["SCRAPE_ASINS"] = ",".join(req.asins)
     else:
         env.pop("SCRAPE_ASINS", None)
 
-    subprocess.Popen(
-        ["python", start_script],
-        cwd=project_root,
-        env=env,
-        creationflags=subprocess.CREATE_NEW_CONSOLE,
-    )
-    asin_msg = f"ASINs: {', '.join(req.asins)}" if req.asins else "all ASINs"
-    return {"message": f"Pipeline started — last {req.days} days, {asin_msg}"}
+    popen_kwargs = {
+        "cwd": project_root,
+        "env": env,
+    }
+    if os.name == "nt" and hasattr(subprocess, "CREATE_NEW_CONSOLE"):
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+
+    subprocess.Popen([sys.executable, start_script], **popen_kwargs)
+    return {
+        "message": f"Pipeline started - last {req.days} days, {asin_msg}",
+        "mode": "direct",
+    }
+
+
+@app.get("/api/pipeline/jobs")
+def list_pipeline_jobs(limit: int = 10):
+    limit = max(1, min(limit, 25))
+    conn = get_conn()
+    try:
+        queue_issue = get_pipeline_queue_issue(conn)
+        jobs = get_recent_pipeline_jobs(conn, limit=limit)
+        workers = get_recent_pipeline_workers(conn, limit=5)
+        healthy_workers = get_healthy_worker_count(conn)
+        return {
+            "jobs": jobs,
+            "workers": workers,
+            "healthy_workers": healthy_workers,
+            "mode": get_pipeline_execution_mode(),
+            "reason": queue_issue,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/pipeline/jobs/{job_id}")
+def get_pipeline_job_status(job_id: int):
+    conn = get_conn()
+    try:
+        job = get_pipeline_job(conn, job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Pipeline job not found")
+        return job
+    finally:
+        conn.close()
 
 
 # Keep old /api/pipeline endpoint for backward compatibility
@@ -628,11 +947,12 @@ def get_trends(
             fmt = "%%Y-%%u" if granularity == "week" else "%%Y-%%m"
 
             cur.execute(f"""
-                SELECT DATE_FORMAT(r.scrape_date, '{fmt}') as period,
+                SELECT DATE_FORMAT({_rd}, '{fmt}') as period,
                     t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE 1=1 {pf_sql} {date_filter}
+                  AND {_rd} IS NOT NULL
                 GROUP BY period, t.primary_categories
                 ORDER BY period
             """, list(base_params))
@@ -658,22 +978,24 @@ def get_trends(
 
             # Rating trend over time
             cur.execute(f"""
-                SELECT DATE_FORMAT(r.scrape_date, '{fmt}') as period,
+                SELECT DATE_FORMAT({_rd}, '{fmt}') as period,
                     ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 2) as avg_rating,
                     COUNT(*) as count
                 FROM raw_reviews r
                 WHERE 1=1 {pf_sql} {date_filter}
+                  AND {_rd} IS NOT NULL
                 GROUP BY period ORDER BY period
             """, list(base_params))
             rating_rows = cur.fetchall()
 
             # Sentiment over time (for stacked area)
             cur.execute(f"""
-                SELECT DATE_FORMAT(r.scrape_date, '{fmt}') as period,
+                SELECT DATE_FORMAT({_rd}, '{fmt}') as period,
                     t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE 1=1 {pf_sql} {date_filter}
+                  AND {_rd} IS NOT NULL
                 GROUP BY period, t.sentiment ORDER BY period
             """, list(base_params))
             sent_time_rows = cur.fetchall()
@@ -819,38 +1141,41 @@ def get_cxo_trends(
 
             # 2. Daily avg rating
             cur.execute(f"""
-                SELECT r.scrape_date as day,
+                SELECT DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day,
                     ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 3) as avg_rating,
                     COUNT(*) as total,
                     SUM(CASE WHEN CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1)) < 1.5 THEN 1 ELSE 0 END) as one_star,
                     SUM(CASE WHEN CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1)) >= 4.5 THEN 1 ELSE 0 END) as five_star
                 FROM raw_reviews r
                 WHERE 1=1 {pf_sql} {date_filter}
-                GROUP BY r.scrape_date ORDER BY r.scrape_date
+                  AND {_rd} IS NOT NULL
+                GROUP BY day ORDER BY day
             """, list(base_params))
             daily_rating_rows = cur.fetchall()
 
             # 3. Daily per-product negative rate
             cur.execute(f"""
-                SELECT r.scrape_date as day, r.product_name,
+                SELECT DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day, r.product_name,
                     t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE 1=1 {pf_sql} {date_filter}
-                GROUP BY r.scrape_date, r.product_name, t.sentiment
-                ORDER BY r.scrape_date
+                  AND {_rd} IS NOT NULL
+                GROUP BY day, r.product_name, t.sentiment
+                ORDER BY day
             """, list(base_params))
             daily_product_rows = cur.fetchall()
 
             # 4. Daily category breakdown (negative only)
             cur.execute(f"""
-                SELECT r.scrape_date as day, t.primary_categories, COUNT(*) as count
+                SELECT DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day, t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE 1=1 {pf_sql} {date_filter}
                   AND t.sentiment = 'Negative'
-                GROUP BY r.scrape_date, t.primary_categories
-                ORDER BY r.scrape_date
+                  AND {_rd} IS NOT NULL
+                GROUP BY day, t.primary_categories
+                ORDER BY day
             """, list(base_params))
             daily_cat_rows = cur.fetchall()
 
@@ -871,13 +1196,14 @@ def get_cxo_trends(
             digest_params = [p for p in base_params if p not in ([date_from] if date_from else []) + ([date_to] if date_to else [])]
             cur.execute(f"""
                 SELECT
-                    YEARWEEK(r.scrape_date, 1) as yw,
+                    YEARWEEK({_rd}, 1) as yw,
                     t.sentiment, COUNT(*) as count,
                     ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 2) as avg_rating
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE r.scrape_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+                WHERE {_rd} >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
                   {pf_sql}
+                  AND {_rd} IS NOT NULL
                 GROUP BY yw, t.sentiment
                 ORDER BY yw
             """, digest_params)
@@ -886,9 +1212,12 @@ def get_cxo_trends(
             # 7. Category momentum — compare first half vs second half of period
             cur.execute(f"""
                 SELECT
-                    CASE WHEN r.scrape_date < (
-                        SELECT DATE_ADD(MIN(r2.scrape_date),
-                            INTERVAL DATEDIFF(MAX(r2.scrape_date), MIN(r2.scrape_date))/2 DAY)
+                    CASE WHEN {_rd} < (
+                        SELECT DATE_ADD(MIN(STR_TO_DATE(REGEXP_REPLACE(r2.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')),
+                            INTERVAL DATEDIFF(
+                                MAX(STR_TO_DATE(REGEXP_REPLACE(r2.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')),
+                                MIN(STR_TO_DATE(REGEXP_REPLACE(r2.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y'))
+                            )/2 DAY)
                         FROM raw_reviews r2 WHERE 1=1 {pf_sql} {date_filter}
                     ) THEN 'first' ELSE 'second' END as half,
                     t.primary_categories, COUNT(*) as count
@@ -896,6 +1225,7 @@ def get_cxo_trends(
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE 1=1 {pf_sql} {date_filter}
                   AND t.sentiment = 'Negative'
+                  AND {_rd} IS NOT NULL
                 GROUP BY half, t.primary_categories
             """, list(base_params) * 2)
             momentum_rows = cur.fetchall()
@@ -1543,7 +1873,7 @@ def get_rating_trends(
 ):
     """
     Returns per-product daily data for the rating trend chart:
-      - daily_avg: avg rating from scraped reviews on that day
+      - daily_avg: avg rating from reviews on that review date
       - count: number of reviews that day
       - overall: Amazon overall rating from product_ratings_snapshot
       - total_ratings: total Amazon ratings count from snapshot
@@ -1554,20 +1884,28 @@ def get_rating_trends(
             products = resolve_products(product, category)
             pf_sql, base_params = product_filter_sql(products)
 
-            # Daily avg rating — grouped by scrape_date (when we ran the pipeline).
-            # The UI date filter is for review dates, not scrape dates, so we ignore it here.
-            # This ensures snapshot + review-avg data always shows regardless of filter state.
+            _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
+            date_filter = ""
+            if date_from:
+                date_filter += f" AND {_rd} >= %s"
+                base_params.append(date_from)
+            if date_to:
+                date_filter += f" AND {_rd} <= %s"
+                base_params.append(date_to)
+
+            # Daily avg rating — grouped by review_date so review-derived charts align to the selected window.
             cur.execute(f"""
                 SELECT
-                    r.scrape_date as day,
+                    DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day,
                     r.product_name,
                     ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 2) as daily_avg,
                     COUNT(*) as review_count
                 FROM raw_reviews r
-                WHERE 1=1 {pf_sql}
-                GROUP BY r.scrape_date, r.product_name
-                ORDER BY r.scrape_date
-            """, base_params)
+                WHERE 1=1 {pf_sql} {date_filter}
+                  AND {_rd} IS NOT NULL
+                GROUP BY day, r.product_name
+                ORDER BY day
+            """, list(base_params))
             daily_rows = cur.fetchall()
 
             # Amazon overall ratings — join on ASIN so product_name mismatches don't matter

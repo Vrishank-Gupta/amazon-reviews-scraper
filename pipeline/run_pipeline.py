@@ -2,11 +2,14 @@ import subprocess
 import sys
 import os
 import pymysql
-from dotenv import load_dotenv
 
-# Load .env from project root
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(project_root, ".env"))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from shared.env import load_project_env
+
+load_project_env()
 
 
 def get_conn():
@@ -45,13 +48,13 @@ try:
 
     print("Step 1/2: Scraping reviews...")
     subprocess.check_call(
-        ["python", os.path.join(pipeline_dir, "scraper_runner.py")],
+        [sys.executable, os.path.join(pipeline_dir, "scraper_runner.py")],
         cwd=pipeline_dir,  # run from pipeline/ so local imports resolve
     )
 
     print("Step 2/2: Tagging reviews...")
     subprocess.check_call(
-        ["python", os.path.join(pipeline_dir, "tagger.py")],
+        [sys.executable, os.path.join(pipeline_dir, "tagger.py")],
         cwd=pipeline_dir,  # run from pipeline/ so local imports resolve
     )
 

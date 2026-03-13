@@ -5,15 +5,20 @@ in batches, and writes sentiment + category tags to review_tags.
 """
 import json
 import os
+import sys
 import pymysql
 from openai import OpenAI
-from dotenv import load_dotenv
 
 from utils.taxonomy import TAXONOMY
 
 # ── Config ────────────────────────────────────────────────────────────────────
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(project_root, ".env"))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from shared.env import load_project_env
+
+load_project_env()
 
 BATCH_SIZE = 5
 MODEL      = "gpt-4o-mini"

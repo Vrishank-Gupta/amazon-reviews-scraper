@@ -7,10 +7,10 @@ Login detection watches the browser automatically — no terminal input needed.
 import csv
 import os
 import random
+import sys
 import time
 
 import pymysql
-from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -19,7 +19,12 @@ from scraper import scrape_reviews_for_asin, scrape_product_rating
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(project_root, ".env"))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from shared.env import load_project_env
+
+load_project_env()
 
 CHROMEDRIVER_PATH   = os.getenv("CHROMEDRIVER_PATH", "")
 ASINS_CSV           = os.path.join(project_root, "data", "asins.csv")

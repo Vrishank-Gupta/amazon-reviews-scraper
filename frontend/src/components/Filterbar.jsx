@@ -2,7 +2,7 @@
  * FilterBar — category tree + date + sentiment + rating filters
  * onChange(updates) receives a partial filter object to merge into App state.
  */
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { SlidersHorizontal, X, ChevronDown, Calendar, Package } from 'lucide-react'
 
 const SC = { Positive:'#22c55e', Neutral:'#eab308', Negative:'#ef4444' }
@@ -147,6 +147,25 @@ function ProductDropdown({ filters, options, onChange }) {
   const categories = Object.keys(tree)
   const activeCat  = filters.product_category
   const activeProds = filters.product || []
+  const [query, setQuery] = useState('')
+
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredCategories = useMemo(() => {
+    if (!normalizedQuery) return categories
+    return categories.filter(cat => {
+      if (cat.toLowerCase().includes(normalizedQuery)) return true
+      return (tree[cat] || []).some(prod => prod.toLowerCase().includes(normalizedQuery))
+    })
+  }, [categories, normalizedQuery, tree])
+
+  const uncategorisedProducts = useMemo(
+    () => all.filter(p => !categories.some(c => (tree[c] || []).includes(p))),
+    [all, categories, tree]
+  )
+  const filteredUncategorisedProducts = useMemo(() => {
+    if (!normalizedQuery) return uncategorisedProducts
+    return uncategorisedProducts.filter(prod => prod.toLowerCase().includes(normalizedQuery))
+  }, [normalizedQuery, uncategorisedProducts])
 
   const isProdSelected = (prod) => {
     if (!activeCat && activeProds.length === 0) return true
@@ -189,6 +208,17 @@ function ProductDropdown({ filters, options, onChange }) {
     <Dropdown trigger={() => <PillBtn label={chipLabel} active={isFiltered} icon={<Package size={12} />} />} minWidth={260}>
       {(close) => (
         <div style={{ maxHeight:340, overflowY:'auto' }}>
+          <div style={{ padding:10, borderBottom:'1px solid var(--border)', background:'#14141e', position:'sticky', top:0, zIndex:1 }}>
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search category or product"
+              style={{
+                width:'100%', padding:'7px 10px', background:'var(--surface2)', border:'1px solid var(--border)',
+                borderRadius:8, color:'var(--text)', fontSize:12, outline:'none', fontFamily:'DM Sans',
+              }}
+            />
+          </div>
           <button onClick={() => selectAll(close)} style={{
             width:'100%', padding:'9px 14px', textAlign:'left',
             background:!isFiltered?'rgba(255,78,26,0.08)':'transparent',
@@ -200,8 +230,11 @@ function ProductDropdown({ filters, options, onChange }) {
             <Check sel={!isFiltered} /> All Products
           </button>
 
-          {categories.map(cat => {
+          {filteredCategories.map(cat => {
             const prods = tree[cat] || []
+            const visibleProds = normalizedQuery
+              ? prods.filter(prod => prod.toLowerCase().includes(normalizedQuery) || cat.toLowerCase().includes(normalizedQuery))
+              : prods
             const catSel = isCatSelected(cat)
             return (
               <div key={cat}>
@@ -216,9 +249,9 @@ function ProductDropdown({ filters, options, onChange }) {
                 }}>
                   <Check sel={catSel} />
                   📁 {cat}
-                  <span style={{ marginLeft:'auto', fontSize:10, color:'var(--text-muted)', fontWeight:400 }}>{prods.length}</span>
+                  <span style={{ marginLeft:'auto', fontSize:10, color:'var(--text-muted)', fontWeight:400 }}>{visibleProds.length}</span>
                 </button>
-                {prods.map(prod => {
+                {visibleProds.map(prod => {
                   const sel = isProdSelected(prod)
                   return (
                     <button key={prod} onClick={() => toggleProduct(prod)} style={{
@@ -237,7 +270,7 @@ function ProductDropdown({ filters, options, onChange }) {
             )
           })}
 
-          {all.filter(p => !categories.some(c => (tree[c]||[]).includes(p))).map(prod => {
+          {filteredUncategorisedProducts.map(prod => {
             const sel = isProdSelected(prod)
             return (
               <button key={prod} onClick={() => toggleProduct(prod)} style={{
@@ -252,6 +285,11 @@ function ProductDropdown({ filters, options, onChange }) {
               </button>
             )
           })}
+          {filteredCategories.length === 0 && filteredUncategorisedProducts.length === 0 && (
+            <div style={{ padding:'12px 14px', color:'var(--text-muted)', fontSize:12 }}>
+              No matching products
+            </div>
+          )}
         </div>
       )}
     </Dropdown>

@@ -79,6 +79,11 @@ export async function fetchPipeline() {
   return res.json()
 }
 
+export async function fetchPipelineCapabilities() {
+  const res = await fetch(`${BASE}/pipeline/capabilities`)
+  return res.json()
+}
+
 export async function runPipeline(days = 30, asins = []) {
   const res = await fetch(`${BASE}/pipeline/run`, {
     method: 'POST',
@@ -86,8 +91,27 @@ export async function runPipeline(days = 30, asins = []) {
     body: JSON.stringify({ days, asins }),
   })
   if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.detail || 'Failed to start pipeline')
+    const raw = await res.text()
+    try {
+      const err = JSON.parse(raw)
+      throw new Error(err.detail || 'Failed to start pipeline')
+    } catch {
+      throw new Error(raw || 'Failed to start pipeline')
+    }
+  }
+  return res.json()
+}
+
+export async function fetchPipelineJobs(limit = 10) {
+  const res = await fetch(`${BASE}/pipeline/jobs?limit=${limit}`)
+  return res.json()
+}
+
+export async function fetchPipelineJob(jobId) {
+  const res = await fetch(`${BASE}/pipeline/jobs/${jobId}`)
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || 'Failed to fetch pipeline job')
   }
   return res.json()
 }
