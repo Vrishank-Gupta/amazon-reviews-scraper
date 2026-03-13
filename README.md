@@ -11,6 +11,10 @@ This repo does four things:
 
 This repo is optimized for Windows + MySQL + Vite (React) + FastAPI.
 
+For deployment decision-making, see:
+
+- `ops/deploy/deployment-options-cto.md`
+
 ## Plain-English Overview
 
 Think of this setup as 3 separate parts:
@@ -106,6 +110,13 @@ There are 2 separate frontend surfaces:
 
 - Dashboard: analytics UI only, no pipeline controls
 - Pipeline Console: the single analyst page for running the pipeline, custom runs, ASIN management, and category management
+
+### Dashboard behavior at larger portfolio size
+
+- tables continue to show the full product list
+- product-heavy charts focus on the top products by default when no specific product filter is applied
+- selecting products from filters overrides that default and shows the products you chose
+- this keeps 20+ ASIN portfolios readable without hiding detail from analysts
 
 ## Environment Selection
 

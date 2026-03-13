@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CartesianGrid,
   Line,
@@ -11,6 +11,7 @@ import {
 } from 'recharts'
 
 const PALETTE = ['#ff4e1a', '#ff8c42', '#ffd166', '#06d6a0', '#60a5fa', '#a855f7', '#ec4899', '#14b8a6', '#f43f5e', '#34d399', '#fb923c', '#c084fc']
+const PRODUCT_DISPLAY_LIMIT = 5
 
 function fmtDay(day) {
   if (!day) return ''
@@ -76,6 +77,23 @@ function SeriesLegend({ products, colorMap }) {
   )
 }
 
+function rankProductsForFocus(products, days, explicitProducts = [], limit = PRODUCT_DISPLAY_LIMIT) {
+  if (explicitProducts?.length) return explicitProducts
+  const latestDay = [...(days || [])].reverse().find(day =>
+    products.some(product => day.products?.[product]?.total_ratings != null || day.products?.[product]?.overall != null),
+  )
+  const ranked = [...products]
+    .sort((a, b) => {
+      const aScale = latestDay?.products?.[a]?.total_ratings ?? 0
+      const bScale = latestDay?.products?.[b]?.total_ratings ?? 0
+      if (bScale !== aScale) return bScale - aScale
+      const aOverall = latestDay?.products?.[a]?.overall ?? 0
+      const bOverall = latestDay?.products?.[b]?.overall ?? 0
+      return bOverall - aOverall
+    })
+  return ranked.slice(0, limit)
+}
+
 export default function RatingTrendChart({ filters }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -102,6 +120,14 @@ export default function RatingTrendChart({ filters }) {
       .catch(() => setLoading(false))
   }, [productCategory, JSON.stringify(activeProducts), dateFrom, dateTo])
 
+  const products = data?.products || []
+  const days = data?.days || []
+  const displayedProducts = useMemo(
+    () => rankProductsForFocus(products, days, activeProducts),
+    [products, days, activeProducts],
+  )
+  const limitedProducts = !activeProducts.length && products.length > displayedProducts.length
+
   if (loading) {
     return <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading...</div>
   }
@@ -113,24 +139,21 @@ export default function RatingTrendChart({ filters }) {
       </div>
     )
   }
-
-  const products = data.products || []
-  const days = data.days || []
-  const colorMap = Object.fromEntries(products.map((product, index) => [product, PALETTE[index % PALETTE.length]]))
+  const colorMap = Object.fromEntries(displayedProducts.map((product, index) => [product, PALETTE[index % PALETTE.length]]))
   const byDay = Object.fromEntries(days.map(day => [day.day, day.products]))
   const spine = buildSpine(days)
 
-  const overallRows = fillPerProduct(spine, products, byDay, 'overall')
-  const totalRatingsRows = fillPerProduct(spine, products, byDay, 'total_ratings')
+  const overallRows = fillPerProduct(spine, displayedProducts, byDay, 'overall')
+  const totalRatingsRows = fillPerProduct(spine, displayedProducts, byDay, 'total_ratings')
   const dailyAvgRows = spine.map(day => ({
     day,
-    ...Object.fromEntries(products.map(product => [product, byDay[day]?.[product]?.daily_avg ?? null])),
+    ...Object.fromEntries(displayedProducts.map(product => [product, byDay[day]?.[product]?.daily_avg ?? null])),
   }))
 
-  const hasOverall = days.some(day => products.some(product => day.products[product]?.overall != null))
-  const hasDailyAvg = days.some(day => products.some(product => day.products[product]?.daily_avg != null))
-  const hasTotalRatings = days.some(day => products.some(product => day.products[product]?.total_ratings != null))
-  const dailyPointCount = dailyAvgRows.filter(row => products.some(product => row[product] != null)).length
+  const hasOverall = days.some(day => displayedProducts.some(product => day.products[product]?.overall != null))
+  const hasDailyAvg = days.some(day => displayedProducts.some(product => day.products[product]?.daily_avg != null))
+  const hasTotalRatings = days.some(day => displayedProducts.some(product => day.products[product]?.total_ratings != null))
+  const dailyPointCount = dailyAvgRows.filter(row => displayedProducts.some(product => row[product] != null)).length
   const dotStyle = count => (count <= 8 ? { r: 4, fill: 'inherit', stroke: '#fff', strokeWidth: 1.5 } : false)
 
   const xAxisProps = {
@@ -159,7 +182,7 @@ export default function RatingTrendChart({ filters }) {
     )
   }
 
-  const latestTotals = products
+  const latestTotals = displayedProducts
     .map(product => ({
       product,
       current: totalRatingsRows[totalRatingsRows.length - 1]?.[product] ?? null,
@@ -177,6 +200,11 @@ export default function RatingTrendChart({ filters }) {
               - public product-page rating shown on Amazon
             </span>
           </div>
+          {limitedProducts && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+              Showing top {displayedProducts.length} products by Amazon rating scale. Use product filters to focus on specific ASINs.
+            </div>
+          )}
           <ResponsiveContainer width="100%" height={170}>
             <LineChart data={overallRows} margin={{ top: 4, right: 16, left: -10, bottom: 0 }}>
               <CartesianGrid {...gridProps} />
@@ -184,7 +212,7 @@ export default function RatingTrendChart({ filters }) {
               <YAxis domain={([min, max]) => [Math.max(1, Math.floor((min - 0.2) * 2) / 2), Math.min(5, Math.ceil((max + 0.2) * 2) / 2)]} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={value => value.toFixed(1)} />
               <Tooltip content={metricTooltip(value => `${value.toFixed(2)} ★`)} />
               <ReferenceLine y={4} stroke="var(--border)" strokeDasharray="4 2" />
-              {products.map(product => (
+              {displayedProducts.map(product => (
                 <Line
                   key={product}
                   type="monotone"
@@ -198,7 +226,7 @@ export default function RatingTrendChart({ filters }) {
               ))}
             </LineChart>
           </ResponsiveContainer>
-          <SeriesLegend products={products} colorMap={colorMap} />
+          <SeriesLegend products={displayedProducts} colorMap={colorMap} />
         </div>
       )}
 
@@ -242,7 +270,7 @@ export default function RatingTrendChart({ filters }) {
               <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={value => value.toFixed(0)} />
               <Tooltip content={metricTooltip(value => `${value.toFixed(2)} ★`)} />
               <ReferenceLine y={4} stroke="var(--border)" strokeDasharray="4 2" />
-              {products.map(product => (
+              {displayedProducts.map(product => (
                 <Line
                   key={product}
                   type="monotone"
@@ -256,7 +284,7 @@ export default function RatingTrendChart({ filters }) {
               ))}
             </LineChart>
           </ResponsiveContainer>
-          <SeriesLegend products={products} colorMap={colorMap} />
+          <SeriesLegend products={displayedProducts} colorMap={colorMap} />
         </div>
       )}
     </div>

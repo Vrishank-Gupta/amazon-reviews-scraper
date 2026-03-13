@@ -26,11 +26,26 @@ export function downloadCSV(reviews) {
 // ── Constants ─────────────────────────────────────────────────────────────────
 const SC = { Positive: '#22c55e', Negative: '#ef4444', Neutral: '#eab308' }
 const PAL = ['#ff4e1a','#ff8c42','#ffd166','#06d6a0','#60a5fa','#a855f7','#ec4899','#14b8a6','#f43f5e','#34d399','#fb923c','#c084fc']
+const PRODUCT_DISPLAY_LIMIT = 5
 
 function fmtDay(d) {
   if (!d) return ''
   try { return new Date(d).toLocaleDateString('en-IN', { day:'numeric', month:'short' }) }
   catch { return d }
+}
+
+function rankProductsForFocus(allProducts, productSummary, explicitProducts = [], limit = PRODUCT_DISPLAY_LIMIT) {
+  if (explicitProducts?.length) return explicitProducts
+  const scored = (productSummary || [])
+    .map(row => ({
+      name: row.product,
+      score: ((row.review_count ?? row.total ?? 0) * 10) + (row.neg_pct ?? 0),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .map(row => row.name)
+  const ranked = scored.filter(Boolean)
+  const fallback = allProducts.filter(product => !ranked.includes(product))
+  return [...ranked, ...fallback].slice(0, limit)
 }
 
 // ── Info tooltip ──────────────────────────────────────────────────────────────
@@ -768,6 +783,7 @@ export default function TrendsPage({ products: allProducts, filters, tree }) {
   const [heatmapDrill, setHeatmapDrill] = useState(null)
   const [hiddenCats,  setHiddenCats]  = useState(new Set())
   const [hiddenProds, setHiddenProds] = useState(new Set())
+  const [showAllProds, setShowAllProds] = useState(false)
 
   // Derive selected products from filter state
   const selectedProducts = useMemo(() =>
@@ -806,6 +822,15 @@ export default function TrendsPage({ products: allProducts, filters, tree }) {
   const productSummary = data?.product_summary || []
   const weeklyDigest   = data?.weekly_digest || []
   const issueHeatmap   = data?.issue_heatmap || { rows: [], categories: [], products: [] }
+  const focusedProds = useMemo(
+    () => rankProductsForFocus(allProds, productSummary, selectedProducts),
+    [allProds, productSummary, selectedProducts],
+  )
+  const displayedProds = selectedProducts.length || showAllProds ? allProds : focusedProds
+  const displayedRatingDist = selectedProducts.length || showAllProds
+    ? ratingDist
+    : ratingDist.filter(row => displayedProds.includes(row.product))
+  const limitedProducts = !selectedProducts.length && allProds.length > displayedProds.length
 
   const healthData = dailyTrend.map(d => ({
     day: d.day,
@@ -915,7 +940,7 @@ export default function TrendsPage({ products: allProducts, filters, tree }) {
           tip="This highlights products where 1-star and 5-star review shares are both meaningfully present. That usually signals inconsistent customer experience, which average rating alone can hide."
           sub="High 1★ and high 5★ together = inconsistent experience worth investigating"
         >
-          <ConsistencyWatch ratingDist={ratingDist} productSummary={productSummary} />
+          <ConsistencyWatch ratingDist={displayedRatingDist} productSummary={productSummary} />
         </Card>
       </div>
 
@@ -1036,10 +1061,24 @@ export default function TrendsPage({ products: allProducts, filters, tree }) {
       <Card
         title="Problem Rate by Product Over Time"
         tip="Daily negative rate % for each product plotted as separate lines. Use this to compare which products are improving or deteriorating relative to each other. The red dashed line at 50% is a critical threshold — any product above it needs urgent attention. Click legend buttons to isolate a product."
-        sub="Tracks which product is driving portfolio pressure"
+        sub={limitedProducts
+          ? `Tracks which product is driving portfolio pressure · showing top ${displayedProds.length} by current impact`
+          : 'Tracks which product is driving portfolio pressure'}
         controls={
-          <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-            {allProds.map((p,i) => (
+          <div style={{ display:'flex', flexWrap:'wrap', gap:6, alignItems:'center' }}>
+            {limitedProducts && (
+              <button
+                onClick={() => setShowAllProds(v => !v)}
+                style={{
+                  padding:'3px 9px', borderRadius:5, cursor:'pointer', fontFamily:'DM Sans',
+                  border:'1px solid var(--border)', background:'var(--surface2)', color:'var(--text)',
+                  fontSize:11, fontWeight:700,
+                }}
+              >
+                {showAllProds ? 'Focus top products' : `Show all ${allProds.length}`}
+              </button>
+            )}
+            {displayedProds.map((p,i) => (
               <button key={p} onClick={() => toggleProd(p)} style={{
                 display:'flex', alignItems:'center', gap:5, padding:'3px 9px', borderRadius:5, cursor:'pointer', fontFamily:'DM Sans',
                 border:`1px solid ${hiddenProds.has(p)?'var(--border)':PAL[i%PAL.length]+'80'}`,
@@ -1062,7 +1101,7 @@ export default function TrendsPage({ products: allProducts, filters, tree }) {
               <YAxis domain={[0,100]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`} />
               <Tooltip content={<CT fmt={v=>v!=null?`${v}%`:'no data'} />} />
               <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.3} />
-              {allProds.map((p,i) => !hiddenProds.has(p) && (
+              {displayedProds.map((p,i) => !hiddenProds.has(p) && (
                 <Line key={p} type="monotone" dataKey={p} stroke={PAL[i%PAL.length]}
                   strokeWidth={2} dot={false} activeDot={{ r:4 }} connectNulls />
               ))}
@@ -1151,11 +1190,13 @@ export default function TrendsPage({ products: allProducts, filters, tree }) {
       <Card
         title="Rating Distribution by Product"
         tip="Horizontal bar breakdown of 1★ through 5★ reviews per product. A healthy product is top-heavy — most reviews at 4★ and 5★. A bimodal distribution (both 1★ and 5★ are high) means polarised opinions, often a sign of a quality consistency issue."
-        sub="Healthy = top-heavy (4★ + 5★). Bimodal = quality consistency issue."
+        sub={limitedProducts
+          ? `Healthy = top-heavy (4★ + 5★). Showing top ${displayedProds.length} products by default.`
+          : 'Healthy = top-heavy (4★ + 5★). Bimodal = quality consistency issue.'}
       >
-        {!ratingDist.length ? <Empty /> : (
+        {!displayedRatingDist.length ? <Empty /> : (
           <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
-            {ratingDist.map(row => {
+            {displayedRatingDist.map(row => {
               const total = [1,2,3,4,5].reduce((s,n)=>s+(row[n]||0),0)
               return (
                 <div key={row.product} style={{ display:'flex', flexDirection:'column', gap:5 }}>
