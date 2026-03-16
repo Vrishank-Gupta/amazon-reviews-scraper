@@ -4,68 +4,96 @@ Voice of Customer analytics for Amazon.in products.
 
 This repo does four things:
 
-- scrape Amazon reviews with Selenium + Chrome
-- tag each review with sentiment, primary categories, and sub-tags
-- store analytics data in MySQL
-- expose a React dashboard for CXO and analyst use
+- scrapes Amazon reviews with Selenium + Chrome
+- tags each review with sentiment, primary categories, and sub-tags
+- stores analytics data in MySQL
+- exposes a React dashboard for CXO and analyst use
 
-This repo is optimized for Windows + MySQL + Vite (React) + FastAPI.
+## Recommended deployment architecture
 
-For deployment decision-making, see:
+Use 4 separate parts in production:
 
-- `ops/deploy/deployment-options-cto.md`
+1. Frontend
+- host as a static site on Netlify
+- serves:
+  - `/`
+  - `/pipeline-console.html`
 
-## Plain-English Overview
+2. Backend API
+- host on a Linux VM
+- run with Docker
+- serves `/api/*`
 
-Think of this setup as 3 separate parts:
+3. MySQL
+- managed or VM-hosted remote MySQL
+- stores all analytics data and pipeline queue state
 
-1. Dashboard
-- this is the read-only analytics website
-- CXO and analysts open this to view insights
+4. Scraping machine
+- Windows machine with Chrome and Amazon login
+- either:
+  - analyst runs the pipeline manually from the laptop, or
+  - a Windows worker runs `pipeline/worker.py`
 
-2. Analyst Run Page
-- this is where analysts trigger the review refresh
-- use `pipeline-console.html`
+This keeps the frontend cheap and static, while the backend remains simple to operate on one VM.
 
-3. Scraping Worker
-- this is the machine that actually opens Chrome, logs into Amazon, fetches reviews, and tags them
-- for production, this should be a Windows machine
-
-### Who uses what
+## Who uses what
 
 - CXO:
   - open the main dashboard only
 - Analyst:
-  - open `pipeline-console.html`
+  - use the dashboard
+  - click the `Pipeline` button in the header when they need to run or manage pipeline operations
 - Admin / you:
-  - deploy the dashboard
-  - configure the database
-  - keep the Windows worker machine running
+  - deploy the frontend
+  - deploy the backend
+  - configure MySQL
+  - set up the Windows scraping machine if you want click-to-run from production
 
-### The simplest mental model
+## Frontend / backend split
 
-- local Windows mode:
-  - everything can run on one machine
-- production mode:
-  - Linux server hosts the dashboard
-  - remote MySQL stores the data
-  - Windows worker does the scraping
+The frontend is now explicitly separated from the backend:
 
-### Important current requirement
+- frontend talks to the backend using `VITE_API_BASE_URL`
+- backend enables CORS using `ALLOWED_ORIGINS`
+- frontend no longer assumes `/api` is on the same host in production
 
-For worker mode to function, the database user must have access to:
+### Production hostnames
 
-- `pipeline_jobs`
-- `pipeline_workers`
+Recommended:
 
-Those tables are already included in `ops/mysql/mysql_setup.sql`.
+- frontend: `https://voc.yourcompany.com`
+- backend: `https://voc-api.yourcompany.com`
 
-## Repo Structure
+Set:
+
+- frontend env: `VITE_API_BASE_URL=https://voc-api.yourcompany.com`
+- backend env: `ALLOWED_ORIGINS=https://voc.yourcompany.com`
+
+Networking note:
+
+- for LAN testing, use the machine's real local network IP, not Docker / WSL / virtual adapter IPs
+- for production, backend HTTPS must be reachable from the frontend host and intended client devices
+
+## Pipeline entry point
+
+The dashboard header now includes a `Pipeline` button.
+
+That button opens:
+
+- `pipeline-console.html`
+
+This keeps the main dashboard clean, but makes pipeline operations reachable from the frontend without exposing controls inline in every dashboard page.
+
+## Repo structure
 
 ```text
 amazon-reviews-scraper/
 |-- .env
-|-- .env.production
+|-- .env.backend.production
+|-- .env.worker.production
+|-- docker-compose.local.yml
+|-- docker-compose.backend.yml
+|-- netlify.toml
 |-- data/
 |   |-- asins.csv
 |   `-- categories.json
@@ -73,125 +101,159 @@ amazon-reviews-scraper/
 |   |-- main.py
 |   |-- requirements.txt
 |   `-- Dockerfile
-|-- pipeline/
-|   |-- start_pipeline.py
-|   |-- run_pipeline.py
-|   |-- scraper_runner.py
-|   |-- scraper.py
-|   |-- tagger.py
-|   |-- worker.py
-|   |-- requirements.txt
-|   `-- utils/taxonomy.py
 |-- frontend/
+|   |-- .env.production
 |   |-- index.html
-|   |-- weekly-run.html
 |   |-- pipeline-console.html
+|   |-- weekly-run.html
 |   |-- package.json
 |   |-- vite.config.js
-|   |-- nginx.conf
 |   `-- src/
 |-- ops/
-|   |-- mysql/mysql_setup.sql
+|   |-- mysql/
+|   |   |-- deployment.sql
+|   |   `-- mysql_setup.sql
 |   |-- deploy/
+|   |   |-- deployment-options-cto.md
 |   |   |-- local-docker.md
 |   |   `-- production.md
 |   `-- windows/
 |       |-- start_pipeline_worker.ps1
 |       `-- register_pipeline_worker_task.ps1
-|-- shared/
-|   `-- env.py
-|-- docker-compose.local.yml
-`-- docker-compose.prod.yml
+|-- pipeline/
+|   |-- run_pipeline.py
+|   |-- scraper_runner.py
+|   |-- tagger.py
+|   |-- worker.py
+|   `-- requirements.txt
+`-- shared/
+    `-- env.py
 ```
 
-## Frontend Surfaces
+## SQL deployment file
 
-There are 2 separate frontend surfaces:
+Use this file for deployment-time DB setup:
 
-- Dashboard: analytics UI only, no pipeline controls
-- Pipeline Console: the single analyst page for running the pipeline, custom runs, ASIN management, and category management
+- `ops/mysql/deployment.sql`
 
-### Dashboard behavior at larger portfolio size
+It creates:
 
-- tables continue to show the full product list
-- product-heavy charts focus on the top products by default when no specific product filter is applied
-- selecting products from filters overrides that default and shows the products you chose
-- this keeps 20+ ASIN portfolios readable without hiding detail from analysts
+- database `world`
+- app user `llm_reader`
+- all required tables
+- worker queue tables
+- seed row for `pipeline_runs`
 
-## Environment Selection
+Keep `ops/mysql/mysql_setup.sql` only as the older compatibility script. For new deployments, use `ops/mysql/deployment.sql`.
 
-- normal local Python runs load `.env`
-- local Docker injects `.env` and sets `APP_ENV=local`
-- production Docker injects `.env.production` and sets `APP_ENV=production`
-- if you need an explicit override outside Docker, set `APP_ENV_FILE` to a specific env file path before starting Python
+## Environment variables
 
-## URLs
+### Local Python / worker
 
-Local `uvicorn` + Vite:
+Uses:
 
-- Dashboard: `http://localhost:5173`
-- Pipeline Console: `http://localhost:5173/pipeline-console.html`
+- `.env`
 
-Local Docker:
+Important values:
 
-- Dashboard: `http://localhost:8080`
-- Pipeline Console: `http://localhost:8080/pipeline-console.html`
+- `DB_HOST`
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_NAME`
+- `OPENAI_API_KEY`
+- `CHROME_PROFILE`
+- `PIPELINE_EXECUTION_MODE`
 
-Production Docker:
+### Backend VM
 
-- Dashboard: `http://<server>/`
-- Pipeline Console: `http://<server>/pipeline-console.html`
+Uses:
 
-## Local Run
+- `.env.backend.production`
+
+Current file is already tracked with placeholders. Fill it and deploy.
+
+Important values:
+
+- `DB_HOST`
+- `DB_USER=llm_reader`
+- `DB_PASSWORD`
+- `DB_NAME=world`
+- `OPENAI_API_KEY`
+- `ALLOWED_ORIGINS`
+- `PIPELINE_EXECUTION_MODE=worker`
+- `PIPELINE_WORKER_TIMEOUT_SECONDS`
+
+### Windows worker machine
+
+Uses:
+
+- `.env.worker.production`
+
+Current file is already tracked with placeholders. Fill it if you are using hosted worker mode.
+
+Important values:
+
+- `DB_HOST`
+- `DB_USER=llm_reader`
+- `DB_PASSWORD`
+- `DB_NAME=world`
+- `OPENAI_API_KEY`
+- `CHROME_PROFILE`
+- `CHROMEDRIVER_PATH`
+- `SCRAPER_PAUSE`
+- `PIPELINE_WORKER_ID`
+- `PIPELINE_WORKER_POLL_SECONDS`
+- `PIPELINE_WORKER_HEARTBEAT_SECONDS`
+
+### Frontend static host
+
+Tracked frontend production env file:
+
+- `frontend/.env.production`
+
+If using Netlify, set the same value in the hosting environment:
+
+- `VITE_API_BASE_URL=https://voc-api.yourcompany.com`
+
+Do not include a trailing slash.
+
+## Local run
 
 ### Option 1: normal local development
 
-Terminal 1:
+Backend:
 
 ```powershell
 cd .\backend
 uvicorn main:app --reload --port 8000
 ```
 
-Terminal 2:
+Frontend:
 
 ```powershell
 cd .\frontend
 npm run dev
 ```
 
-Stop:
+URLs:
 
-- `Ctrl+C` in the backend terminal
-- `Ctrl+C` in the frontend terminal
+- dashboard: `http://localhost:5173`
+- pipeline console: `http://localhost:5173/pipeline-console.html`
 
-This mode is the simplest way to run the full app on one Windows machine, including direct UI-triggered pipeline runs.
+This is the best local mode if you want to scrape from the same Windows machine.
 
 ### Option 2: local Docker
-
-Optional build only:
-
-```powershell
-docker compose -f docker-compose.local.yml build
-```
-
-Start:
-
-```powershell
-docker compose -f docker-compose.local.yml up -d
-```
-
-Build and start:
 
 ```powershell
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
-Check status:
+URLs:
 
-```powershell
-docker compose -f docker-compose.local.yml ps
-```
+- dashboard: `http://localhost:8080`
+- pipeline console: `http://localhost:8080/pipeline-console.html`
+
+This is mainly for local packaging / deployment verification. Real Selenium scraping is still best run directly on Windows.
 
 Stop:
 
@@ -199,364 +261,188 @@ Stop:
 docker compose -f docker-compose.local.yml down
 ```
 
-### Local scraping
+## Production deployment
 
-If you are using normal local `uvicorn` + `npm run dev`, the Pipeline Console can trigger the pipeline directly on that Windows machine.
+### Frontend
 
-You can also run scraping manually:
+Recommended host:
 
-```powershell
-py .\pipeline\scraper_runner.py
-py .\pipeline\tagger.py
-```
+- Netlify
 
-Or:
+Why:
 
-```powershell
-py .\pipeline\run_pipeline.py
-```
+- static site only
+- simple multipage support
+- cheap
+- no need to run frontend in Docker on the VM
 
-### Local Docker notes
+Netlify config already exists at:
 
-- uses your existing `.env`
-- overrides `DB_HOST` to `host.docker.internal` by default
-- if MySQL is remote, set `DOCKER_DB_HOST`
-- the dashboard stays pipeline-free
-- use `/pipeline-console.html` for analyst pipeline operations
-- actual Selenium scraping is still best run on a Windows machine, not inside the Linux Docker container
-- if you want click-to-run from the Docker-hosted analyst pages, connect a Windows worker as described below
+- `netlify.toml`
 
-## Production Run
+Frontend deploy settings:
 
-Cheapest practical production setup:
+- base directory: `frontend`
+- build command: `npm run build`
+- publish directory: `dist`
+- env:
+  - `VITE_API_BASE_URL=https://voc-api.yourcompany.com`
 
-- one low-cost Linux VM
-- remote MySQL
+### Backend
+
+Recommended host:
+
+- one Linux VM
+
+Recommended runtime:
+
 - Docker Compose
-- frontend served by Nginx
-- backend served by Uvicorn
-- one separate Windows worker machine for scraping
 
-Required production files:
-
-- `backend/Dockerfile`
-- `frontend/Dockerfile`
-- `frontend/nginx.conf`
-- `docker-compose.prod.yml`
-- `.env.production`
-
-### Production quickstart
-
-1. Provision remote MySQL.
-2. Run `ops/mysql/mysql_setup.sql`.
-3. Fill `.env.production`.
-4. On the Linux VM, run:
+Backend deploy command:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.backend.yml up -d --build
 ```
 
 Useful commands:
 
 ```bash
-docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml logs -f
-docker compose -f docker-compose.prod.yml down
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.backend.yml ps
+docker compose -f docker-compose.backend.yml logs -f
+docker compose -f docker-compose.backend.yml down
+docker compose -f docker-compose.backend.yml up -d --build
 ```
 
-## Minimal Worker Setup
+Backend env file:
 
-This is the setup that removes terminals from the analyst workflow.
+- `.env.backend.production`
 
-### Why it exists
+Worker env file:
 
-The production Docker app can serve the dashboard and analyst pages, but reliable Amazon scraping still needs a browser-capable Windows machine with your Chrome profile and Amazon login session.
+- `.env.worker.production`
 
-So the minimal worker model is:
+### MySQL
 
-- Linux VM hosts the dashboard/backend
-- Windows worker machine runs `pipeline/worker.py`
-- analyst uses `pipeline-console.html`
-- backend enqueues a job in MySQL
-- Windows worker picks the job, runs the scraper/tagger, and updates status
+Run:
 
-### What the analyst sees
+- `ops/mysql/deployment.sql`
 
-On the Pipeline Console page:
-
-- current data freshness
-- whether a worker is connected
-- latest queued/running/completed job
-- run controls and product/category management
-
-The analyst does not need to open a terminal once the worker is installed and kept running.
-
-### Worker setup on the Windows machine
-
-Clone the repo on the Windows browser-capable machine and configure `.env` for the same remote MySQL used by production.
-
-Start the worker manually:
-
-```powershell
-py .\pipeline\worker.py
-```
-
-Or use the helper script:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\ops\windows\start_pipeline_worker.ps1
-```
-
-To register a scheduled task so the worker starts automatically at logon:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\ops\windows\register_pipeline_worker_task.ps1
-```
-
-### Worker env requirements
-
-The worker machine needs:
-
-- `.env` pointing to the same remote MySQL
-- `CHROME_PROFILE` pointing to the local Windows Chrome profile folder
-- a valid Amazon login session in that profile
-- Python dependencies installed
-- Chrome available on that machine
-
-### Queue model
-
-The worker model uses these database tables:
-
-- `pipeline_jobs`
-- `pipeline_workers`
-
-They are already included in `ops/mysql/mysql_setup.sql`.
-
-## Setup
-
-### 1. Prereqs
-
-- Python 3.10+
-- Node 18+
-- MySQL 8+ or compatible MariaDB
-- Google Chrome installed for Selenium
-
-### 2. Create `.env`
+### Production URLs
 
 Example:
 
-```env
-DB_HOST=localhost
-DB_USER=your_mysql_user
-DB_PASSWORD=your_mysql_password
-DB_NAME=voc
-OPENAI_API_KEY=sk-...
-ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
-CHROMEDRIVER_PATH=
-CHROME_PROFILE=C:\amazon_profile
-PIPELINE_EXECUTION_MODE=auto
-```
+- frontend dashboard: `https://voc.yourcompany.com`
+- frontend pipeline page: `https://voc.yourcompany.com/pipeline-console.html`
+- backend API: `https://voc-api.yourcompany.com`
 
-### 3. Fill `.env.production`
+## How pipeline works in production
 
-Example production shape:
+You have 2 valid models.
 
-```env
-DB_HOST=your-remote-mysql-host
-DB_USER=llm_reader
-DB_PASSWORD=replace_with_real_password
-DB_NAME=world
-OPENAI_API_KEY=replace_if_summary_generation_is_needed
-ALLOWED_ORIGINS=http://your-server-ip,http://your-domain
-PIPELINE_EXECUTION_MODE=worker
-```
+### Model A: cheapest manual model
 
-### 4. Add products to scrape
+- frontend is hosted
+- backend is hosted
+- MySQL is hosted
+- analyst runs pipeline manually from a Windows laptop
 
-Edit `data/asins.csv`, or use the Pipeline Console page to add ASINs and categories.
+Analyst laptop needs:
 
-### 5. Create MySQL tables
+- Python
+- Chrome
+- repo code
+- `.env` pointing to remote MySQL
+- Amazon login in the configured Chrome profile
 
-Recommended:
-
-- use `ops/mysql/mysql_setup.sql`
-
-That file is intended to be the from-scratch setup script for DevOps. It creates:
-
-- database `world`
-- app user `llm_reader` for both `%` and `localhost`
-- all required app tables
-- pipeline queue tables
-- the seed row for `pipeline_runs`
-
-Core tables expected by the app:
-
-- `raw_reviews`
-- `review_tags`
-- `pipeline_runs`
-- `pipeline_jobs`
-- `pipeline_workers`
-- `product_summaries`
-- `product_ratings_snapshot`
-
-### 6. Install dependencies
+Command:
 
 ```powershell
-py -m pip install -r .\backend\requirements.txt
-py -m pip install -r .\pipeline\requirements.txt
-cd .\frontend
-npm install
+py .\pipeline\run_pipeline.py
 ```
 
-## How the product works now
+This is the cheapest model and does not need an always-on worker.
 
-### Dashboard tabs
+### Model B: click-to-run worker model
 
-- Overview: portfolio KPIs, issue priorities, customer strengths, and summary tables
-- Reviews: sortable tagged reviews table with CSV export
-- Trends: CXO daily trends, rating movement, issue watchlists, and product comparisons
+- frontend is hosted
+- backend is hosted
+- MySQL is hosted
+- Windows worker runs `pipeline/worker.py`
 
-### Pipeline page
+Analyst uses:
 
-- Pipeline Console (`/pipeline-console.html`): analyst page for run setup, product selection, ASIN add/update, and category management
+- `https://voc.yourcompany.com/pipeline-console.html`
 
-### Running the pipeline from the UI
+Backend queues a job in MySQL.
+Windows worker picks it up and runs scraping.
 
-There are two execution modes:
+This is smoother operationally, but requires a Windows machine to stay available.
 
-- direct mode
-- worker mode
+## What DevOps needs to deploy
 
-Direct mode:
+Ask DevOps for:
 
-- used automatically on a Windows host when `PIPELINE_EXECUTION_MODE=auto`
-- backend launches `pipeline/start_pipeline.py`
-- good for local single-machine usage
+1. Frontend static hosting
+- Netlify site connected to this repo
+- build base: `frontend`
+- build command: `npm run build`
+- publish dir: `dist`
+- env:
+  - `VITE_API_BASE_URL=https://voc-api.yourcompany.com`
 
-Worker mode:
+2. Backend VM
+- one Linux VM
+- Docker installed
+- Docker Compose plugin installed
+- repo copied or pulled onto the VM
+- `.env.backend.production` filled
+- backend started with:
+  - `docker compose -f docker-compose.backend.yml up -d --build`
 
-- used automatically on non-Windows when `PIPELINE_EXECUTION_MODE=auto`
-- recommended for production via `PIPELINE_EXECUTION_MODE=worker`
-- backend writes a job to `pipeline_jobs`
-- Windows worker polls, claims, runs, and updates status
+3. Backend domain / routing
+- one DNS name for backend, for example `voc-api.yourcompany.com`
+- reverse proxy or firewall rule exposing backend on HTTPS
+- route that forwards traffic to VM port `8000`
 
-## Pipeline Data Flow
+4. MySQL
+- remote MySQL instance
+- run:
+  - `ops/mysql/deployment.sql`
+- confirm app user exists:
+  - `llm_reader`
+- confirm access exists for:
+  - `pipeline_jobs`
+  - `pipeline_workers`
 
-```mermaid
-flowchart LR
-  A["pipeline-console.html"] --> B["backend/main.py"]
-  B -->|"direct mode"| C["pipeline/start_pipeline.py"]
-  B -->|"worker mode"| D["MySQL: pipeline_jobs"]
-  E["pipeline/worker.py"] --> D
-  E --> F["pipeline/run_pipeline.py"]
-  F --> G["pipeline/scraper_runner.py"]
-  G --> H["MySQL: raw_reviews"]
-  F --> I["pipeline/tagger.py"]
-  I --> J["MySQL: review_tags"]
-  H --> K["dashboard APIs"]
-  J --> K
-```
+5. Network and secrets
+- backend VM must be able to reach:
+  - MySQL
+  - OpenAI API
+- set backend secrets in `.env.backend.production`
 
-## Backend API
+6. CORS
+- backend `ALLOWED_ORIGINS` must include the frontend domain
 
-Main endpoints under `/api`:
+7. Optional Windows worker
+- if you want click-to-run from production:
+  - one Windows machine
+  - Chrome
+  - Amazon login session
+  - repo cloned
+  - `.env.worker.production` filled
+  - worker started with:
+    - `powershell -ExecutionPolicy Bypass -File .\ops\windows\start_pipeline_worker.ps1`
 
-- `GET /api/reviews`
-- `GET /api/filters`
-- `GET /api/stats`
-- `GET /api/analysis`
-- `GET /api/summary`
-- `GET /api/trends/cxo`
-- `GET /api/trends/rating`
-- `GET /api/wordcloud`
-- `GET /api/reviews/by-keyword`
-- `GET /api/pipeline/status`
-- `GET /api/pipeline`
-- `GET /api/pipeline/capabilities`
-- `GET /api/pipeline/jobs`
-- `GET /api/pipeline/jobs/{job_id}`
-- `POST /api/pipeline/run`
-- `GET /api/asins`
-- `POST /api/asins`
-- `GET /api/categories`
-- `POST /api/categories`
+## Dashboard behavior at larger portfolio size
 
-## Configuration Reference
+- tables show the full product list
+- product-heavy charts focus on the top products by default when no specific product filter is applied
+- explicit product filters override that default
 
-Environment variables:
+## Deployment references
 
-- `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`: MySQL connection
-- `OPENAI_API_KEY`: required for tagging and summary generation
-- `ALLOWED_ORIGINS`: CORS origins
-- `CHROME_PROFILE`: Chrome user data directory used by Selenium
-- `CHROMEDRIVER_PATH`: optional explicit chromedriver path
-- `SCRAPE_DAYS_BACK`: runtime override used by pipeline run
-- `SCRAPE_ASINS`: runtime override used by pipeline run
-- `PIPELINE_EXECUTION_MODE`: `auto`, `direct`, or `worker`
-- `PIPELINE_WORKER_TIMEOUT_SECONDS`: worker heartbeat timeout for capability checks
-- `PIPELINE_WORKER_ID`: optional explicit worker ID on the Windows worker machine
-
-## Troubleshooting
-
-### `localhost:8080` does not open
-
-You probably ran:
-
-```powershell
-docker compose -f docker-compose.local.yml build
-```
-
-That only builds images. Start the stack with:
-
-```powershell
-docker compose -f docker-compose.local.yml up -d
-```
-
-### Pipeline page on `5173` does not work
-
-Use the Vite local URLs:
-
-- `http://localhost:5173/pipeline-console.html`
-
-`8080` is only for the Docker/Nginx stack.
-
-### Pipeline page says no worker is connected
-
-That means the backend is in worker mode and has not seen a recent heartbeat in `pipeline_workers`.
-
-Start the Windows worker:
-
-```powershell
-py .\pipeline\worker.py
-```
-
-Or register the scheduled task:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\ops\windows\register_pipeline_worker_task.ps1
-```
-
-### Scraper opens Chrome but inserts 0 reviews
-
-- ensure Amazon is actually logged in in the Chrome profile being used
-- ensure `CHROME_PROFILE` points to a valid writable local folder
-- Amazon may load slowly or challenge the session
-
-### Tagger runs but nothing gets tagged
-
-- ensure `OPENAI_API_KEY` is set
-- ensure `review_tags.review_id` matches `raw_reviews.review_id`
-- the tagger only processes untagged rows
-
-### Ratings/trend dates look wrong
-
-Review-derived trends use parsed `review_date`.
-Amazon overall rating snapshots still use snapshot scrape dates, which is expected.
-
-## Notes
-
-- the dashboard and pipeline operations are intentionally separated
-- analysts should use `pipeline-console.html`
-- the executive dashboard stays clean and read-only
-- the cheapest reliable production model is dashboard on Linux VM plus worker on Windows
+- CTO comparison: `ops/deploy/deployment-options-cto.md`
+- DevOps full handoff: `ops/deploy/devops-complete-handoff.md`
+- DevOps quick handoff: `ops/deploy/devops-handoff.md`
+- production deployment: `ops/deploy/production.md`
+- local Docker notes: `ops/deploy/local-docker.md`

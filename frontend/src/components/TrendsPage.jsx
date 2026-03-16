@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import ProductPerformanceScorecard from './ProductPerformanceScorecard'
 import ReviewsDrawer from './ReviewsDrawer'
+import { apiUrl } from '../api'
 import {
   AreaChart, Area, LineChart, Line, BarChart,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -496,7 +497,7 @@ export function RatingTrendChart({ filters, allProducts, tree }) {
     else if (activeProds.length) p.set('product', activeProds.join('|||'))
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo)   p.set('date_to',   dateTo)
-    fetch(`/api/trends/rating?${p}`)
+    fetch(apiUrl(`/api/trends/rating?${p}`))
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false) })
       .catch(() => setLoading(false))
@@ -802,7 +803,7 @@ export default function TrendsPage({ products: allProducts, filters, tree }) {
     else if (selectedProducts.length) p.set('product', selectedProducts.join('|||'))
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo)   p.set('date_to',   dateTo)
-    fetch(`/api/trends/cxo?${p}`)
+    fetch(apiUrl(`/api/trends/cxo?${p}`))
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); setHasData(true) })
       .catch(() => setLoading(false))

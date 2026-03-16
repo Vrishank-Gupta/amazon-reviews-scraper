@@ -10,6 +10,7 @@
  */
 import { useState, useEffect } from 'react'
 import { X } from 'lucide-react'
+import { apiUrl } from '../api'
 
 function StarLabel({ rating }) {
   const n = Math.round(parseFloat(rating) || 0)
@@ -78,7 +79,7 @@ export default function ReviewsDrawer({ category, label, filters, onClose, produ
     else if (filters?.product?.length) p.set('product', filters.product.join('|||'))
     if (filters?.date_from) p.set('date_from', filters.date_from)
     if (filters?.date_to)   p.set('date_to',   filters.date_to)
-    fetch(`/api/reviews/by-keyword?${p}`)
+    fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
       .then(r => r.json())
       .then(setReviews)
       .catch(() => setReviews([]))

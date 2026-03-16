@@ -14,7 +14,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer
 } from 'recharts'
-import { fetchSummary, fetchReviewsByKeyword } from '../api'
+import { apiUrl, fetchSummary, fetchReviewsByKeyword } from '../api'
 import { InfoTip, StarLabel, Delta, SentBadge, Card } from './shared'
 
 const PIE_NEG = ['#ef4444','#f97316','#fbbf24','#a855f7','#e879f9','#f43f5e','#94a3b8','#64748b']
@@ -175,7 +175,7 @@ function DrillDown({ row, filters }) {
     p.set('product', row.product_name)
     if (filters.date_from) p.set('date_from', filters.date_from)
     if (filters.date_to)   p.set('date_to',   filters.date_to)
-    fetch(`/api/analysis?${p}`)
+    fetch(apiUrl(`/api/analysis?${p}`))
       .then(r=>r.json())
       .then(d => { setNegPieData(d.neg_pie||[]); setPosPieData(d.pos_pie||[]) })
       .catch(()=>{})
@@ -188,7 +188,7 @@ function DrillDown({ row, filters }) {
     if (filters.date_from) p.set('date_from', filters.date_from)
     if (filters.date_to)   p.set('date_to',   filters.date_to)
     if (wcCat) p.set('category', wcCat)
-    fetch(`/api/wordcloud?${p}`)
+    fetch(apiUrl(`/api/wordcloud?${p}`))
       .then(r=>r.json()).then(setWcData).catch(()=>setWcData([])).finally(()=>setWcLoading(false))
   }, [row.product_name, wcCat, filters.date_from, filters.date_to])
 
@@ -198,7 +198,7 @@ function DrillDown({ row, filters }) {
     const p = new URLSearchParams({ keyword: activeWord, product: row.product_name })
     if (filters.date_from) p.set('date_from', filters.date_from)
     if (filters.date_to)   p.set('date_to',   filters.date_to)
-    fetch(`/api/reviews/by-keyword?${p}`)
+    fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
       .then(r=>r.json())
       .then(data => {
         const f = wcSent==='neg' ? data.filter(r=>r.sentiment==='Negative')

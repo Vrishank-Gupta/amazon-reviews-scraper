@@ -13,7 +13,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ComposedChart, Bar, Line, ReferenceLine
 } from 'recharts'
-import { fetchAnalysis, fetchSummary } from '../api'
+import { apiUrl, fetchAnalysis, fetchSummary } from '../api'
 import { InfoTip, Card } from './shared'
 import RatingTrendChart from './RatingTrendChart'
 
@@ -185,7 +185,7 @@ function InlineWordCloud({ category, filters, allProducts }) {
     if (filters.product?.length) p.set('product', filters.product.join('|||'))
     if (filters.date_from) p.set('date_from', filters.date_from)
     if (filters.date_to)   p.set('date_to',   filters.date_to)
-    fetch(`/api/wordcloud?${p}`)
+    fetch(apiUrl(`/api/wordcloud?${p}`))
       .then(r => r.json()).then(setWords).catch(() => setWords([])).finally(() => setLoading(false))
   }, [category, JSON.stringify(filters)])
 
@@ -197,7 +197,7 @@ function InlineWordCloud({ category, filters, allProducts }) {
     if (filters.product?.length) p.set('product', filters.product.join('|||'))
     if (filters.date_from) p.set('date_from', filters.date_from)
     if (filters.date_to)   p.set('date_to',   filters.date_to)
-    fetch(`/api/reviews/by-keyword?${p}`)
+    fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
       .then(r => r.json()).then(setReviews).catch(() => setReviews([])).finally(() => setRevLoading(false))
   }, [activeWord])
 

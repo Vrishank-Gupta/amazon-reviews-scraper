@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchReviews, fetchFilters, fetchStats } from './api'
+import { appPath, fetchReviews, fetchFilters, fetchStats } from './api'
 import { downloadCSV } from './components/TrendsPage'
 import FilterBar from './components/FilterBar'
 import ReviewsTable from './components/ReviewsTable'
 import TrendsPage from './components/TrendsPage'
 import AnalysisPage from './components/AnalysisPage'
 import SummaryPage from './components/SummaryPage'
-import { RefreshCw, Download } from 'lucide-react'
+import { RefreshCw, Download, Database } from 'lucide-react'
 
 const DEFAULT_FILTERS = {
   product_category: null,
@@ -76,6 +76,7 @@ export default function App() {
   const [options, setOptions] = useState({ tree: {}, products: [], ratings: [] })
   const [initialLoading, setInitialLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const pipelineConsoleHref = appPath('pipeline-console.html')
 
   useEffect(() => {
     fetchFilters().then(o => {
@@ -137,6 +138,24 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <a
+            href={pipelineConsoleHref}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '6px 12px',
+              borderRadius: 7,
+              fontFamily: 'DM Sans',
+              border: '1px solid rgba(255,78,26,0.28)',
+              background: 'rgba(255,78,26,0.08)',
+              color: 'var(--accent)',
+              fontSize: 12,
+              textDecoration: 'none',
+            }}
+          >
+            <Database size={12} /> Pipeline
+          </a>
           <button
             onClick={() => loadReviews(filters)}
             disabled={refreshing}

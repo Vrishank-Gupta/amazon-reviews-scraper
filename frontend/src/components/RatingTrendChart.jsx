@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { apiUrl } from '../api'
 
 const PALETTE = ['#ff4e1a', '#ff8c42', '#ffd166', '#06d6a0', '#60a5fa', '#a855f7', '#ec4899', '#14b8a6', '#f43f5e', '#34d399', '#fb923c', '#c084fc']
 const PRODUCT_DISPLAY_LIMIT = 5
@@ -111,7 +112,7 @@ export default function RatingTrendChart({ filters }) {
     if (dateFrom) params.set('date_from', dateFrom)
     if (dateTo) params.set('date_to', dateTo)
 
-    fetch(`/api/trends/rating?${params}`)
+    fetch(apiUrl(`/api/trends/rating?${params}`))
       .then(response => response.json())
       .then(payload => {
         setData(payload)

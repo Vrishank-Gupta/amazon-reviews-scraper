@@ -1,0 +1,16 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: amazon-reviews-backend
+    restart: unless-stopped
+    env_file:
+      - .env.backend.production
+    environment:
+      APP_ENV: production
+      APP_ROLE: backend
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"

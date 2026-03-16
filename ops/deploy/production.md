@@ -1,127 +1,169 @@
 # Production Deployment
 
-This repo is packaged for a cheap production setup with a separate Windows scraping worker.
+This document describes the recommended production setup:
 
-## Target architecture
+- frontend on a static host
+- backend on a Linux VM
+- MySQL hosted remotely
+- optional Windows worker for click-to-run pipeline execution
 
-- one Linux VM for dashboard + backend
-- one remote MySQL instance
-- one Windows machine for Selenium scraping
+## Recommended architecture
 
-The Linux VM serves:
+### Frontend
+
+Host on:
+
+- Netlify
+
+Serves:
 
 - `/`
 - `/pipeline-console.html`
-- `/api/*`
 
-The Windows machine runs:
+Set frontend env:
 
-- `pipeline/worker.py`
+- `VITE_API_BASE_URL=https://voc-api.yourcompany.com`
 
-## Why the worker exists
+Tracked file:
 
-The production Docker app can serve the UI and queue jobs, but the Amazon scraper still needs:
+- `frontend/.env.production`
 
-- Windows
-- Chrome
-- a local Chrome profile
-- an interactive Amazon login session
+### Backend
 
-The worker solves that by polling MySQL for queued jobs and running the pipeline on the Windows machine.
+Host on:
 
-## Environment selection
+- one Linux VM
 
-- `docker-compose.prod.yml` injects `.env.production`
-- it sets `APP_ENV=production`
-- production should use `PIPELINE_EXECUTION_MODE=worker`
-- the Windows worker should usually use `.env` with the same remote MySQL values
-- if needed, override with `APP_ENV_FILE=/absolute/path/to/envfile`
+Run with:
 
-## Deploy the Linux VM
+- Docker Compose
+
+Use:
+
+- `docker-compose.backend.yml`
+- `.env.backend.production`
+
+Start:
+
+```bash
+docker compose -f docker-compose.backend.yml up -d --build
+```
+
+### Database
+
+Use:
+
+- remote MySQL
+
+Run:
+
+- `ops/mysql/deployment.sql`
+
+### Optional worker
+
+If you want pipeline runs from the hosted frontend without asking the analyst to run a local script:
+
+- use one Windows machine
+- run `pipeline/worker.py`
+
+If you do not need that, the analyst can run `py .\pipeline\run_pipeline.py` manually from a Windows laptop against the same remote DB.
+
+## Backend VM deployment
 
 1. Copy the repo to the VM.
 2. Install Docker and Docker Compose plugin.
-3. Fill in `.env.production`.
-4. Start:
+3. Fill `.env.backend.production`.
+4. Start the backend:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.backend.yml up -d --build
 ```
 
 Useful commands:
 
 ```bash
-docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml logs -f
-docker compose -f docker-compose.prod.yml down
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.backend.yml ps
+docker compose -f docker-compose.backend.yml logs -f
+docker compose -f docker-compose.backend.yml down
+docker compose -f docker-compose.backend.yml up -d --build
 ```
 
-## Configure the Windows worker
+## Frontend deployment
 
-1. Clone the same repo on the Windows machine.
-2. Fill `.env` so it points to the same remote MySQL used by production.
-3. Set `CHROME_PROFILE` to the local Windows Chrome profile path.
-4. Confirm Amazon is logged in in that profile.
+Use the root `netlify.toml`.
+
+Ask the frontend host to:
+
+- use repo base `frontend`
+- run `npm run build`
+- publish `dist`
+- set:
+  - `VITE_API_BASE_URL=https://voc-api.yourcompany.com`
+
+## Backend env file
+
+Use:
+
+- `.env.backend.production`
+
+Important values:
+
+- `DB_HOST`
+- `DB_USER=llm_reader`
+- `DB_PASSWORD`
+- `DB_NAME=world`
+- `OPENAI_API_KEY`
+- `ALLOWED_ORIGINS=https://voc.yourcompany.com`
+- `PIPELINE_EXECUTION_MODE=worker`
+
+## MySQL requirements
+
+Run:
+
+- `ops/mysql/deployment.sql`
+
+This creates:
+
+- database `world`
+- app user `llm_reader`
+- all core tables
+- queue tables:
+  - `pipeline_jobs`
+  - `pipeline_workers`
+
+## DNS / routing
+
+Recommended:
+
+- frontend: `voc.yourcompany.com`
+- backend: `voc-api.yourcompany.com`
+
+The backend API must be reachable from the frontend over HTTPS.
+
+## Windows worker setup
+
+Only needed if you want click-to-run pipeline execution from the hosted frontend.
+
+1. Clone the repo on a Windows machine.
+2. Fill `.env.worker.production` so it points to the same remote MySQL.
+3. Set `CHROME_PROFILE`.
+4. Confirm Amazon is logged in in that Chrome profile.
 5. Install Python dependencies.
-6. Start the worker.
-
-Manual start:
-
-```powershell
-py .\pipeline\worker.py
-```
-
-Helper script:
+6. Start the worker:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\ops\windows\start_pipeline_worker.ps1
 ```
 
-Scheduled task at user logon:
+Or register at logon:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\ops\windows\register_pipeline_worker_task.ps1
 ```
 
-## What analysts do
+## What analysts use
 
-Analysts use:
+- dashboard: `https://voc.yourcompany.com`
+- pipeline page: `https://voc.yourcompany.com/pipeline-console.html`
 
-- `http://<server-ip>/pipeline-console.html`
-
-When they click run:
-
-- backend writes a job to `pipeline_jobs`
-- worker claims the job
-- worker runs `pipeline/run_pipeline.py`
-- worker updates job status and heartbeat
-
-No terminal is required for the analyst once the worker is installed and kept running.
-
-## Persistent app-managed files
-
-The backend writes to:
-
-- `data/asins.csv`
-- `data/categories.json`
-
-Those stay persistent via:
-
-```yaml
-volumes:
-  - ./data:/app/data
-```
-
-## Database tables required for worker mode
-
-These are included in `ops/mysql/mysql_setup.sql`:
-
-- `pipeline_jobs`
-- `pipeline_workers`
-
-## Notes
-
-- the executive dashboard stays pipeline-free
-- the pipeline console is the analyst entry point
-- if the pipeline console says no worker is connected, the Windows worker is not heartbeating into MySQL
+The dashboard header includes a `Pipeline` button that links to the pipeline page.

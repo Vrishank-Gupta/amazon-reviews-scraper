@@ -10,6 +10,10 @@ def get_env_mode() -> str:
     return os.getenv("APP_ENV", "local").strip().lower() or "local"
 
 
+def get_env_role() -> str:
+    return os.getenv("APP_ROLE", "").strip().lower()
+
+
 def resolve_env_path() -> str:
     explicit_path = os.getenv("APP_ENV_FILE", "").strip()
     if explicit_path:
@@ -17,6 +21,11 @@ def resolve_env_path() -> str:
 
     mode = get_env_mode()
     if mode == "production":
+        role = get_env_role()
+        if role == "backend":
+            return os.path.join(PROJECT_ROOT, ".env.backend.production")
+        if role == "worker":
+            return os.path.join(PROJECT_ROOT, ".env.worker.production")
         return os.path.join(PROJECT_ROOT, ".env.production")
     return os.path.join(PROJECT_ROOT, ".env")
 
