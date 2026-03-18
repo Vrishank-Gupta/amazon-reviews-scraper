@@ -9,4 +9,6 @@ pipeline/__pycache__
 **/*.pyc
 **/*.pyo
 **/*.log
+chrome-profile/
+pipeline/start_pipeline.py
 

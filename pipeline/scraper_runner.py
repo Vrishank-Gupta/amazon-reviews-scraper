@@ -28,6 +28,11 @@ load_project_env()
 
 CHROMEDRIVER_PATH   = os.getenv("CHROMEDRIVER_PATH", "")
 ASINS_CSV           = os.path.join(project_root, "data", "asins.csv")
+
+# Chrome profile stored inside the repo by default so login persists across runs.
+# Override with CHROME_PROFILE in .env if you want a different location.
+_DEFAULT_CHROME_PROFILE = os.path.join(project_root, "chrome-profile")
+os.makedirs(_DEFAULT_CHROME_PROFILE, exist_ok=True)
 PAUSE_BETWEEN_ASINS = float(os.getenv("SCRAPER_PAUSE", "8"))
 
 _asin_filter_raw = os.getenv("SCRAPE_ASINS", "").strip()
@@ -108,14 +113,12 @@ def make_driver() -> webdriver.Chrome:
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--lang=en-IN")
 
-    # Persistent Chrome profile — stays logged in between script runs
-    # Set CHROME_PROFILE in .env, e.g.: CHROME_PROFILE=C:\chrome-amazon-profile
-    chrome_profile = os.getenv("CHROME_PROFILE", "").strip()
-    if chrome_profile:
-        options.add_argument(f"--user-data-dir={chrome_profile}")
-        print(f"  Using profile: {chrome_profile}")
-    else:
-        print(f"  Tip: add CHROME_PROFILE=C:\\chrome-amazon-profile to .env to stay logged in")
+    # Persistent Chrome profile — stays logged in between script runs.
+    # Defaults to <repo>/chrome-profile (created automatically, gitignored).
+    # Override with CHROME_PROFILE in .env to use a different path.
+    chrome_profile = os.getenv("CHROME_PROFILE", _DEFAULT_CHROME_PROFILE).strip()
+    options.add_argument(f"--user-data-dir={chrome_profile}")
+    print(f"  Using profile: {chrome_profile}")
 
     if CHROMEDRIVER_PATH:
         driver = webdriver.Chrome(service=Service(CHROMEDRIVER_PATH), options=options)

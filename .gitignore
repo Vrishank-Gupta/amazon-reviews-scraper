@@ -8,3 +8,6 @@
 *.log
 logs/
 .netlify/
+
+# Chrome profile — stores Amazon login session, never commit
+chrome-profile/

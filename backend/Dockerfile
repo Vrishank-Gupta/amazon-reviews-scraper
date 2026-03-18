@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 COPY backend/requirements.txt /tmp/backend-requirements.txt
-COPY pipeline/requirements.txt /tmp/pipeline-requirements.txt
+COPY pipeline/requirements.backend.txt /tmp/pipeline-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/backend-requirements.txt -r /tmp/pipeline-requirements.txt
 
 COPY backend /app/backend

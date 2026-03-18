@@ -41,7 +41,7 @@ cur = conn.cursor()
 
 # ── Fetch untagged reviews ────────────────────────────────────────────────────
 cur.execute("""
-    SELECT r.review_id, r.asin, r.review
+    SELECT r.review_id, r.asin, r.product_name, r.review
     FROM raw_reviews r
     LEFT JOIN review_tags t ON r.review_id = t.review_id
     WHERE t.review_id IS NULL
@@ -62,6 +62,11 @@ You are a strict classification engine.
 
 Allowed taxonomy:
 {json.dumps(TAXONOMY, indent=2)}
+
+Product type rules (MUST follow):
+- "Dashcam Features" and "Windshield Glare" and "Overheating" ONLY apply to dashcam products (e.g. Dashcam ProX). NEVER use these for home/indoor cameras.
+- "Home Camera Features" and "False / Excessive Alerts" ONLY apply to home/indoor cameras (e.g. Cam360). NEVER use these for dashcams.
+- Use the "product" field in each review to determine product type before tagging.
 
 Rules:
 - Classify EACH review independently
@@ -88,7 +93,7 @@ Reviews:
 
 # ── Tag in batches ────────────────────────────────────────────────────────────
 for batch in chunks(rows, BATCH_SIZE):
-    review_payload = [{"id": r[0], "text": r[2]} for r in batch]
+    review_payload = [{"id": r[0], "product": r[2], "text": r[3]} for r in batch]
 
     try:
         response = client.chat.completions.create(
@@ -108,7 +113,7 @@ for batch in chunks(rows, BATCH_SIZE):
 
     results = {r["id"]: r for r in parsed.get("results", [])}
 
-    for review_id, asin, _ in batch:
+    for review_id, asin, _, __ in batch:
         if review_id not in results:
             print(f"  Missing result for {review_id}")
             continue

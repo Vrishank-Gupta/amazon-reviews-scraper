@@ -122,6 +122,11 @@ function DateDropdown({ filters, onChange }) {
               <input type="date" value={filters.date_to||''} onChange={e=>onChange({date_to:e.target.value||null})}
                 style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, color:'var(--text)', padding:'6px 10px', fontSize:12, outline:'none', fontFamily:'DM Sans', width:'100%' }} />
             </div>
+            {filters.date_from && filters.date_to && filters.date_to < filters.date_from && (
+              <div style={{ fontSize:11, color:'#ef4444', display:'flex', alignItems:'center', gap:4 }}>
+                ⚠ End date is before start date
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -184,11 +189,13 @@ function ProductDropdown({ filters, options, onChange }) {
     close()
   }
   const toggleProduct = (prod) => {
+    if (activeProds.length === 0 && !activeCat) {
+      onChange({ product_category: null, product: [prod] })
+      return
+    }
     let current = activeProds.length > 0
       ? [...activeProds]
-      : activeCat
-        ? [...(tree[activeCat] || [])]
-        : [...all]
+      : [...(tree[activeCat] || [])]
     if (current.includes(prod)) current = current.filter(p => p !== prod)
     else current = [...current, prod]
     if (current.length === all.length) onChange({ product_category: null, product: [] })
@@ -302,8 +309,15 @@ function SentimentDropdown({ filters, onChange }) {
   const toggle = s => onChange({ sentiment: selected.includes(s) ? selected.filter(x=>x!==s) : [...selected, s] })
   return (
     <Dropdown trigger={() => <PillBtn label={label} active={selected.length > 0} />}>
-      {() => (
+      {(close) => (
         <div style={{ padding:8, display:'flex', flexDirection:'column', gap:2 }}>
+          {selected.length > 0 && (
+            <button onClick={() => { onChange({ sentiment: [] }); close() }} style={{
+              display:'flex', alignItems:'center', padding:'7px 10px', borderRadius:6,
+              background:'rgba(255,78,26,0.08)', border:'none', cursor:'pointer',
+              color:'var(--accent)', fontSize:12, fontWeight:600, textAlign:'left', width:'100%',
+            }}>All Sentiments</button>
+          )}
           {['Positive','Neutral','Negative'].map(s => {
             const sel = selected.includes(s)
             const color = SC[s]
@@ -331,8 +345,15 @@ function RatingDropdown({ filters, options, onChange }) {
   const toggle = r => onChange({ rating: selected.includes(r) ? selected.filter(x=>x!==r) : [...selected, r] })
   return (
     <Dropdown trigger={() => <PillBtn label={label} active={selected.length > 0} />}>
-      {() => (
+      {(close) => (
         <div style={{ padding:8, display:'flex', flexDirection:'column', gap:2 }}>
+          {selected.length > 0 && (
+            <button onClick={() => { onChange({ rating: [] }); close() }} style={{
+              display:'flex', alignItems:'center', padding:'7px 10px', borderRadius:6,
+              background:'rgba(255,78,26,0.08)', border:'none', cursor:'pointer',
+              color:'var(--accent)', fontSize:12, fontWeight:600, textAlign:'left', width:'100%',
+            }}>All Ratings</button>
+          )}
           {all.map(r => {
             const sel = selected.includes(r)
             const stars = Math.round(parseFloat(r))
@@ -382,12 +403,6 @@ export default function FilterBar({ filters, options, onChange, tab }) {
     return `${prods.slice(0,2).join(' · ')} +${prods.length-2} more`
   })()
 
-  const helperText = tab === 'analysis'
-    ? 'Shape the story by product group and date range.'
-    : tab === 'trends'
-    ? 'Narrow the trend story to a product, category, or time window.'
-    : 'Filter down to the exact review evidence you want to inspect or export.'
-
   return (
     <div style={{
       display:'flex', alignItems:'center', gap:8, flexWrap:'wrap',
@@ -398,7 +413,6 @@ export default function FilterBar({ filters, options, onChange, tab }) {
         <SlidersHorizontal size={13} style={{ color:'var(--text-muted)' }} />
         <span style={{ fontSize:11, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)' }}>Filters</span>
       </div>
-      <span style={{ fontSize:11, color:'var(--text-muted)' }}>{helperText}</span>
       <div style={{ width:1, height:20, background:'var(--border)', flexShrink:0 }} />
 
       <DateDropdown filters={filters} onChange={onChange} />

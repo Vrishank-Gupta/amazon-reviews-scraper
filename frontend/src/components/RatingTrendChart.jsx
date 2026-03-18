@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Bar,
   CartesianGrid,
+  ComposedChart,
   Line,
   LineChart,
   ReferenceLine,
@@ -98,6 +100,7 @@ function rankProductsForFocus(products, days, explicitProducts = [], limit = PRO
 export default function RatingTrendChart({ filters }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [filterProd, setFilterProd] = useState(null)
 
   const productCategory = filters?.product_category || null
   const activeProducts = filters?.product?.length ? filters.product : []
@@ -127,7 +130,13 @@ export default function RatingTrendChart({ filters }) {
     () => rankProductsForFocus(products, days, activeProducts),
     [products, days, activeProducts],
   )
-  const limitedProducts = !activeProducts.length && products.length > displayedProducts.length
+
+  // Reset to "All Products" when the product list changes
+  useEffect(() => {
+    setFilterProd(null)
+  }, [JSON.stringify(products)])
+
+  const displayedForChart = (filterProd && products.includes(filterProd)) ? [filterProd] : displayedProducts
 
   if (loading) {
     return <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading...</div>
@@ -140,22 +149,28 @@ export default function RatingTrendChart({ filters }) {
       </div>
     )
   }
-  const colorMap = Object.fromEntries(displayedProducts.map((product, index) => [product, PALETTE[index % PALETTE.length]]))
+
+  const colorMap = Object.fromEntries(products.map((product, index) => [product, PALETTE[index % PALETTE.length]]))
   const byDay = Object.fromEntries(days.map(day => [day.day, day.products]))
   const spine = buildSpine(days)
 
-  const overallRows = fillPerProduct(spine, displayedProducts, byDay, 'overall')
-  const totalRatingsRows = fillPerProduct(spine, displayedProducts, byDay, 'total_ratings')
-  const dailyAvgRows = spine.map(day => ({
-    day,
-    ...Object.fromEntries(displayedProducts.map(product => [product, byDay[day]?.[product]?.daily_avg ?? null])),
+  const overallRows = fillPerProduct(spine, displayedForChart, byDay, 'overall')
+  const totalRatingsRows = fillPerProduct(spine, displayedForChart, byDay, 'total_ratings')
+
+  // Merge overall + total_ratings into a single dataset for ComposedChart
+  const combinedRows = spine.map((day, i) => ({
+    ...overallRows[i],
+    ...Object.fromEntries(displayedForChart.map(p => [`${p}_vol`, totalRatingsRows[i][p]])),
   }))
 
-  const hasOverall = days.some(day => displayedProducts.some(product => day.products[product]?.overall != null))
-  const hasDailyAvg = days.some(day => displayedProducts.some(product => day.products[product]?.daily_avg != null))
-  const hasTotalRatings = days.some(day => displayedProducts.some(product => day.products[product]?.total_ratings != null))
-  const dailyPointCount = dailyAvgRows.filter(row => displayedProducts.some(product => row[product] != null)).length
-  const dotStyle = count => (count <= 8 ? { r: 4, fill: 'inherit', stroke: '#fff', strokeWidth: 1.5 } : false)
+  const dailyAvgRows = spine.map(day => ({
+    day,
+    ...Object.fromEntries(displayedForChart.map(product => [product, byDay[day]?.[product]?.daily_avg ?? null])),
+  }))
+
+  const hasOverall = days.some(day => displayedForChart.some(product => day.products[product]?.overall != null))
+  const hasDailyAvg = days.some(day => displayedForChart.some(product => day.products[product]?.daily_avg != null))
+  const limitedProducts = !activeProducts.length && !filterProd && products.length > displayedProducts.length
 
   const xAxisProps = {
     dataKey: 'day',
@@ -170,89 +185,109 @@ export default function RatingTrendChart({ filters }) {
 
   const metricTooltip = valueFormatter => ({ active, payload, label }) => {
     if (!active || !payload?.length) return null
+    const ratingPoints = payload.filter(pt => !pt.dataKey.endsWith('_vol') && pt.value != null)
+    const volPoints = payload.filter(pt => pt.dataKey.endsWith('_vol') && pt.value != null)
     return (
       <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', fontSize: 11, minWidth: 160 }}>
         <div style={{ fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>{fmtDay(label)}</div>
-        {payload.filter(point => point.value != null).map(point => (
+        {ratingPoints.map(point => (
           <div key={point.dataKey} style={{ color: point.color, display: 'flex', justifyContent: 'space-between', gap: 16, marginTop: 3 }}>
             <span style={{ color: 'var(--text-muted)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{point.dataKey}</span>
             <span style={{ fontWeight: 700, flexShrink: 0 }}>{valueFormatter(point.value)}</span>
+          </div>
+        ))}
+        {volPoints.map(point => (
+          <div key={point.dataKey} style={{ color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', gap: 16, marginTop: 3 }}>
+            <span style={{ opacity: 0.7 }}>Reviews on Amazon</span>
+            <span style={{ fontWeight: 700, flexShrink: 0 }}>{Number(point.value).toLocaleString()}</span>
           </div>
         ))}
       </div>
     )
   }
 
-  const latestTotals = displayedProducts
-    .map(product => ({
-      product,
-      current: totalRatingsRows[totalRatingsRows.length - 1]?.[product] ?? null,
-      start: totalRatingsRows[0]?.[product] ?? null,
-    }))
-    .filter(row => row.current != null)
+  const selectStyle = {
+    padding: '4px 8px',
+    borderRadius: 6,
+    border: '1px solid var(--border)',
+    background: 'var(--surface2)',
+    color: 'var(--accent)',
+    fontSize: 11,
+    fontFamily: 'DM Sans',
+    cursor: 'pointer',
+    outline: 'none',
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {hasOverall && (
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
-            Amazon Overall Rating
-            <span style={{ fontWeight: 400, marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
-              - public product-page rating shown on Amazon
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              Amazon Overall Rating
+              <span style={{ fontWeight: 400, marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
+                — public product-page rating + total review volume
+              </span>
+            </div>
+            <select value={filterProd || ''} onChange={e => setFilterProd(e.target.value || null)} style={{ ...selectStyle, color: filterProd ? 'var(--accent)' : 'var(--text-muted)' }}>
+              <option value="">All Products</option>
+              {products.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
           </div>
           {limitedProducts && (
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
-              Showing top {displayedProducts.length} products by Amazon rating scale. Use product filters to focus on specific ASINs.
+              Showing top {displayedProducts.length} products by Amazon rating scale. Use the dropdown to focus on a specific product.
             </div>
           )}
-          <ResponsiveContainer width="100%" height={170}>
-            <LineChart data={overallRows} margin={{ top: 4, right: 16, left: -10, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height={190}>
+            <ComposedChart data={combinedRows} margin={{ top: 4, right: 48, left: -10, bottom: 0 }}>
               <CartesianGrid {...gridProps} />
               <XAxis {...xAxisProps} />
-              <YAxis domain={([min, max]) => [Math.max(1, Math.floor((min - 0.2) * 2) / 2), Math.min(5, Math.ceil((max + 0.2) * 2) / 2)]} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={value => value.toFixed(1)} />
+              <YAxis
+                yAxisId="rating"
+                domain={([min, max]) => [Math.max(1, Math.floor((min - 0.2) * 2) / 2), Math.min(5, Math.ceil((max + 0.2) * 2) / 2)]}
+                tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={value => value.toFixed(1)}
+              />
+              <YAxis
+                yAxisId="vol"
+                orientation="right"
+                tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}
+              />
               <Tooltip content={metricTooltip(value => `${value.toFixed(2)} ★`)} />
-              <ReferenceLine y={4} stroke="var(--border)" strokeDasharray="4 2" />
-              {displayedProducts.map(product => (
+              <ReferenceLine yAxisId="rating" y={4} stroke="var(--border)" strokeDasharray="4 2" />
+              {displayedForChart.map(product => (
+                <Bar
+                  key={`${product}_vol`}
+                  yAxisId="vol"
+                  dataKey={`${product}_vol`}
+                  fill={colorMap[product]}
+                  opacity={0.18}
+                  radius={[2, 2, 0, 0]}
+                  maxBarSize={12}
+                />
+              ))}
+              {displayedForChart.map(product => (
                 <Line
                   key={product}
-                  type="monotone"
+                  yAxisId="rating"
+                  type="basis"
                   dataKey={product}
                   stroke={colorMap[product]}
                   strokeWidth={2.5}
-                  dot={dotStyle(days.length)}
+                  dot={false}
                   activeDot={{ r: 5, stroke: '#fff', strokeWidth: 1.5 }}
                   connectNulls
                 />
               ))}
-            </LineChart>
+            </ComposedChart>
           </ResponsiveContainer>
-          <SeriesLegend products={displayedProducts} colorMap={colorMap} />
-        </div>
-      )}
-
-      {hasTotalRatings && latestTotals.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            Total Ratings on Amazon
-            <span style={{ fontWeight: 400, marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
-              - market scale and maturity
-            </span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(1, latestTotals.length)}, minmax(0, 1fr))`, gap: 10 }}>
-            {latestTotals.map(row => {
-              const delta = row.start != null ? row.current - row.start : null
-              return (
-                <div key={row.product} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: colorMap[row.product] }}>{row.product}</div>
-                  <div style={{ fontSize: 20, fontFamily: 'Bebas Neue', color: 'var(--text)' }}>{Number(row.current).toLocaleString()}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {delta == null || delta === 0 ? 'Stable in selected window' : `${delta > 0 ? '+' : ''}${delta.toLocaleString()} vs window start`}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          <SeriesLegend products={displayedForChart} colorMap={colorMap} />
         </div>
       )}
 
@@ -271,21 +306,21 @@ export default function RatingTrendChart({ filters }) {
               <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={value => value.toFixed(0)} />
               <Tooltip content={metricTooltip(value => `${value.toFixed(2)} ★`)} />
               <ReferenceLine y={4} stroke="var(--border)" strokeDasharray="4 2" />
-              {displayedProducts.map(product => (
+              {displayedForChart.map(product => (
                 <Line
                   key={product}
-                  type="monotone"
+                  type="basis"
                   dataKey={product}
                   stroke={colorMap[product]}
                   strokeWidth={2}
-                  dot={dotStyle(dailyPointCount)}
+                  dot={false}
                   activeDot={{ r: 5, stroke: '#fff', strokeWidth: 1.5 }}
                   connectNulls
                 />
               ))}
             </LineChart>
           </ResponsiveContainer>
-          <SeriesLegend products={displayedProducts} colorMap={colorMap} />
+          <SeriesLegend products={displayedForChart} colorMap={colorMap} />
         </div>
       )}
     </div>

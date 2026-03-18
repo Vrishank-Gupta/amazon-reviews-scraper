@@ -8,12 +8,12 @@
  *  4. Top burning issues (ranked horizontal bars)
  *  5. Sentiment trend (compact, toggle volume/rate)
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ComposedChart, Bar, Line, ReferenceLine
+  ResponsiveContainer, ComposedChart, Bar, ReferenceLine
 } from 'recharts'
-import { apiUrl, fetchAnalysis, fetchSummary } from '../api'
+import { apiUrl, fetchAnalysis } from '../api'
 import { InfoTip, Card } from './shared'
 import RatingTrendChart from './RatingTrendChart'
 
@@ -22,35 +22,6 @@ function fmtDay(d) {
 }
 
 // ── Alert banner ──────────────────────────────────────────────────────────────
-function AlertBanner({ kpi, negPie, products }) {
-  if (!kpi?.total) return null
-  const negPct = +((kpi.negative / kpi.total) * 100).toFixed(1)
-  const topIssue = negPie?.[0]
-  const critProds = (products||[]).filter(p => p.neg_pct > 50).length
-  const watchProds = (products||[]).filter(p => p.neg_pct > 30 && p.neg_pct <= 50).length
-  const level = negPct > 50 || critProds > 0 ? 'critical' : negPct > 30 || watchProds > 0 ? 'watch' : 'healthy'
-  const cfg = {
-    critical: { color:'#ef4444', bg:'rgba(239,68,68,0.07)', icon:'🔴', label:'ACTION REQUIRED' },
-    watch:    { color:'#eab308', bg:'rgba(234,179,8,0.07)',  icon:'⚠️', label:'MONITOR CLOSELY' },
-    healthy:  { color:'#22c55e', bg:'rgba(34,197,94,0.07)', icon:'✅', label:'PERFORMING WELL'  },
-  }[level]
-
-  return (
-    <div style={{ background:cfg.bg, border:`1px solid ${cfg.color}30`, borderRadius:10, padding:'14px 18px', display:'flex', alignItems:'center', gap:14 }}>
-      <span style={{ fontSize:22, flexShrink:0 }}>{cfg.icon}</span>
-      <div style={{ flex:1 }}>
-        <div style={{ fontSize:11, fontWeight:700, color:cfg.color, letterSpacing:'0.1em', marginBottom:4 }}>{cfg.label}</div>
-        <div style={{ fontSize:13, color:'var(--text)', lineHeight:1.6 }}>
-          Portfolio negative rate is <strong style={{ color:cfg.color }}>{negPct}%</strong>.
-          {topIssue && <> Top complaint: <strong>{topIssue.category}</strong> ({topIssue.count} reviews).</>}
-          {critProds > 0 && <> <strong style={{ color:'#ef4444' }}>{critProds} product{critProds>1?'s':''}</strong> in crisis (50%+ negative).</>}
-          {watchProds > 0 && <> <strong style={{ color:'#eab308' }}>{watchProds} product{watchProds>1?'s':''}</strong> in watch zone.</>}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── KPI tile ──────────────────────────────────────────────────────────────────
 function KpiTile({ label, value, sub, color, tip }) {
   return (
@@ -65,112 +36,8 @@ function KpiTile({ label, value, sub, color, tip }) {
   )
 }
 
-function PriorityStrip({ kpi, negPie, posPie, summaryRows }) {
-  if (!kpi?.total) return null
-  const topRisk = [...(summaryRows || [])].sort((a, b) => b.neg_pct - a.neg_pct)[0]
-  const topStrength = [...(summaryRows || [])].sort((a, b) => a.neg_pct - b.neg_pct)[0]
-  const topIssue = negPie?.[0]
-  const topLove = posPie?.[0]
-
-  const items = [
-    {
-      label: 'Priority Product',
-      title: topRisk?.product_name || 'No product data',
-      meta: topRisk ? `${topRisk.neg_pct}% problem rate · ${topRisk.review_count} reviews` : 'Waiting for review data',
-      color: '#ef4444',
-    },
-    {
-      label: 'Strongest Product',
-      title: topStrength?.product_name || 'No product data',
-      meta: topStrength ? `${topStrength.neg_pct}% problem rate · ${topStrength.avg_rating?.toFixed?.(1) || topStrength.avg_rating}★ review rating` : 'Waiting for review data',
-      color: '#22c55e',
-    },
-    {
-      label: 'Biggest Customer Pain',
-      title: topIssue?.category || 'No issue data',
-      meta: topIssue ? `${topIssue.count} negative reviews tagged here` : 'Waiting for issue data',
-      color: '#f97316',
-    },
-    {
-      label: 'Equity To Protect',
-      title: topLove?.category || 'No positive signal yet',
-      meta: topLove ? `${topLove.count} positive reviews mention this` : 'Waiting for positive signal',
-      color: '#60a5fa',
-    },
-  ]
-
-  return (
-    <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
-      {items.map(item => (
-        <div key={item.label} style={{ background:'var(--surface)', border:`1px solid ${item.color}25`, borderRadius:12, padding:'14px 16px', display:'flex', flexDirection:'column', gap:6, borderTop:`2px solid ${item.color}` }}>
-          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>{item.label}</div>
-          <div style={{ fontSize:15, fontWeight:700, color:'var(--text)', lineHeight:1.35 }}>{item.title}</div>
-          <div style={{ fontSize:11, color:'var(--text-muted)', lineHeight:1.45 }}>{item.meta}</div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ── Product health card grid ──────────────────────────────────────────────────
-function ProductHealthGrid({ summaryRows }) {
-  if (!summaryRows?.length) return null
-  return (
-    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px,1fr))', gap:12 }}>
-      {[...summaryRows].sort((a,b) => b.neg_pct - a.neg_pct).map(p => {
-        const health = Math.max(0, 100 - p.neg_pct)
-        const color  = health >= 75 ? '#22c55e' : health >= 60 ? '#eab308' : '#ef4444'
-        const label  = health >= 75 ? 'Good' : health >= 60 ? 'Watch' : 'Act Now'
-        const bg     = health >= 75 ? 'rgba(34,197,94,0.06)' : health >= 60 ? 'rgba(234,179,8,0.06)' : 'rgba(239,68,68,0.06)'
-        const avgRating = parseFloat(p.avg_rating || 0).toFixed(1)
-        return (
-          <div key={p.product} style={{ background:bg, border:`1px solid ${color}30`, borderRadius:10, padding:'14px 16px', display:'flex', flexDirection:'column', gap:10 }}>
-            {/* Name + badge */}
-            <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:8 }}>
-              <div style={{ fontSize:12, fontWeight:700, lineHeight:1.4, flex:1 }}>{p.product}</div>
-              <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color, background:`${color}18`, border:`1px solid ${color}40`, borderRadius:4, padding:'2px 7px', flexShrink:0 }}>{label}</div>
-            </div>
-            {/* Big health score */}
-            <div style={{ display:'flex', alignItems:'flex-end', gap:12 }}>
-              <div>
-                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:2 }}>Health</div>
-                <div style={{ fontFamily:'Bebas Neue', fontSize:38, lineHeight:1, color }}>{Math.round(health)}</div>
-              </div>
-              <div style={{ flex:1, paddingBottom:6 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
-                  <span style={{ fontSize:10, color:'#ef4444', fontWeight:600 }}>{p.neg_pct}% neg</span>
-                  <span style={{ fontSize:10, color:'#22c55e', fontWeight:600 }}>{Math.round(p.positive/Math.max(p.total,1)*100)}% pos</span>
-                </div>
-                {/* Stacked bar */}
-                <div style={{ height:6, background:'var(--border)', borderRadius:3, overflow:'hidden', display:'flex' }}>
-                  <div style={{ width:`${Math.round(p.positive/Math.max(p.total,1)*100)}%`, background:'#22c55e', opacity:0.8 }} />
-                  <div style={{ width:`${Math.round(p.neutral/Math.max(p.total,1)*100)}%`, background:'#eab308', opacity:0.7 }} />
-                  <div style={{ width:`${p.neg_pct}%`, background:'#ef4444', opacity:0.8 }} />
-                </div>
-              </div>
-            </div>
-            {/* Stats row */}
-            <div style={{ display:'flex', gap:0, borderTop:`1px solid ${color}20`, paddingTop:8 }}>
-              {[
-                { l:'Reviews', v:p.total?.toLocaleString() },
-                { l:'Avg Rating', v:`${avgRating}★` },
-                { l:'Neg Count', v:p.negative?.toLocaleString() },
-              ].map(({ l, v }) => (
-                <div key={l} style={{ flex:1, display:'flex', flexDirection:'column', gap:2 }}>
-                  <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.07em' }}>{l}</div>
-                  <div style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{v}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 // ── Inline sub-tag word cloud (shown after clicking an issue row) ─────────────
-function InlineWordCloud({ category, filters, allProducts }) {
+function InlineWordCloud({ category, filters }) {
   const [words, setWords]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [activeWord, setActiveWord] = useState(null)
@@ -201,8 +68,37 @@ function InlineWordCloud({ category, filters, allProducts }) {
       .then(r => r.json()).then(setReviews).catch(() => setReviews([])).finally(() => setRevLoading(false))
   }, [activeWord])
 
+  // When there are no sub-tags, auto-fetch reviews for the category directly
+  useEffect(() => {
+    if (loading || words.length > 0 || !category) return
+    setRevLoading(true)
+    const p = new URLSearchParams({ keyword: category })
+    if (filters.product_category) p.set('product_category', filters.product_category)
+    if (filters.product?.length) p.set('product', filters.product.join('|||'))
+    if (filters.date_from) p.set('date_from', filters.date_from)
+    if (filters.date_to)   p.set('date_to',   filters.date_to)
+    fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
+      .then(r => r.json()).then(setReviews).catch(() => setReviews([])).finally(() => setRevLoading(false))
+  }, [loading, words.length, category, JSON.stringify(filters)])
+
   if (loading) return <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>Loading sub-tags…</div>
-  if (!words.length) return <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12, fontStyle:'italic' }}>No sub-tags found for this category.</div>
+  if (!words.length) return (
+    <div style={{ marginTop:8, padding:'12px 14px', background:'var(--surface2)', borderRadius:8, border:'1px solid var(--border)' }}>
+      <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:8 }}>
+        Reviews in "{category}"
+        <span style={{ marginLeft:8, fontWeight:400, fontStyle:'italic', textTransform:'none', opacity:0.7 }}>no sub-tags available</span>
+      </div>
+      {revLoading ? (
+        <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>Loading…</div>
+      ) : reviews.length === 0 ? (
+        <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>No reviews found.</div>
+      ) : (
+        <div style={{ maxHeight:280, overflowY:'auto' }}>
+          {reviews.map((r, i) => <ReviewCard key={r.review_id || i} r={r} />)}
+        </div>
+      )}
+    </div>
+  )
 
   const max = Math.max(...words.map(w => w.count))
   const sentColor = w => w.neg_ratio > 0.6 ? '#ef4444' : w.neg_ratio > 0.35 ? '#f97316' : w.neg_ratio > 0.15 ? '#eab308' : '#22c55e'
@@ -290,7 +186,7 @@ function ReviewCard({ r }) {
 }
 
 // ── Burning issues (horizontal ranked bars) ───────────────────────────────────
-function BurningIssues({ negPie, activeCat, onRowClick, filters, allProducts }) {
+function BurningIssues({ negPie, activeCat, onRowClick, filters }) {
   if (!negPie?.length) return <div style={{ padding:'20px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>No data</div>
   const max = negPie[0].count
   const total = negPie.reduce((s,r)=>s+r.count,0)
@@ -316,7 +212,7 @@ function BurningIssues({ negPie, activeCat, onRowClick, filters, allProducts }) 
               onMouseLeave={e => { if (!isActive) e.currentTarget.style.background='transparent' }}
             >
               <div style={{ width:26, fontSize:10, color:'var(--text-muted)', textAlign:'right', flexShrink:0 }}>#{i+1}</div>
-              <div style={{ width:130, fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flexShrink:0, color: isActive ? 'var(--accent)' : 'var(--text)' }}>{item.category}</div>
+              <div title={item.category} style={{ width:130, fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flexShrink:0, color: isActive ? 'var(--accent)' : 'var(--text)' }}>{item.category}</div>
               <div style={{ flex:1, height:8, background:'var(--border)', borderRadius:4, overflow:'hidden' }}>
                 <div style={{ height:'100%', width:`${w}%`, background:c, borderRadius:4, opacity:0.85 }} />
               </div>
@@ -326,7 +222,7 @@ function BurningIssues({ negPie, activeCat, onRowClick, filters, allProducts }) 
             </div>
             {isActive && (
               <div style={{ marginLeft:32 }}>
-                <InlineWordCloud category={item.category} filters={filters} allProducts={allProducts} />
+                <InlineWordCloud category={item.category} filters={filters} />
               </div>
             )}
           </div>
@@ -440,12 +336,28 @@ function Toggle({ value, options, onChange }) {
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 export default function AnalysisPage({ filters, allProducts, tree }) {
   const [data, setData]       = useState(null)
-  const [summaryRows, setSummaryRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [hasData, setHasData] = useState(false)
-  const [trendMode, setTrendMode] = useState('volume')
+  const [trendMode, setTrendMode] = useState('sentiment')
   const [drawerCat, setDrawerCat] = useState(null)
   const [drawerCatPos, setDrawerCatPos] = useState(null)
+  const [issueFilter, setIssueFilter] = useState(null)
+  const [localIssueData, setLocalIssueData] = useState(null)
+  const [signalProd, setSignalProd] = useState(null)
+  const [localTrendData, setLocalTrendData] = useState(null)
+
+  // Respect parent filter: only show products in scope
+  const scopedProducts = useMemo(() => {
+    if (filters.product?.length) return filters.product
+    if (filters.product_category) return tree?.[filters.product_category] || []
+    return allProducts || []
+  }, [filters.product, filters.product_category, tree, allProducts])
+
+  // Reset widget filters if selected product is no longer in scope
+  useEffect(() => {
+    if (issueFilter && !scopedProducts.includes(issueFilter)) setIssueFilter(null)
+    if (signalProd && !scopedProducts.includes(signalProd)) setSignalProd(null)
+  }, [JSON.stringify(scopedProducts)])
 
   const apiParams = {
     product_category: filters.product_category || null,
@@ -457,19 +369,37 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const load = useCallback(() => {
     if (!allProducts?.length) return
     setLoading(true)
-    Promise.all([
-      fetchAnalysis(apiParams),
-      fetchSummary(apiParams),
-    ])
-      .then(([analysis, summary]) => {
+    fetchAnalysis(apiParams)
+      .then(analysis => {
         setData(analysis)
-        setSummaryRows(summary || [])
         setHasData(true)
       })
       .finally(() => setLoading(false))
   }, [JSON.stringify(apiParams), allProducts?.length])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!issueFilter) { setLocalIssueData(null); return }
+    const p = new URLSearchParams({ product: issueFilter })
+    if (apiParams.date_from) p.set('date_from', apiParams.date_from)
+    if (apiParams.date_to) p.set('date_to', apiParams.date_to)
+    fetch(apiUrl(`/api/analysis?${p}`))
+      .then(r => r.json())
+      .then(d => setLocalIssueData(d))
+      .catch(() => setLocalIssueData(null))
+  }, [issueFilter, apiParams.date_from, apiParams.date_to])
+
+  useEffect(() => {
+    if (!signalProd) { setLocalTrendData(null); return }
+    const p = new URLSearchParams({ product: signalProd })
+    if (apiParams.date_from) p.set('date_from', apiParams.date_from)
+    if (apiParams.date_to) p.set('date_to', apiParams.date_to)
+    fetch(apiUrl(`/api/analysis?${p}`))
+      .then(r => r.json())
+      .then(d => setLocalTrendData(d?.daily_trend ?? null))
+      .catch(() => setLocalTrendData(null))
+  }, [signalProd, apiParams.date_from, apiParams.date_to])
 
   if (loading && !hasData) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:200, color:'var(--text-muted)', gap:10 }}>
@@ -484,13 +414,13 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const negPct  = kpi.total ? +((kpi.negative/kpi.total)*100).toFixed(1) : 0
   const posPct  = kpi.total ? +((kpi.positive/kpi.total)*100).toFixed(1) : 0
 
-  // Build product summary from pie data for health cards
-  // (re-use neg_pie + pos_pie totals; real per-product data comes from /api/summary)
-  // We pass a minimal shape to ProductHealthGrid from what /api/analysis returns
-  const productSummaryFromTrend = [] // populated by per-product breakdown if available
+  const displayedNegPie = localIssueData?.neg_pie ?? negPie
+  const displayedPosPie = localIssueData?.pos_pie ?? posPie
+
+  const activeTrend = localTrendData ?? trend
 
   // For rolling neg rate on trend
-  const trendWithRolling = trend.map((pt, i, arr) => {
+  const trendWithRolling = activeTrend.map((pt, i, arr) => {
     const window = arr.slice(Math.max(0,i-6), i+1)
     const total = window.reduce((s,w)=>s+(w.Positive+w.Negative+w.Neutral),0)
     const neg   = window.reduce((s,w)=>s+w.Negative,0)
@@ -507,66 +437,75 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
 
-      {/* 1. Alert banner */}
-      <AlertBanner kpi={kpi} negPie={negPie} products={summaryRows} />
-
-      {/* 2. KPI tiles */}
+      {/* KPI tiles */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
         <KpiTile label="Feedback Volume" value={kpi.total?.toLocaleString()} color="#60a5fa"
           sub={`${allProducts?.length||0} product${allProducts?.length!==1?'s':''} · selected period`}
-          tip="Total scraped reviews inside the selected date range. This is the size of the voice-of-customer sample behind the dashboard." />
-        <KpiTile label="Customers Reporting Problems" value={`${negPct}%`}
+          tip="Total scraped reviews in the selected date range." />
+        <KpiTile label="1–2 Stars" value={`${negPct}%`}
           color={negPct>50?'#ef4444':negPct>30?'#f97316':'#22c55e'}
-          sub={<span><strong style={{color:'#ef4444'}}>{kpi.negative?.toLocaleString()}</strong> reviews · {negPct>50?'🔴 Needs immediate action':negPct>30?'⚠️ Watch closely':'✅ In control'}</span>}
-          tip="Share of reviews the model classified as Negative. This is the clearest early warning signal for customer pain in the selected period." />
-        <KpiTile label="Customers Delighted" value={`${posPct}%`}
+          sub={<span><strong style={{color:'#ef4444'}}>{kpi.negative?.toLocaleString()}</strong> reviews</span>}
+          tip="Share of reviews rated 1 or 2 stars." />
+        <KpiTile label="4–5 Stars" value={`${posPct}%`}
           color="#22c55e"
-          sub={<span><strong style={{color:'#22c55e'}}>{kpi.positive?.toLocaleString()}</strong> reviews · {posPct>60?'✅ Strong brand equity':'⚠️ Room to improve'}</span>}
-          tip="Share of reviews classified as Positive. This helps identify what the brand should protect while fixing the negatives." />
-        <KpiTile label="Undecided / Neutral" value={`${kpi.total?((kpi.neutral/kpi.total)*100).toFixed(1):0}%`}
+          sub={<span><strong style={{color:'#22c55e'}}>{kpi.positive?.toLocaleString()}</strong> reviews</span>}
+          tip="Share of reviews rated 4 or 5 stars." />
+        <KpiTile label="3 Stars" value={`${kpi.total?((kpi.neutral/kpi.total)*100).toFixed(1):0}%`}
           color="#eab308"
-          sub={<span><strong style={{color:'#eab308'}}>{kpi.neutral?.toLocaleString()}</strong> reviews · not strongly positive or negative</span>}
-          tip="Neutral reviews usually reflect acceptable but unremarkable experiences. A large share here can mean customers are not yet impressed." />
+          sub={<span><strong style={{color:'#eab308'}}>{kpi.neutral?.toLocaleString()}</strong> reviews</span>}
+          tip="Share of reviews rated 3 stars." />
       </div>
-
-      {/* 3. Executive priorities */}
-      <PriorityStrip kpi={kpi} negPie={negPie} posPie={posPie} summaryRows={summaryRows} />
 
       <Card
         title="Amazon Rating Signal"
-        tip="This is the external market-facing rating view. It uses Amazon product-page rating snapshots over time, alongside scraped daily review averages and total rating count. Use this in Overview because it shows how public product perception is moving beyond just the current filtered review slice."
-        sub="Public Amazon rating trend first · filtered review-period ratings live in Trends"
+        tip="Amazon product-page rating snapshots over time, alongside scraped daily review averages."
       >
         <RatingTrendChart filters={filters} allProducts={allProducts} tree={tree} />
       </Card>
 
-      {/* 4. Burning issues — what to fix RIGHT NOW */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
         <Card
-          title="🔴 What Needs Attention"
-          tip="Issue areas driving the most negative reviews, ranked by volume. This is the action queue for leadership: what is hurting customer experience most right now. Click a row to see the sub-topics, then click a word to read the underlying reviews."
-          sub="Prioritized by negative review volume"
+          title="Top Issues"
+          tip="Issue categories with the most negative reviews, ranked by volume. Click a row to see sub-tags, then click a word to read reviews."
+          controls={
+            <select value={issueFilter || ''} onChange={e => { setIssueFilter(e.target.value || null); setDrawerCat(null) }} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: issueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+              <option value="">All Products</option>
+              {scopedProducts.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          }
         >
-          <BurningIssues negPie={negPie} activeCat={drawerCat} onRowClick={cat => setDrawerCat(drawerCat === cat ? null : cat)} filters={filters} allProducts={allProducts} />
+          <BurningIssues negPie={displayedNegPie} activeCat={drawerCat} onRowClick={cat => setDrawerCat(drawerCat === cat ? null : cat)} filters={filters} />
         </Card>
 
         <Card
-          title="✅ What We Must Protect"
-          tip="Categories appearing most in positive reviews. These are the strengths customers consistently value, and they should be preserved while teams fix pain points. Click a row to see the sub-topics, then click a word to read the underlying reviews."
-          sub="Highest positive review concentration"
+          title="Top Positive Signals"
+          tip="Categories with the most positive reviews. Click a row to see sub-tags, then click a word to read reviews."
+          controls={
+            <select value={issueFilter || ''} onChange={e => { setIssueFilter(e.target.value || null); setDrawerCatPos(null) }} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: issueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+              <option value="">All Products</option>
+              {scopedProducts.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          }
         >
-          <BurningIssues negPie={posPie.map(p=>({...p}))} activeCat={drawerCatPos} onRowClick={cat => setDrawerCatPos(drawerCatPos === cat ? null : cat)} filters={filters} allProducts={allProducts} />
+          <BurningIssues negPie={displayedPosPie.map(p=>({...p}))} activeCat={drawerCatPos} onRowClick={cat => setDrawerCatPos(drawerCatPos === cat ? null : cat)} filters={filters} />
         </Card>
       </div>
 
-      {/* 5. Sentiment trend — compact with toggle */}
+      {/* Customer Signal Over Time */}
       <Card
         title="Customer Signal Over Time"
-        tip="Volume mode shows how many positive, negative, and neutral reviews came in each day. Neg Rate mode shows the rolling problem rate, which is the cleaner executive signal because it smooths out daily noise. Use Volume to understand scale and Neg Rate to understand pressure."
-        sub="Volume shows scale · Neg Rate shows sustained pressure"
-        controls={<Toggle value={trendMode} onChange={setTrendMode} options={[{v:'rate',l:'Neg Rate %'},{v:'volume',l:'Volume'}]} />}
+        tip="Neg Rate shows the 7-day rolling problem rate. Sentiment shows daily positive / negative / neutral breakdown."
+        controls={
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <select value={signalProd || ''} onChange={e => setSignalProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: signalProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+              <option value="">All Products</option>
+              {scopedProducts.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <Toggle value={trendMode} onChange={setTrendMode} options={[{v:'rate',l:'Neg Rate %'},{v:'sentiment',l:'Sentiment'}]} />
+          </div>
+        }
       >
-        {trend.length === 0 ? (
+        {activeTrend.length === 0 ? (
           <div style={{ padding:'24px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
             No trend data — review dates may not be parsed correctly yet.
           </div>
@@ -583,15 +522,15 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
               <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
               <YAxis domain={[rateMin, rateMax]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`} width={36} />
               <Tooltip content={<RateTip />} />
-              {rateMax >= 30 && <ReferenceLine y={30} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value:'⚠ 30%', fill:'#eab308', fontSize:10, position:'insideRight' }} />}
-              {rateMax >= 50 && <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value:'🔴 50%', fill:'#ef4444', fontSize:10, position:'insideRight' }} />}
+              {rateMax >= 30 && <ReferenceLine y={30} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value:'30%', fill:'#eab308', fontSize:10, position:'insideRight' }} />}
+              {rateMax >= 50 && <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value:'50%', fill:'#ef4444', fontSize:10, position:'insideRight' }} />}
               <Bar dataKey="neg_rate" fill="#ef4444" opacity={0.12} name="Daily Neg %" radius={[2,2,0,0]} barSize={6} />
               <Area type="monotone" dataKey="rolling_neg" stroke="#ff4e1a" strokeWidth={2.5} fill="url(#negGrad)" dot={false} activeDot={{ r:5, fill:'#ff4e1a', stroke:'#fff', strokeWidth:2 }} name="7d Rolling" />
             </ComposedChart>
           </ResponsiveContainer>
         ) : (
           <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={trend} margin={{ top:8, right:8, bottom:0, left:-10 }}>
+            <AreaChart data={activeTrend} margin={{ top:8, right:8, bottom:0, left:-10 }}>
               <defs>
                 {Object.entries(SC).map(([s,c]) => (
                   <linearGradient key={s} id={`ov-${s}`} x1="0" y1="0" x2="0" y2="1">

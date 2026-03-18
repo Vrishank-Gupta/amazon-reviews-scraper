@@ -215,33 +215,10 @@ export default function App() {
       </div>
 
       <main style={{ flex: 1, padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-        <div className="glass-panel" style={{ borderRadius: 14, padding: '16px 20px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                {currentTab.eyebrow}
-              </div>
-              <h1 style={{ margin: 0, fontSize: 28, lineHeight: 1.05, color: 'var(--text)', fontFamily: 'Bebas Neue', letterSpacing: '0.02em' }}>
-                {currentTab.title}
-              </h1>
-              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.6, maxWidth: 760 }}>
-                {currentTab.subtitle}
-              </p>
-            </div>
-
-            <div style={{ minWidth: 280, maxWidth: 420, padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>
-                Reading Guide
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.6 }}>
-                {tab === 'analysis'
-                  ? 'Start with the top metrics, then scan product and issue priorities to see what is driving the overall story.'
-                  : tab === 'trends'
-                    ? 'Use this page to confirm whether pressure is rising, persistent, or isolated to a specific product or issue.'
-                    : 'Use this page to validate patterns with review text, tags, and exports.'}
-              </div>
-            </div>
-          </div>
+        <div className="glass-panel" style={{ borderRadius: 14, padding: '14px 20px' }}>
+          <h1 style={{ margin: 0, fontSize: 28, lineHeight: 1.05, color: 'var(--text)', fontFamily: 'Bebas Neue', letterSpacing: '0.02em' }}>
+            {currentTab.title}
+          </h1>
         </div>
 
         {initialLoading ? (

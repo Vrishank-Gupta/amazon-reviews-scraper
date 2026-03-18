@@ -39,8 +39,8 @@ function ReviewCard({ r }) {
         <SentBadge s={r.sentiment} />
         <StarLabel rating={r.rating} />
         {r.product_name && (
-          <span style={{ fontSize:10, color:'var(--text-muted)', background:'var(--surface2)', padding:'1px 7px', borderRadius:4, border:'1px solid var(--border)' }}>
-            {r.product_name.split(' ').slice(0,4).join(' ')}
+          <span title={r.product_name} style={{ fontSize:10, color:'var(--text-muted)', background:'var(--surface2)', padding:'1px 7px', borderRadius:4, border:'1px solid var(--border)', maxWidth:180, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'inline-block' }}>
+            {r.product_name}
           </span>
         )}
         <span style={{ fontSize:10, color:'var(--text-muted)', marginLeft:'auto' }}>{date}</span>

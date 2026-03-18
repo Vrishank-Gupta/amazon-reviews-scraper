@@ -292,7 +292,9 @@ export default function ReviewsTable({ data }) {
             {pageData.length === 0 && (
               <tr>
                 <td colSpan={7} style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-                  No reviews match your filters or search.
+                  {normalizedQuery
+                    ? `No reviews found for "${query}" — try different keywords or broaden your filters.`
+                    : 'No reviews match the current filters.'}
                 </td>
               </tr>
             )}
@@ -301,7 +303,7 @@ export default function ReviewsTable({ data }) {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {sorted.length > 0 && (
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -309,9 +311,11 @@ export default function ReviewsTable({ data }) {
           padding: '8px 4px',
         }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Showing {sorted.length ? page * PAGE_SIZE + 1 : 0}–{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
+            {totalPages > 1
+              ? `Showing ${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, sorted.length)} of ${sorted.length}`
+              : `${sorted.length} review${sorted.length !== 1 ? 's' : ''}`}
           </span>
-          <div style={{ display: 'flex', gap: 8 }}>
+          {totalPages > 1 && <div style={{ display: 'flex', gap: 8 }}>
             <button
               onClick={() => setPage(p => Math.max(0, p - 1))}
               disabled={page === 0}
@@ -344,7 +348,7 @@ export default function ReviewsTable({ data }) {
             >
               Next <ChevronRight size={14} />
             </button>
-          </div>
+          </div>}
         </div>
       )}
     </div>

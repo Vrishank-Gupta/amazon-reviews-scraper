@@ -9,7 +9,6 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         pipelineConsole: resolve(__dirname, 'pipeline-console.html'),
-        weeklyRun: resolve(__dirname, 'weekly-run.html'),
       },
     },
   },

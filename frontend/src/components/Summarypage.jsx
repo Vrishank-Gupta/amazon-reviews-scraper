@@ -14,7 +14,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer
 } from 'recharts'
-import { apiUrl, fetchSummary, fetchReviewsByKeyword } from '../api'
+import { apiUrl, fetchSummary } from '../api'
 import { InfoTip, StarLabel, Delta, SentBadge, Card } from './shared'
 
 const PIE_NEG = ['#ef4444','#f97316','#fbbf24','#a855f7','#e879f9','#f43f5e','#94a3b8','#64748b']
@@ -124,10 +124,10 @@ function ReviewCard({ r }) {
 }
 
 // ── Keyword cloud ─────────────────────────────────────────────────────────────
-function WordCloud({ words, filters, onWordClick, activeWord }) {
+function WordCloud({ words, onWordClick, activeWord, noSubTagsMsg }) {
   if (!words?.length) return (
-    <div style={{ padding:'18px 0', textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>
-      No sub-tags — click a pie slice to filter
+    <div style={{ padding:'18px 0', textAlign:'center', color:'var(--text-muted)', fontSize:12, fontStyle:'italic' }}>
+      {noSubTagsMsg || 'No sub-tags — click a pie slice to filter'}
     </div>
   )
   const max = Math.max(...words.map(w=>w.count))
@@ -165,8 +165,7 @@ function DrillDown({ row, filters }) {
   const [negPieData, setNegPieData] = useState([])
   const [posPieData, setPosPieData] = useState([])
 
-  const apiProduct = row.asin  // filter wordcloud by this product's ASIN name
-  const productFilter = { ...filters, product: [row.product_name] }
+
 
   useEffect(() => {
     setWcCat(null); setActiveWord(null); setReviews([])
@@ -208,6 +207,24 @@ function DrillDown({ row, filters }) {
       .catch(()=>setReviews([]))
       .finally(()=>setRevLoading(false))
   }, [activeWord, wcSent, row.product_name])
+
+  // When a category has no sub-tags, auto-fetch reviews for it directly
+  useEffect(() => {
+    if (wcLoading || wcData.length > 0 || !wcCat) return
+    setRevLoading(true)
+    const p = new URLSearchParams({ keyword: wcCat, product: row.product_name })
+    if (filters.date_from) p.set('date_from', filters.date_from)
+    if (filters.date_to)   p.set('date_to',   filters.date_to)
+    fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
+      .then(r=>r.json())
+      .then(data => {
+        const f = wcSent==='neg' ? data.filter(r=>r.sentiment==='Negative')
+          : wcSent==='pos' ? data.filter(r=>r.sentiment!=='Negative') : data
+        setReviews(f)
+      })
+      .catch(()=>setReviews([]))
+      .finally(()=>setRevLoading(false))
+  }, [wcLoading, wcData.length, wcCat, row.product_name])
 
   const handlePieClick = (entry, sentiment) => {
     const cat = entry?.name||entry?.category
@@ -294,14 +311,15 @@ function DrillDown({ row, filters }) {
         {wcLoading ? (
           <div style={{ padding:'16px 0', textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>Loading…</div>
         ) : (
-          <WordCloud words={wcData} filters={productFilter} activeWord={activeWord} onWordClick={w=>{setActiveWord(w)}} />
+          <WordCloud words={wcData} activeWord={activeWord} onWordClick={w=>{setActiveWord(w)}}
+            noSubTagsMsg={wcCat ? `No sub-tags for "${wcCat}" — showing reviews below` : undefined} />
         )}
-        {!wcCat && !activeWord && (
+        {!wcCat && !activeWord && wcData.length > 0 && (
           <div style={{ fontSize:11, color:'var(--text-muted)', textAlign:'center', fontStyle:'italic' }}>
             Click a pie slice to filter by category · then click a word to read reviews
           </div>
         )}
-        {wcCat && !activeWord && (
+        {wcCat && !activeWord && wcData.length > 0 && (
           <div style={{ fontSize:11, color:'var(--text-muted)', textAlign:'center', fontStyle:'italic' }}>
             Now click a word to read the reviews ↓
           </div>
@@ -309,11 +327,11 @@ function DrillDown({ row, filters }) {
       </div>
 
       {/* Reviews */}
-      {activeWord && (
+      {(activeWord || (wcCat && wcData.length === 0 && !wcLoading)) && (
         <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
           <div style={{ padding:'10px 14px', borderBottom:'1px solid var(--border)', background:'var(--surface2)', display:'flex', alignItems:'center', gap:8 }}>
             <span style={{ fontFamily:'Bebas Neue', fontSize:14, letterSpacing:'0.06em', color:'var(--text-muted)' }}>
-              Reviews — <span style={{ color:'var(--accent)' }}>{activeWord}</span>
+              Reviews — <span style={{ color:'var(--accent)' }}>{activeWord || wcCat}</span>
             </span>
             {!revLoading && (
               <span style={{ background:'rgba(255,78,26,0.15)', color:'var(--accent)', border:'1px solid rgba(255,78,26,0.3)', borderRadius:10, padding:'1px 8px', fontSize:11, fontWeight:600 }}>
@@ -418,10 +436,10 @@ export default function SummaryPage({ filters, allProducts }) {
           { label:'Review Volume', value:totalReviews.toLocaleString(), color:'#60a5fa',
             sub:'In selected period',
             tip:'Total reviews for all selected products in the date range.' },
-          { label:'Needs Attention', value:worst?.product_name?.split(' ').slice(0,2).join(' '), color:'#ef4444',
+          { label:'Needs Attention', value:worst?.product_name, color:'#ef4444',
             sub:`${worst?.neg_pct}% problem rate · click to drill down`,
             tip:'Worst performing product by negative rate. Click its row in the table to investigate.' },
-          { label:'Best Performer', value:best?.product_name?.split(' ').slice(0,2).join(' '), color:'#22c55e',
+          { label:'Best Performer', value:best?.product_name, color:'#22c55e',
             sub:`${best?.neg_pct}% problem rate`,
             tip:'Best performing product by negative rate. Study what it does right.' },
         ].map(({ label, value, color, sub, tip }) => (
@@ -430,7 +448,7 @@ export default function SummaryPage({ filters, allProducts }) {
               <span style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>{label}</span>
               <InfoTip text={tip} />
             </div>
-            <div style={{ fontFamily:'Bebas Neue', fontSize:22, lineHeight:1.1, color }}>{value||'—'}</div>
+            <div title={value||''} style={{ fontFamily:'Bebas Neue', fontSize:22, lineHeight:1.1, color, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{value||'—'}</div>
             <div style={{ fontSize:10, color:'var(--text-muted)' }}>{sub}</div>
           </div>
         ))}
@@ -486,7 +504,7 @@ export default function SummaryPage({ filters, allProducts }) {
                       onMouseEnter={e => e.currentTarget.style.background='rgba(255,78,26,0.04)'}
                       onMouseLeave={e => e.currentTarget.style.background=isDrill?'rgba(255,78,26,0.05)':rowBg}
                     >
-                      <td style={{ padding:'12px 14px', fontSize:13, fontWeight:600, borderBottom:isDrill?'none':'1px solid var(--border)', maxWidth:170, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      <td title={row.product_name||row.asin} style={{ padding:'12px 14px', fontSize:13, fontWeight:600, borderBottom:isDrill?'none':'1px solid var(--border)', maxWidth:170, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                         {row.product_name||row.asin}
                       </td>
                       <td style={{ padding:'12px 14px', fontSize:11, color:'var(--text-muted)', borderBottom:isDrill?'none':'1px solid var(--border)', whiteSpace:'nowrap' }}>{row.asin}</td>
