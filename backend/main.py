@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import pymysql
 import pymysql.cursors
+from dbutils.pooled_db import PooledDB
 import json
 import csv
 import subprocess
@@ -121,15 +122,21 @@ def product_filter_sql(products: Optional[list], table_alias: str = "r") -> tupl
     return f" AND {table_alias}.product_name IN ({placeholders})", list(products)
 
 
+_db_pool = PooledDB(
+    creator=pymysql,
+    maxconnections=10,
+    mincached=2,
+    blocking=True,
+    host=os.getenv("DB_HOST", "localhost"),
+    user=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASSWORD"),
+    database=os.getenv("DB_NAME"),
+    charset="utf8mb4",
+    cursorclass=pymysql.cursors.DictCursor,
+)
+
 def get_conn():
-    return pymysql.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        database=os.getenv("DB_NAME"),
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-    )
+    return _db_pool.connection()
 
 
 PIPELINE_JOB_TABLE_SQL = """
@@ -1346,7 +1353,6 @@ def get_cxo_trends(
         ]
 
         # ── Weekly digest (last 2 weeks) ──
-        weeks = sorted(set(str(r["yw"]) for r in digest_rows))
         digest = {}
         for row in digest_rows:
             yw = str(row["yw"])
@@ -2015,6 +2021,17 @@ def get_rating_trends(
 
 # ── Stub endpoints — silence 404s from older frontend versions ────────────────
 # These endpoints are called by an older build and can be safely ignored.
+
+@app.get("/health")
+def health():
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        conn.close()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 @app.get("/api/health-score")
 def stub_health_score(): return {}

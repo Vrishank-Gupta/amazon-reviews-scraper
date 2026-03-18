@@ -13,10 +13,10 @@ Voice of Customer analytics for Amazon.in products — scrapes reviews, tags the
 
 | Part | What it is | Where it runs |
 |---|---|---|
-| Frontend | React + Vite SPA | Netlify (static) |
-| Backend API | FastAPI + uvicorn | Linux VM (Docker) |
+| Frontend | React + Vite SPA | Docker (nginx) or Netlify |
+| Backend API | FastAPI + uvicorn (4 workers) | Docker on Linux VM |
 | Database | MySQL 8 | Managed or VM |
-| Scraper | Selenium + Chrome | Windows machine |
+| Scraper | Selenium + Chrome | Windows machine (manual `py` command) |
 
 ---
 
@@ -24,62 +24,60 @@ Voice of Customer analytics for Amazon.in products — scrapes reviews, tags the
 
 ```
 amazon-reviews/
-├── .env                          # local secrets (gitignored)
-├── .env.backend.production       # backend VM template
-├── .env.worker.production        # Windows worker template
-├── docker-compose.local.yml      # local dev with Docker
-├── docker-compose.backend.yml    # backend-only VM deploy
-├── netlify.toml                  # Netlify frontend config
+├── .env                          # local secrets (gitignored) — copy from .env.example
+├── .env.example                  # canonical reference for all env vars
+├── .env.backend.production       # backend VM config (gitignored)
+├── .env.worker.production        # Windows scraper config (gitignored)
+├── docker-compose.local.yml      # local dev: backend + frontend in Docker
+├── docker-compose.backend.yml    # production: backend only
 ├── data/
-│   ├── asins.csv                 # products to scrape
+│   ├── asins.csv                 # products to scrape (ASIN, product_name, category)
 │   └── categories.json
 ├── backend/
-│   ├── main.py                   # FastAPI app
+│   ├── main.py                   # FastAPI app (connection-pooled, 4 workers)
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   ├── index.html
-│   ├── pipeline-console.html
+│   ├── nginx.conf                # production nginx (rate limiting, security headers)
 │   ├── vite.config.js
 │   └── Dockerfile
 ├── pipeline/
-│   ├── run_pipeline.py           # entry point (scrape → tag)
+│   ├── run_pipeline.py           # entry point: scrape → tag
 │   ├── scraper_runner.py         # Selenium scraper
-│   ├── scraper.py                # scraping logic
-│   ├── tagger.py                 # AI tagger
-│   ├── worker.py                 # Windows background worker
+│   ├── tagger.py                 # GPT-4o-mini tagger
+│   ├── worker.py                 # background worker (polls DB job queue)
 │   ├── requirements.txt          # Windows worker deps (includes selenium)
 │   └── requirements.backend.txt  # Docker backend deps (no selenium)
 ├── shared/
 │   └── env.py                    # .env loader
+├── dev.py                        # local dev launcher (backend + frontend together)
 └── ops/
     ├── mysql/
-    │   └── deployment.sql        # DB setup
-    ├── deploy/                   # full deployment guides
+    │   └── deployment.sql        # DB schema + seed
+    ├── deploy/                   # production deployment guides
     └── windows/                  # Windows worker scripts
 ```
 
 ---
 
-## Local development
+## Local development (no Docker)
+
+The fastest way to run locally — just Python + Node, no Docker needed.
 
 ### Prerequisites
 
 - Python 3.11+
 - Node 20+
 - MySQL 8 running locally
-- Chrome + chromedriver (for scraping)
 
-### 1. Set up `.env`
+### 1. Copy and fill `.env`
 
+```bash
+cp .env.example .env
 ```
-DB_HOST=localhost
-DB_USER=llm_reader
-DB_PASSWORD=your_password
-DB_NAME=world
-OPENAI_API_KEY=sk-...
-```
+
+Edit `.env` with your local MySQL credentials and OpenAI key.
 
 ### 2. Set up the database
 
@@ -101,13 +99,47 @@ py dev.py
 
 This starts backend + frontend together and streams their logs side by side. Ctrl+C stops both.
 
-- Dashboard: `http://localhost:5173`
-- Pipeline console: `http://localhost:5173/pipeline-console.html`
-- API: `http://localhost:8000`
+| URL | What |
+|---|---|
+| `http://localhost:5173` | Dashboard |
+| `http://localhost:5173/pipeline-console.html` | Pipeline console |
+| `http://localhost:8000` | API |
+| `http://localhost:8000/health` | Health check |
 
 `npm install` runs automatically on first launch if `node_modules` is missing.
 
-### 5. Run the scraper (Windows)
+---
+
+## Local development (Docker)
+
+Runs the full stack in containers — useful to test the production nginx setup locally.
+
+### Prerequisites
+
+- Docker + Docker Compose
+
+### 1. Copy and fill `.env`
+
+```bash
+cp .env.example .env
+```
+
+### 2. Build and start
+
+```bash
+docker compose -f docker-compose.local.yml up --build
+```
+
+| URL | What |
+|---|---|
+| `http://localhost:8080` | Dashboard (served by nginx) |
+| `http://localhost:8080/api/...` | API (proxied through nginx) |
+
+---
+
+## Run the scraper (Windows, manual)
+
+The pipeline runs manually on a Windows machine with Chrome.
 
 ```powershell
 cd pipeline
@@ -115,7 +147,9 @@ pip install -r requirements.txt
 py run_pipeline.py
 ```
 
-On first run, Chrome opens and asks you to log in to Amazon. After that the session is saved to `chrome-profile/` in the repo root — no re-login needed on future runs.
+On first run, Chrome opens and prompts you to log in to Amazon. The session is saved to `chrome-profile/` (gitignored) — no re-login needed on future runs.
+
+To run with a specific set of ASINs or date range, edit `data/asins.csv` then run again.
 
 ---
 
@@ -125,43 +159,46 @@ On first run, Chrome opens and asks you to log in to Amazon. After that the sess
 
 - 1 Linux VM (2 vCPU, 2–4 GB RAM) with Docker + Docker Compose
 - Remote MySQL 8 instance
-- Netlify account for the frontend
-- Windows machine for scraping (your laptop or a Windows VM)
+- Windows machine for scraping
 
 ### Step 1 — Set up the database
-
-Run on your MySQL instance:
 
 ```bash
 mysql -u root -p < ops/mysql/deployment.sql
 ```
 
-### Step 2 — Deploy the backend on the VM
+### Step 2 — Deploy the backend
 
-Copy the repo to the VM. Fill in `.env.backend.production`:
+Copy the repo to the VM. Create `.env.backend.production` (see `.env.example`):
 
 ```
 DB_HOST=your-mysql-host
 DB_USER=llm_reader
-DB_PASSWORD=your_password
-DB_NAME=world
+DB_PASSWORD=your_strong_password
+DB_NAME=amazon_reviews
 OPENAI_API_KEY=sk-...
 ALLOWED_ORIGINS=https://your-frontend-domain.com
 PIPELINE_EXECUTION_MODE=worker
 PIPELINE_WORKER_TIMEOUT_SECONDS=180
 ```
 
-Start the backend:
+Start it:
 
 ```bash
 docker compose -f docker-compose.backend.yml up -d --build
 ```
 
-The backend runs on port `8000`. Put a reverse proxy (nginx, Caddy) in front of it with HTTPS.
+The backend is only accessible within Docker's network — put nginx or Caddy in front with HTTPS. The frontend's nginx container handles proxying `/api/` requests to the backend.
 
-### Step 3 — Deploy the frontend on Netlify
+### Step 3 — Deploy the frontend
 
-Connect the repo on Netlify with:
+**Option A — Docker (same VM):**
+
+The frontend container in `docker-compose.local.yml` can also be used in production. It includes nginx with rate limiting and security headers.
+
+**Option B — Netlify (static):**
+
+Connect the repo on Netlify:
 
 - Base directory: `frontend`
 - Build command: `npm run build`
@@ -170,70 +207,49 @@ Connect the repo on Netlify with:
 
 ### Step 4 — Configure the scraping machine (Windows)
 
-Fill in `.env.worker.production` on the Windows machine:
+Create `.env.worker.production` from `.env.example`. Set:
 
 ```
-DB_HOST=your-mysql-host
-DB_USER=llm_reader
-DB_PASSWORD=your_password
-DB_NAME=world
-OPENAI_API_KEY=sk-...
+CHROME_PROFILE=C:\path\to\chrome-amazon-profile
 PIPELINE_EXECUTION_MODE=worker
 ```
 
-**Option A — manual scraping** (simpler): analyst runs:
+Run the scraper manually whenever needed:
 
 ```powershell
 py pipeline\run_pipeline.py
 ```
 
-**Option B — background worker** (click-to-run from the dashboard): run the worker service:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File ops\windows\start_pipeline_worker.ps1
-```
-
-Analysts then use the Pipeline button in the dashboard to trigger a run without touching the terminal.
-
----
-
-## Chrome profile
-
-The scraper stores the Chrome session at `chrome-profile/` inside the repo root (auto-created, gitignored). Login once, all future runs reuse the session.
-
-To use a custom location, set `CHROME_PROFILE=C:\your\path` in `.env`.
-
 ---
 
 ## Key environment variables
 
+See `.env.example` for the full annotated list.
+
 | Variable | Used by | Description |
 |---|---|---|
 | `DB_HOST` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | all | MySQL connection |
-| `OPENAI_API_KEY` | backend, tagger | GPT-4o-mini tagging + summaries |
-| `ALLOWED_ORIGINS` | backend | CORS — set to your frontend URL |
-| `PIPELINE_EXECUTION_MODE` | backend | `worker` = queue to MySQL; omit for direct |
-| `CHROME_PROFILE` | Windows worker | Chrome session path (defaults to `chrome-profile/`) |
-| `CHROMEDRIVER_PATH` | Windows worker | Leave empty if chromedriver is on PATH |
-| `VITE_API_BASE_URL` | frontend build | Backend API URL for production builds |
+| `OPENAI_API_KEY` | backend, tagger | GPT-4o-mini tagging + AI summaries |
+| `ALLOWED_ORIGINS` | backend | CORS — comma-separated frontend URLs |
+| `PIPELINE_EXECUTION_MODE` | backend | `worker` = queue jobs via DB; omit for direct trigger |
+| `CHROME_PROFILE` | Windows scraper | Chrome session path (auto-created if missing) |
+| `CHROMEDRIVER_PATH` | Windows scraper | Leave empty if chromedriver is on PATH |
+| `VITE_API_BASE_URL` | frontend build | Backend URL (baked in at build time) |
 
 ---
 
-## Dashboard
+## Dashboard tabs
 
-Three tabs:
-
-- **Overview** — KPI tiles, Amazon rating trend, top issues, top positives, sentiment over time
-- **Trends** — week-on-week digest, emerging issues, brand health score, problem rate by product, issue pressure over time, rating distribution
-- **Reviews** — full review table with filters and CSV export
-
-All charts and issue widgets have per-widget product dropdowns that respect the global filter bar.
+- **Overview** — KPI tiles, Amazon rating trend, top issues, top positives, sentiment over time. Every widget has a per-product dropdown.
+- **Products** — Sortable product table with health scores, AI brief, category pies, and keyword cloud drill-down.
+- **Trends** — Week-on-week digest, emerging issues, brand health score, problem rate by product, rating distribution.
+- **Reviews** — Full review table with search, sort, filters, and CSV export.
 
 ---
 
 ## Full deployment docs
 
 - `ops/deploy/production.md` — step-by-step production setup
-- `ops/deploy/deployment-options-cto.md` — Model A vs Model B comparison
+- `ops/deploy/deployment-options-cto.md` — architecture options comparison
 - `ops/deploy/devops-complete-handoff.md` — full DevOps handoff guide
-- `ops/mysql/deployment.sql` — database schema and seed data
+- `ops/mysql/deployment.sql` — database schema

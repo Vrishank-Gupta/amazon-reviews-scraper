@@ -24,7 +24,11 @@ def tag(label, color):
 def stream(proc, label, color):
     """Forward a process stream to stdout with a coloured label prefix."""
     for line in iter(proc.stdout.readline, b""):
-        sys.stdout.write(f"  {tag(label, color)}  {line.decode(errors='replace')}")
+        text = f"  {tag(label, color)}  {line.decode(errors='replace')}"
+        try:
+            sys.stdout.write(text)
+        except UnicodeEncodeError:
+            sys.stdout.buffer.write(text.encode(sys.stdout.encoding or 'utf-8', errors='replace'))
         sys.stdout.flush()
 
 def check_node_modules():
