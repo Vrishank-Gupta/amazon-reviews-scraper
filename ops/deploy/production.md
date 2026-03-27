@@ -2,37 +2,18 @@
 
 This document describes the recommended production setup:
 
-- frontend on a static host
-- backend on a Linux VM
+- frontend on the Linux VM in Docker
+- backend on the same Linux VM in Docker
 - MySQL hosted remotely
 - optional Windows worker for click-to-run pipeline execution
 
 ## Recommended architecture
 
-### Frontend
-
-Host on:
-
-- Netlify
-
-Serves:
-
-- `/`
-- `/pipeline-console.html`
-
-Set frontend env:
-
-- `VITE_API_BASE_URL=https://voc-api.yourcompany.com`
-
-Tracked file:
-
-- `frontend/.env.production`
-
 ### Backend
 
 Host on:
 
-- one Linux VM
+- one Linux VM, alongside the frontend
 
 Run with:
 
@@ -40,13 +21,13 @@ Run with:
 
 Use:
 
-- `docker-compose.backend.yml`
-- `.env.backend.production`
+- `docker-compose.production.yml`
+- `.env.production`
 
 Start:
 
 ```bash
-docker compose -f docker-compose.backend.yml up -d --build
+docker compose -f docker-compose.production.yml up -d --build
 ```
 
 ### Database
@@ -68,43 +49,43 @@ If you want pipeline runs from the hosted frontend without asking the analyst to
 
 If you do not need that, the analyst can run `py .\pipeline\run_pipeline.py` manually from a Windows laptop against the same remote DB.
 
-## Backend VM deployment
+## VM deployment
 
 1. Copy the repo to the VM.
 2. Install Docker and Docker Compose plugin.
-3. Fill `.env.backend.production`.
-4. Start the backend:
+3. Fill `.env.production`.
+4. Start the full stack:
 
 ```bash
-docker compose -f docker-compose.backend.yml up -d --build
+docker compose -f docker-compose.production.yml up -d --build
 ```
 
 Useful commands:
 
 ```bash
-docker compose -f docker-compose.backend.yml ps
-docker compose -f docker-compose.backend.yml logs -f
-docker compose -f docker-compose.backend.yml down
-docker compose -f docker-compose.backend.yml up -d --build
+docker compose -f docker-compose.production.yml ps
+docker compose -f docker-compose.production.yml logs -f
+docker compose -f docker-compose.production.yml down
+docker compose -f docker-compose.production.yml up -d --build
 ```
 
-## Frontend deployment
+This exposes the frontend on port 80. The frontend nginx proxies `/api/` and `/health` to the backend container on the internal Docker network.
 
-Use the root `netlify.toml`.
+## Frontend on the same VM
 
-Ask the frontend host to:
+The frontend is built with the repo's Dockerfile and served by nginx inside the `frontend` container.
 
-- use repo base `frontend`
-- run `npm run build`
-- publish `dist`
-- set:
-  - `VITE_API_BASE_URL=https://voc-api.yourcompany.com`
+Serves:
+
+- `/`
+- `/pipeline-console.html`
+- `/api/...` via nginx proxy to the backend container
 
 ## Backend env file
 
 Use:
 
-- `.env.backend.production`
+- `.env.production`
 
 Important values:
 
@@ -113,7 +94,7 @@ Important values:
 - `DB_PASSWORD`
 - `DB_NAME=world`
 - `OPENAI_API_KEY`
-- `ALLOWED_ORIGINS=https://voc.yourcompany.com`
+- `ALLOWED_ORIGINS=http://your-server-ip,http://your-domain`
 - `PIPELINE_EXECUTION_MODE=worker`
 
 ## MySQL requirements
@@ -135,10 +116,9 @@ This creates:
 
 Recommended:
 
-- frontend: `voc.yourcompany.com`
-- backend: `voc-api.yourcompany.com`
+- frontend + API: `voc.yourcompany.com`
 
-The backend API must be reachable from the frontend over HTTPS.
+If you later put a reverse proxy or load balancer in front, it should route the same host to this VM. The frontend already proxies API traffic internally, so the browser only needs one public origin.
 
 ## Windows worker setup
 
@@ -163,7 +143,7 @@ powershell -ExecutionPolicy Bypass -File .\ops\windows\register_pipeline_worker_
 
 ## What analysts use
 
-- dashboard: `https://voc.yourcompany.com`
-- pipeline page: `https://voc.yourcompany.com/pipeline-console.html`
+- dashboard: `http://your-server-ip/` or `https://voc.yourcompany.com/`
+- pipeline page: `http://your-server-ip/pipeline-console.html` or `https://voc.yourcompany.com/pipeline-console.html`
 
 The dashboard header includes a `Pipeline` button that links to the pipeline page.
