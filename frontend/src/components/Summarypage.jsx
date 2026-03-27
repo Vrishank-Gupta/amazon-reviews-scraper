@@ -267,10 +267,11 @@ function DrillDown({ row, filters }) {
     const negative = []
     const positive = []
     for (const word of words) {
-      const negRatio = word.neg_ratio || 0
-      const posRatio = word.pos_ratio || 0
-      if (negRatio >= posRatio) negative.push(word)
-      if (posRatio > negRatio) positive.push(word)
+      const negativeCount = word.negative || 0
+      const positiveCount = word.positive || 0
+
+      if (negativeCount > 0) negative.push({ ...word, count: negativeCount, sentimentCount: negativeCount })
+      if (positiveCount > 0) positive.push({ ...word, count: positiveCount, sentimentCount: positiveCount })
     }
     negative.sort((a, b) => b.count - a.count)
     positive.sort((a, b) => b.count - a.count)
