@@ -69,6 +69,15 @@ function TabBtn({ active, onClick, emoji }) {
   )
 }
 
+function formatHeaderDate(value) {
+  if (!value) return null
+  try {
+    return new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  } catch {
+    return value
+  }
+}
+
 export default function App() {
   const [tab, setTab] = useState('analysis')
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
@@ -118,12 +127,12 @@ export default function App() {
         .filter(item => item.last_scrape && item.last_scrape.slice(0, 10) === scrapeStatus.last_scrape.slice(0, 10))
         .map(item => item.product_name)
     : []
-  const headerScrapeLabel = scrapeStatus?.last_scrape
-    ? new Date(scrapeStatus.last_scrape).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-    : 'Not available'
-  const headerProductLabel = latestScrapeProducts.length
-    ? latestScrapeProducts.join(', ')
-    : 'No products recorded yet'
+  const headerScrapeLabel = formatHeaderDate(scrapeStatus?.last_scrape) || 'Not available'
+  const headerDataStart = formatHeaderDate(scrapeStatus?.data_start_date)
+  const headerDataEnd = formatHeaderDate(scrapeStatus?.data_end_date)
+  const headerDataRange = headerDataStart && headerDataEnd
+    ? `${headerDataStart} - ${headerDataEnd}`
+    : headerDataEnd || headerDataStart || 'Not available'
   const headerProductSummary = latestScrapeProducts.length
     ? `${latestScrapeProducts.length} product${latestScrapeProducts.length === 1 ? '' : 's'} updated`
     : 'No products recorded yet'
@@ -186,6 +195,9 @@ export default function App() {
                 <div style={{ fontSize: 12, color: 'var(--text)' }}>
                   {headerScrapeLabel}
                 </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Data range: {headerDataRange}
+                </div>
               </div>
               <div
                 style={{
@@ -229,6 +241,9 @@ export default function App() {
               >
                 <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                   Products In Latest Scrape
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  Data available: {headerDataRange}
                 </div>
                 {latestScrapeProducts.length ? latestScrapeProducts.map(product => (
                   <div

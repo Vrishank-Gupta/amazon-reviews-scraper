@@ -48,6 +48,13 @@ function rankProductsForFocus(allProducts, productSummary, explicitProducts = []
   return [...ranked, ...fallback].slice(0, limit)
 }
 
+function getDefaultWidgetProduct({ parentProducts, parentCategory, scopedProducts, widgetValue }) {
+  if (widgetValue !== undefined) return widgetValue
+  if (parentProducts.length === 1) return parentProducts[0]
+  if (parentProducts.length > 1 || parentCategory) return null
+  return scopedProducts[0] || null
+}
+
 // ── Info tooltip ──────────────────────────────────────────────────────────────
 function InfoTip({ text }) {
   const [show, setShow] = useState(false)
@@ -385,9 +392,9 @@ export default function TrendsPage({ products: allProducts, filters }) {
   const [catMode,  setCatMode]    = useState('total')
   const [emergingCat, setEmergingCat] = useState(null)
   const [drawerCat, setDrawerCat]  = useState(null)
-  const [issueProd, setIssueProd] = useState(null)
+  const [issueProd, setIssueProd] = useState(undefined)
   const [hiddenCats,  setHiddenCats]  = useState(new Set())
-  const [selectedProd, setSelectedProd] = useState(null)
+  const [selectedProd, setSelectedProd] = useState(undefined)
 
   // Derive selected products from filter state
   const selectedProducts = useMemo(() =>
@@ -431,12 +438,24 @@ export default function TrendsPage({ products: allProducts, filters }) {
   const momentum       = data?.category_momentum || []
   const productSummary = data?.product_summary || []
   const weeklyDigest   = data?.weekly_digest || []
+  const effectiveIssueProd = getDefaultWidgetProduct({
+    parentProducts: selectedProducts,
+    parentCategory: productCategory,
+    scopedProducts: allProds,
+    widgetValue: issueProd,
+  })
+  const effectiveSelectedProd = getDefaultWidgetProduct({
+    parentProducts: selectedProducts,
+    parentCategory: productCategory,
+    scopedProducts: allProds,
+    widgetValue: selectedProd,
+  })
   const [localMomentum, setLocalMomentum] = useState(null)
   const [localDailyCats, setLocalDailyCats] = useState(null)
   const [ratingDistProd, setRatingDistProd] = useState(null)
   useEffect(() => {
-    if (!issueProd) { setLocalMomentum(null); setLocalDailyCats(null); return }
-    const p = new URLSearchParams({ product: issueProd })
+    if (!effectiveIssueProd) { setLocalMomentum(null); setLocalDailyCats(null); return }
+    const p = new URLSearchParams({ product: effectiveIssueProd })
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo)   p.set('date_to', dateTo)
     fetch(apiUrl(`/api/trends/cxo?${p}`))
@@ -446,16 +465,16 @@ export default function TrendsPage({ products: allProducts, filters }) {
         setLocalDailyCats(d?.daily_categories || null)
       })
       .catch(() => { setLocalMomentum(null); setLocalDailyCats(null) })
-  }, [issueProd, dateFrom, dateTo])
+  }, [effectiveIssueProd, dateFrom, dateTo])
   const issueMomentum = localMomentum ?? momentum
   const activeDailyCats = localDailyCats ?? dailyCats
 
   // Reset widget-level filters when the available product list changes
   useEffect(() => {
-    if (issueProd && !allProds.includes(issueProd)) setIssueProd(null)
-    if (selectedProd && !allProds.includes(selectedProd)) setSelectedProd(null)
+    if (issueProd && !allProds.includes(issueProd)) setIssueProd(undefined)
+    if (selectedProd && !allProds.includes(selectedProd)) setSelectedProd(undefined)
     if (ratingDistProd && !allProds.includes(ratingDistProd)) setRatingDistProd(null)
-  }, [JSON.stringify(allProds)])
+  }, [JSON.stringify(allProds), issueProd, selectedProd, ratingDistProd])
 
   const focusedProds = useMemo(
     () => rankProductsForFocus(allProds, productSummary, selectedProducts),
@@ -558,10 +577,10 @@ export default function TrendsPage({ products: allProducts, filters }) {
           title="Emerging Issues"
           tip="Issues absent or small in the first half of the period that are now growing."
           controls={
-            <select value={issueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: issueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
-              <option value="">All Products</option>
-              {allProds.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
+          <select value={effectiveIssueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+            <option value="">All Products</option>
+            {allProds.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
           }
         >
           <EmergingIssues momentum={issueMomentum} onSelect={cat => setEmergingCat(emergingCat === cat ? null : cat)} />
@@ -677,7 +696,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
         title="Problem Rate by Product Over Time"
         tip="Daily negative rate % per product. Red dashed line at 50% is critical threshold."
         controls={
-          <select value={selectedProd || ''} onChange={e => setSelectedProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: selectedProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+          <select value={effectiveSelectedProd || ''} onChange={e => setSelectedProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveSelectedProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
             <option value="">All Products</option>
             {allProds.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
@@ -691,7 +710,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
               <YAxis domain={[0,100]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`} />
               <Tooltip content={<CT fmt={v=>v!=null?`${v}%`:'no data'} />} />
               <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.3} />
-              {allProds.filter(p => !selectedProd || p === selectedProd).map(p => (
+              {allProds.filter(p => !effectiveSelectedProd || p === effectiveSelectedProd).map(p => (
                 <Line key={p} type="basis" dataKey={p} stroke={PAL[allProds.indexOf(p)%PAL.length]}
                   strokeWidth={2} dot={false} activeDot={{ r:4 }} connectNulls />
               ))}
@@ -709,7 +728,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
           sub="Shows which problems are persistent versus episodic"
           controls={
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <select value={issueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: issueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+              <select value={effectiveIssueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
                 <option value="">All Products</option>
                 {allProds.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
@@ -753,9 +772,9 @@ export default function TrendsPage({ products: allProducts, filters }) {
           ) : (
             <>
               <div style={{ display:'flex', flexDirection:'column', gap:0, marginTop:4 }}>
-                {(issueProd ? (localMomentum||[]) : (data?.category_momentum||[])).slice(0,10).map((row,i) => {
+                {(effectiveIssueProd ? (localMomentum||[]) : (data?.category_momentum||[])).slice(0,10).map((row,i) => {
                   const rowTotal = (row.first||0) + (row.second||0)
-                  const allRows = issueProd ? (localMomentum||[]) : (data?.category_momentum||[])
+                  const allRows = effectiveIssueProd ? (localMomentum||[]) : (data?.category_momentum||[])
                   const max = Math.max(...allRows.map(r=>(r.first||0)+(r.second||0)),1)
                   return (
                     <div key={row.category}
@@ -785,7 +804,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
           title="Issues That Need Attention"
           tip="Top negative issues ranked by total volume. RISING = escalate now, NEW = fresh problem, FALLING = fix working, STABLE = chronic."
           controls={
-            <select value={issueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: issueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+            <select value={effectiveIssueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
               <option value="">All Products</option>
               {allProds.map(p => <option key={p} value={p}>{p}</option>)}
             </select>

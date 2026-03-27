@@ -14,6 +14,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer
 } from 'recharts'
+import { ExternalLink } from 'lucide-react'
 import { apiUrl, fetchSummary } from '../api'
 import { InfoTip, StarLabel, Delta, SentBadge, Card } from './shared'
 
@@ -119,6 +120,29 @@ function ReviewCard({ r }) {
           {open ? 'Show less ▲' : 'Read full review ▼'}
         </button>
       )}
+      {r.review_url && (
+        <a
+          href={r.review_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display:'inline-flex',
+            alignItems:'center',
+            gap:6,
+            width:'fit-content',
+            padding:'5px 9px',
+            borderRadius:6,
+            border:'1px solid rgba(255,78,26,0.28)',
+            background:'rgba(255,78,26,0.08)',
+            color:'var(--accent)',
+            fontSize:11,
+            fontWeight:600,
+            textDecoration:'none',
+          }}
+        >
+          <ExternalLink size={12} /> Open on Amazon
+        </a>
+      )}
     </div>
   )
 }
@@ -160,6 +184,7 @@ function DrillDown({ row, filters }) {
   const [wcCat, setWcCat]         = useState(null)
   const [wcSent, setWcSent]       = useState(null)
   const [activeWord, setActiveWord] = useState(null)
+  const [activeWordSent, setActiveWordSent] = useState(null)
   const [reviews, setReviews]     = useState([])
   const [revLoading, setRevLoading] = useState(false)
   const [negPieData, setNegPieData] = useState([])
@@ -168,7 +193,7 @@ function DrillDown({ row, filters }) {
 
 
   useEffect(() => {
-    setWcCat(null); setActiveWord(null); setReviews([])
+    setWcCat(null); setWcSent(null); setActiveWord(null); setActiveWordSent(null); setReviews([])
     // Fetch analysis data for this specific product to get pies
     const p = new URLSearchParams()
     p.set('product', row.product_name)
@@ -181,7 +206,7 @@ function DrillDown({ row, filters }) {
   }, [row.asin, filters.date_from, filters.date_to])
 
   useEffect(() => {
-    setWcLoading(true); setActiveWord(null); setReviews([])
+    setWcLoading(true); setActiveWord(null); setActiveWordSent(null); setReviews([])
     const p = new URLSearchParams()
     p.set('product', row.product_name)
     if (filters.date_from) p.set('date_from', filters.date_from)
@@ -200,13 +225,14 @@ function DrillDown({ row, filters }) {
     fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
       .then(r=>r.json())
       .then(data => {
-        const f = wcSent==='neg' ? data.filter(r=>r.sentiment==='Negative')
-          : wcSent==='pos' ? data.filter(r=>r.sentiment!=='Negative') : data
+        const effectiveSent = activeWordSent || wcSent
+        const f = effectiveSent==='neg' ? data.filter(r=>r.sentiment==='Negative')
+          : effectiveSent==='pos' ? data.filter(r=>r.sentiment!=='Negative') : data
         setReviews(f)
       })
       .catch(()=>setReviews([]))
       .finally(()=>setRevLoading(false))
-  }, [activeWord, wcSent, row.product_name])
+  }, [activeWord, activeWordSent, wcSent, row.product_name])
 
   // When a category has no sub-tags, auto-fetch reviews for it directly
   useEffect(() => {
@@ -218,19 +244,44 @@ function DrillDown({ row, filters }) {
     fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
       .then(r=>r.json())
       .then(data => {
-        const f = wcSent==='neg' ? data.filter(r=>r.sentiment==='Negative')
-          : wcSent==='pos' ? data.filter(r=>r.sentiment!=='Negative') : data
+        const effectiveSent = activeWordSent || wcSent
+        const f = effectiveSent==='neg' ? data.filter(r=>r.sentiment==='Negative')
+          : effectiveSent==='pos' ? data.filter(r=>r.sentiment!=='Negative') : data
         setReviews(f)
       })
       .catch(()=>setReviews([]))
       .finally(()=>setRevLoading(false))
-  }, [wcLoading, wcData.length, wcCat, row.product_name])
+  }, [wcLoading, wcData.length, wcCat, row.product_name, activeWordSent, wcSent])
 
   const handlePieClick = (entry, sentiment) => {
     const cat = entry?.name||entry?.category
     if (!cat) return
+    setActiveWord(null)
+    setActiveWordSent(null)
     if (wcCat===cat && wcSent===sentiment) { setWcCat(null); setWcSent(null) }
     else { setWcCat(cat); setWcSent(sentiment) }
+  }
+
+  const splitWordCloud = words => {
+    const negative = []
+    const positive = []
+    for (const word of words) {
+      const negRatio = word.neg_ratio || 0
+      const posRatio = word.pos_ratio || 0
+      if (negRatio >= posRatio) negative.push(word)
+      if (posRatio > negRatio) positive.push(word)
+    }
+    negative.sort((a, b) => b.count - a.count)
+    positive.sort((a, b) => b.count - a.count)
+    return { negative, positive }
+  }
+
+  const { negative: negativeWordCloud, positive: positiveWordCloud } = splitWordCloud(wcData)
+
+  const handleWordClick = (word, sentiment) => {
+    const isActive = activeWord === word && activeWordSent === sentiment
+    setActiveWord(isActive ? null : word)
+    setActiveWordSent(isActive ? null : sentiment)
   }
 
   const PieTip = ({ active, payload }) => {
@@ -294,7 +345,7 @@ function DrillDown({ row, filters }) {
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <div style={{ display:'flex', alignItems:'center', gap:7 }}>
             <span style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--text-muted)' }}>Keyword Cloud</span>
-            <InfoTip text="Sub-tags sized by volume, coloured by sentiment (red=negative, green=positive). Click a word to read the actual reviews mentioning it." />
+            <InfoTip text="Negative and positive sub-tags are separated below. Click a word to read the actual reviews mentioning it." />
             {wcCat && (
               <span style={{ fontSize:10, background:'rgba(255,78,26,0.1)', border:'1px solid rgba(255,78,26,0.3)', color:'var(--accent)', borderRadius:4, padding:'1px 8px', display:'flex', alignItems:'center', gap:4 }}>
                 {wcCat}
@@ -303,7 +354,7 @@ function DrillDown({ row, filters }) {
             )}
           </div>
           {activeWord && (
-            <button onClick={()=>{setActiveWord(null);setReviews([])}} style={{ background:'none', border:'1px solid var(--border)', borderRadius:5, color:'var(--text-muted)', fontSize:11, padding:'3px 9px', cursor:'pointer', fontFamily:'DM Sans' }}>
+            <button onClick={()=>{setActiveWord(null);setActiveWordSent(null);setReviews([])}} style={{ background:'none', border:'1px solid var(--border)', borderRadius:5, color:'var(--text-muted)', fontSize:11, padding:'3px 9px', cursor:'pointer', fontFamily:'DM Sans' }}>
               Clear ✕
             </button>
           )}
@@ -311,17 +362,39 @@ function DrillDown({ row, filters }) {
         {wcLoading ? (
           <div style={{ padding:'16px 0', textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>Loading…</div>
         ) : (
-          <WordCloud words={wcData} activeWord={activeWord} onWordClick={w=>{setActiveWord(w)}}
-            noSubTagsMsg={wcCat ? `No sub-tags for "${wcCat}" — showing reviews below` : undefined} />
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#ef4444' }}>
+                Negative Keyword Cloud
+              </div>
+              <WordCloud
+                words={negativeWordCloud}
+                activeWord={activeWordSent === 'neg' ? activeWord : null}
+                onWordClick={w => handleWordClick(w, 'neg')}
+                noSubTagsMsg={wcCat && wcSent === 'neg' ? `No negative sub-tags for "${wcCat}" — showing reviews below` : 'No negative keyword signal yet'}
+              />
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#22c55e' }}>
+                Positive Keyword Cloud
+              </div>
+              <WordCloud
+                words={positiveWordCloud}
+                activeWord={activeWordSent === 'pos' ? activeWord : null}
+                onWordClick={w => handleWordClick(w, 'pos')}
+                noSubTagsMsg={wcCat && wcSent === 'pos' ? `No positive sub-tags for "${wcCat}" — showing reviews below` : 'No positive keyword signal yet'}
+              />
+            </div>
+          </div>
         )}
         {!wcCat && !activeWord && wcData.length > 0 && (
           <div style={{ fontSize:11, color:'var(--text-muted)', textAlign:'center', fontStyle:'italic' }}>
-            Click a pie slice to filter by category · then click a word to read reviews
+            Click a pie slice to filter by category · then click a negative or positive keyword to read reviews
           </div>
         )}
         {wcCat && !activeWord && wcData.length > 0 && (
           <div style={{ fontSize:11, color:'var(--text-muted)', textAlign:'center', fontStyle:'italic' }}>
-            Now click a word to read the reviews ↓
+            Now click a negative or positive keyword to read the reviews ↓
           </div>
         )}
       </div>

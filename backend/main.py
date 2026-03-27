@@ -639,6 +639,15 @@ def get_pipeline_status():
             """)
             summary_row = cur.fetchone()
 
+            # Overall review-date window currently available in the dataset
+            cur.execute("""
+                SELECT
+                    MIN(STR_TO_DATE(REGEXP_REPLACE(review_date, 'Reviewed in India on ', ''), '%d %M %Y')) as data_start_date,
+                    MAX(STR_TO_DATE(REGEXP_REPLACE(review_date, 'Reviewed in India on ', ''), '%d %M %Y')) as data_end_date
+                FROM raw_reviews
+            """)
+            date_window = cur.fetchone()
+
             # Reviews scraped in the last 7 days
             cur.execute("""
                 SELECT COUNT(*) as recent_count
@@ -729,6 +738,8 @@ def get_pipeline_status():
         return {
             "last_scrape": last_scrape,
             "days_ago": days_ago,
+            "data_start_date": str(date_window["data_start_date"]) if date_window and date_window["data_start_date"] else None,
+            "data_end_date": str(date_window["data_end_date"]) if date_window and date_window["data_end_date"] else None,
             "total_reviews": summary_row["total_reviews"] if summary_row else 0,
             "recent_reviews": recent["recent_count"] if recent else 0,
             "tagged_reviews": tagged["tagged"] if tagged else 0,

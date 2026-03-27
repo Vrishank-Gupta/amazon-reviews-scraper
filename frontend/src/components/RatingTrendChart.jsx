@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
 import {
   Bar,
   CartesianGrid,
@@ -12,6 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { apiUrl } from '../api'
+import { SHOW_AMAZON_RATING_HISTORY } from '../config/dashboard'
 
 const PALETTE = ['#ff4e1a', '#ff8c42', '#ffd166', '#06d6a0', '#60a5fa', '#a855f7', '#ec4899', '#14b8a6', '#f43f5e', '#34d399', '#fb923c', '#c084fc']
 const PRODUCT_DISPLAY_LIMIT = 5
@@ -97,10 +99,235 @@ function rankProductsForFocus(products, days, explicitProducts = [], limit = PRO
   return ranked.slice(0, limit)
 }
 
-export default function RatingTrendChart({ filters }) {
+function buildLatestSnapshotRows(products, days) {
+  return products.map(product => {
+    const latestDay = [...days].reverse().find(day =>
+      day.products?.[product]?.overall != null || day.products?.[product]?.total_ratings != null,
+    )
+    return {
+      product,
+      day: latestDay?.day || null,
+      overall: latestDay?.products?.[product]?.overall ?? null,
+      total_ratings: latestDay?.products?.[product]?.total_ratings ?? null,
+    }
+  }).filter(row => row.overall != null || row.total_ratings != null)
+}
+
+function amazonProductUrl(asin) {
+  return asin ? `https://www.amazon.in/dp/${asin}` : null
+}
+
+function ratingColor(overall) {
+  if (overall == null) return 'var(--text)'
+  if (overall >= 4) return '#22c55e'
+  if (overall >= 3) return '#eab308'
+  return '#ef4444'
+}
+
+function renderStars(overall) {
+  if (overall == null) return '—'
+  const stars = Math.round(Number(overall))
+  return `${'★'.repeat(stars)}${'☆'.repeat(Math.max(0, 5 - stars))}`
+}
+
+function ProductSnapshotAccordion({ row }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)' }}>
+      <button
+        onClick={() => setOpen(current => !current)}
+        style={{
+          width: '100%',
+          display: 'grid',
+          gridTemplateColumns: '1.4fr 1fr 1fr auto',
+          gap: 12,
+          alignItems: 'center',
+          padding: '12px 16px',
+          border: 'none',
+          background: 'transparent',
+          color: 'var(--text)',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+          {row.asin ? (
+            <a
+              href={amazonProductUrl(row.asin)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={event => event.stopPropagation()}
+              style={{ color: 'var(--text)', textDecoration: 'none' }}
+            >
+              {row.product}
+            </a>
+          ) : row.product}
+        </span>
+        <span style={{ color: ratingColor(row.overall), fontSize: 12, fontWeight: 700 }}>
+          {row.overall != null ? `${Number(row.overall).toFixed(1)} ${renderStars(row.overall)}` : '—'}
+        </span>
+        <span style={{ color: 'var(--text)', fontSize: 12 }}>
+          {row.total_ratings != null ? Number(row.total_ratings).toLocaleString() : '—'}
+        </span>
+        {open ? <ChevronUp size={15} color="var(--text-muted)" /> : <ChevronDown size={15} color="var(--text-muted)" />}
+      </button>
+
+      {open && (
+        <div style={{ borderTop: '1px solid var(--border)', background: 'rgba(255,255,255,0.015)', padding: '14px 16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+            <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+                Amazon Overall Rating
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: ratingColor(row.overall) }}>
+                {row.overall != null ? `${Number(row.overall).toFixed(1)} ${renderStars(row.overall)}` : '—'}
+              </div>
+            </div>
+            <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+                Amazon Review Count
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+                {row.total_ratings != null ? Number(row.total_ratings).toLocaleString() : '—'}
+              </div>
+            </div>
+            <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+                Product Page
+              </div>
+              {row.asin ? (
+                <a
+                  href={amazonProductUrl(row.asin)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    color: 'var(--accent)',
+                    textDecoration: 'none',
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  <ExternalLink size={13} /> Open on Amazon
+                </a>
+              ) : (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Not available</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SnapshotAccordion({ groupedSnapshotRows }) {
+  const orderedCategories = useMemo(
+    () => Object.keys(groupedSnapshotRows).sort((a, b) => a.localeCompare(b)),
+    [groupedSnapshotRows],
+  )
+  const [openCategories, setOpenCategories] = useState({})
+
+  useEffect(() => {
+    setOpenCategories(prev => {
+      const next = {}
+      orderedCategories.forEach((category, index) => {
+        next[category] = prev[category] ?? index === 0
+      })
+      return next
+    })
+  }, [orderedCategories])
+
+  if (!orderedCategories.length) {
+    return (
+      <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, fontStyle: 'italic' }}>
+        No Amazon rating snapshot data yet - will appear after the next scrape run.
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {orderedCategories.map(category => {
+        const rows = groupedSnapshotRows[category]
+        const isOpen = !!openCategories[category]
+        return (
+          <div key={category} style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', background: 'rgba(255,255,255,0.02)' }}>
+            <button
+              onClick={() => setOpenCategories(prev => ({ ...prev, [category]: !prev[category] }))}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '14px 16px',
+                border: 'none',
+                borderBottom: isOpen ? '1px solid var(--border)' : 'none',
+                background: 'rgba(255,255,255,0.03)',
+                color: 'var(--text)',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--accent)' }}>
+                  {category}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {rows.length} product{rows.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              {isOpen ? <ChevronUp size={16} color="var(--text-muted)" /> : <ChevronDown size={16} color="var(--text-muted)" />}
+            </button>
+
+            {isOpen && (
+              <div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1.4fr 1fr 1fr auto',
+                    gap: 12,
+                    padding: '10px 16px',
+                    borderBottom: '1px solid var(--border)',
+                    background: 'rgba(255,255,255,0.015)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  <span>Product</span>
+                  <span>Amazon Overall Rating</span>
+                  <span>Amazon Review Count</span>
+                  <span />
+                </div>
+                {rows.map(row => (
+                  <ProductSnapshotAccordion key={`${category}-${row.product}`} row={row} />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function getDefaultWidgetProduct({ parentProducts, parentCategory, scopedProducts, widgetValue }) {
+  if (widgetValue !== undefined) return widgetValue
+  if (parentProducts.length === 1) return parentProducts[0]
+  if (parentProducts.length > 1 || parentCategory) return null
+  return scopedProducts[0] || null
+}
+
+export default function RatingTrendChart({ filters, tree }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [filterProd, setFilterProd] = useState(null)
+  const [filterProd, setFilterProd] = useState(undefined)
 
   const productCategory = filters?.product_category || null
   const activeProducts = filters?.product?.length ? filters.product : []
@@ -131,12 +358,28 @@ export default function RatingTrendChart({ filters }) {
     [products, days, activeProducts],
   )
 
-  // Reset to "All Products" when the product list changes
   useEffect(() => {
-    setFilterProd(null)
-  }, [JSON.stringify(products)])
+    setFilterProd(undefined)
+  }, [JSON.stringify(products), productCategory, JSON.stringify(activeProducts)])
 
-  const displayedForChart = (filterProd && products.includes(filterProd)) ? [filterProd] : displayedProducts
+  const effectiveFilterProd = getDefaultWidgetProduct({
+    parentProducts: activeProducts,
+    parentCategory: productCategory,
+    scopedProducts: products,
+    widgetValue: filterProd,
+  })
+
+  const displayedForChart = (effectiveFilterProd && products.includes(effectiveFilterProd)) ? [effectiveFilterProd] : displayedProducts
+
+  const productToCategory = useMemo(() => {
+    const lookup = {}
+    Object.entries(tree || {}).forEach(([category, categoryProducts]) => {
+      ;(categoryProducts || []).forEach(product => {
+        lookup[product] = category
+      })
+    })
+    return lookup
+  }, [tree])
 
   if (loading) {
     return <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading...</div>
@@ -156,13 +399,10 @@ export default function RatingTrendChart({ filters }) {
 
   const overallRows = fillPerProduct(spine, displayedForChart, byDay, 'overall')
   const totalRatingsRows = fillPerProduct(spine, displayedForChart, byDay, 'total_ratings')
-
-  // Merge overall + total_ratings into a single dataset for ComposedChart
   const combinedRows = spine.map((day, i) => ({
     ...overallRows[i],
-    ...Object.fromEntries(displayedForChart.map(p => [`${p}_vol`, totalRatingsRows[i][p]])),
+    ...Object.fromEntries(displayedForChart.map(product => [`${product}_vol`, totalRatingsRows[i][product]])),
   }))
-
   const dailyAvgRows = spine.map(day => ({
     day,
     ...Object.fromEntries(displayedForChart.map(product => [product, byDay[day]?.[product]?.daily_avg ?? null])),
@@ -170,7 +410,24 @@ export default function RatingTrendChart({ filters }) {
 
   const hasOverall = days.some(day => displayedForChart.some(product => day.products[product]?.overall != null))
   const hasDailyAvg = days.some(day => displayedForChart.some(product => day.products[product]?.daily_avg != null))
-  const limitedProducts = !activeProducts.length && !filterProd && products.length > displayedProducts.length
+  const limitedProducts = !activeProducts.length && !productCategory && !filterProd && products.length > displayedProducts.length
+
+  const groupedSnapshotRows = buildLatestSnapshotRows(products, days)
+    .map(row => ({
+      ...row,
+      category: productToCategory[row.product] || 'Other',
+      asin: null,
+    }))
+    .reduce((acc, row) => {
+      const category = row.category || 'Other'
+      if (!acc[category]) acc[category] = []
+      acc[category].push(row)
+      return acc
+    }, {})
+
+  Object.values(groupedSnapshotRows).forEach(rows => {
+    rows.sort((a, b) => a.product.localeCompare(b.product))
+  })
 
   const xAxisProps = {
     dataKey: 'day',
@@ -185,8 +442,8 @@ export default function RatingTrendChart({ filters }) {
 
   const metricTooltip = valueFormatter => ({ active, payload, label }) => {
     if (!active || !payload?.length) return null
-    const ratingPoints = payload.filter(pt => !pt.dataKey.endsWith('_vol') && pt.value != null)
-    const volPoints = payload.filter(pt => pt.dataKey.endsWith('_vol') && pt.value != null)
+    const ratingPoints = payload.filter(point => !point.dataKey.endsWith('_vol') && point.value != null)
+    const volPoints = payload.filter(point => point.dataKey.endsWith('_vol') && point.value != null)
     return (
       <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', fontSize: 11, minWidth: 160 }}>
         <div style={{ fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>{fmtDay(label)}</div>
@@ -220,7 +477,16 @@ export default function RatingTrendChart({ filters }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {hasOverall && (
+      {!SHOW_AMAZON_RATING_HISTORY && (
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Showing the latest available Amazon product-page rating snapshot until enough historical scrape data is collected for the trend view.
+          </div>
+          <SnapshotAccordion groupedSnapshotRows={groupedSnapshotRows} />
+        </div>
+      )}
+
+      {SHOW_AMAZON_RATING_HISTORY && hasOverall && (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
@@ -229,9 +495,9 @@ export default function RatingTrendChart({ filters }) {
                 — public product-page rating + total review volume
               </span>
             </div>
-            <select value={filterProd || ''} onChange={e => setFilterProd(e.target.value || null)} style={{ ...selectStyle, color: filterProd ? 'var(--accent)' : 'var(--text-muted)' }}>
+            <select value={effectiveFilterProd || ''} onChange={event => setFilterProd(event.target.value || null)} style={{ ...selectStyle, color: effectiveFilterProd ? 'var(--accent)' : 'var(--text-muted)' }}>
               <option value="">All Products</option>
-              {products.map(p => <option key={p} value={p}>{p}</option>)}
+              {products.map(product => <option key={product} value={product}>{product}</option>)}
             </select>
           </div>
           {limitedProducts && (
@@ -257,7 +523,7 @@ export default function RatingTrendChart({ filters }) {
                 tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}
+                tickFormatter={value => (value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value)}
               />
               <Tooltip content={metricTooltip(value => `${value.toFixed(2)} ★`)} />
               <ReferenceLine yAxisId="rating" y={4} stroke="var(--border)" strokeDasharray="4 2" />
@@ -291,7 +557,7 @@ export default function RatingTrendChart({ filters }) {
         </div>
       )}
 
-      {hasDailyAvg && (
+      {SHOW_AMAZON_RATING_HISTORY && hasDailyAvg && (
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
             Daily Avg Rating from Scraped Reviews

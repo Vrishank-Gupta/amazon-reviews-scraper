@@ -13,12 +13,20 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ComposedChart, Bar, ReferenceLine
 } from 'recharts'
+import { ExternalLink } from 'lucide-react'
 import { apiUrl, fetchAnalysis } from '../api'
 import { InfoTip, Card } from './shared'
 import RatingTrendChart from './RatingTrendChart'
 
 function fmtDay(d) {
   try { return new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) } catch { return d }
+}
+
+function getDefaultWidgetProduct({ parentProducts, parentCategory, scopedProducts, widgetValue }) {
+  if (widgetValue !== undefined) return widgetValue
+  if (parentProducts.length === 1) return parentProducts[0]
+  if (parentProducts.length > 1 || parentCategory) return null
+  return scopedProducts[0] || null
 }
 
 // ── Alert banner ──────────────────────────────────────────────────────────────
@@ -181,6 +189,29 @@ function ReviewCard({ r }) {
           {open ? 'Show less ▲' : 'Read full review ▼'}
         </button>
       )}
+      {r.review_url && (
+        <a
+          href={r.review_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            marginTop: 8,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '5px 9px',
+            borderRadius: 6,
+            border: '1px solid rgba(255,78,26,0.28)',
+            background: 'rgba(255,78,26,0.08)',
+            color: 'var(--accent)',
+            fontSize: 11,
+            fontWeight: 600,
+            textDecoration: 'none',
+          }}
+        >
+          <ExternalLink size={12} /> Open on Amazon
+        </a>
+      )}
     </div>
   )
 }
@@ -341,9 +372,9 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const [trendMode, setTrendMode] = useState('sentiment')
   const [drawerCat, setDrawerCat] = useState(null)
   const [drawerCatPos, setDrawerCatPos] = useState(null)
-  const [issueFilter, setIssueFilter] = useState(null)
+  const [issueFilter, setIssueFilter] = useState(undefined)
   const [localIssueData, setLocalIssueData] = useState(null)
-  const [signalProd, setSignalProd] = useState(null)
+  const [signalProd, setSignalProd] = useState(undefined)
   const [localTrendData, setLocalTrendData] = useState(null)
 
   // Respect parent filter: only show products in scope
@@ -353,11 +384,24 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
     return allProducts || []
   }, [filters.product, filters.product_category, tree, allProducts])
 
+  const effectiveIssueFilter = getDefaultWidgetProduct({
+    parentProducts: filters.product || [],
+    parentCategory: filters.product_category,
+    scopedProducts,
+    widgetValue: issueFilter,
+  })
+  const effectiveSignalProd = getDefaultWidgetProduct({
+    parentProducts: filters.product || [],
+    parentCategory: filters.product_category,
+    scopedProducts,
+    widgetValue: signalProd,
+  })
+
   // Reset widget filters if selected product is no longer in scope
   useEffect(() => {
-    if (issueFilter && !scopedProducts.includes(issueFilter)) setIssueFilter(null)
-    if (signalProd && !scopedProducts.includes(signalProd)) setSignalProd(null)
-  }, [JSON.stringify(scopedProducts)])
+    if (issueFilter && !scopedProducts.includes(issueFilter)) setIssueFilter(undefined)
+    if (signalProd && !scopedProducts.includes(signalProd)) setSignalProd(undefined)
+  }, [JSON.stringify(scopedProducts), issueFilter, signalProd])
 
   const apiParams = {
     product_category: filters.product_category || null,
@@ -380,26 +424,26 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    if (!issueFilter) { setLocalIssueData(null); return }
-    const p = new URLSearchParams({ product: issueFilter })
+    if (!effectiveIssueFilter) { setLocalIssueData(null); return }
+    const p = new URLSearchParams({ product: effectiveIssueFilter })
     if (apiParams.date_from) p.set('date_from', apiParams.date_from)
     if (apiParams.date_to) p.set('date_to', apiParams.date_to)
     fetch(apiUrl(`/api/analysis?${p}`))
       .then(r => r.json())
       .then(d => setLocalIssueData(d))
       .catch(() => setLocalIssueData(null))
-  }, [issueFilter, apiParams.date_from, apiParams.date_to])
+  }, [effectiveIssueFilter, apiParams.date_from, apiParams.date_to])
 
   useEffect(() => {
-    if (!signalProd) { setLocalTrendData(null); return }
-    const p = new URLSearchParams({ product: signalProd })
+    if (!effectiveSignalProd) { setLocalTrendData(null); return }
+    const p = new URLSearchParams({ product: effectiveSignalProd })
     if (apiParams.date_from) p.set('date_from', apiParams.date_from)
     if (apiParams.date_to) p.set('date_to', apiParams.date_to)
     fetch(apiUrl(`/api/analysis?${p}`))
       .then(r => r.json())
       .then(d => setLocalTrendData(d?.daily_trend ?? null))
       .catch(() => setLocalTrendData(null))
-  }, [signalProd, apiParams.date_from, apiParams.date_to])
+  }, [effectiveSignalProd, apiParams.date_from, apiParams.date_to])
 
   if (loading && !hasData) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:200, color:'var(--text-muted)', gap:10 }}>
@@ -468,7 +512,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
           title="Top Issues"
           tip="Issue categories with the most negative reviews, ranked by volume. Click a row to see sub-tags, then click a word to read reviews."
           controls={
-            <select value={issueFilter || ''} onChange={e => { setIssueFilter(e.target.value || null); setDrawerCat(null) }} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: issueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+            <select value={effectiveIssueFilter || ''} onChange={e => { setIssueFilter(e.target.value || null); setDrawerCat(null) }} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
               <option value="">All Products</option>
               {scopedProducts.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
@@ -481,7 +525,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
           title="Top Positive Signals"
           tip="Categories with the most positive reviews. Click a row to see sub-tags, then click a word to read reviews."
           controls={
-            <select value={issueFilter || ''} onChange={e => { setIssueFilter(e.target.value || null); setDrawerCatPos(null) }} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: issueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+            <select value={effectiveIssueFilter || ''} onChange={e => { setIssueFilter(e.target.value || null); setDrawerCatPos(null) }} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
               <option value="">All Products</option>
               {scopedProducts.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
@@ -497,7 +541,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
         tip="Neg Rate shows the 7-day rolling problem rate. Sentiment shows daily positive / negative / neutral breakdown."
         controls={
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <select value={signalProd || ''} onChange={e => setSignalProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: signalProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+            <select value={effectiveSignalProd || ''} onChange={e => setSignalProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveSignalProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
               <option value="">All Products</option>
               {scopedProducts.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
