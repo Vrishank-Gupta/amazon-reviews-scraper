@@ -1567,6 +1567,8 @@ def get_reviews_by_keyword(
     product_category: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    category: Optional[str] = None,
+    sentiment: Optional[str] = None,
 ):
     """
     Returns all reviews tagged with a given keyword (sub_tag or primary_category).
@@ -1587,6 +1589,16 @@ def get_reviews_by_keyword(
                 date_filter += f" AND {_rd} <= %s"
                 base_params.append(date_to)
 
+            category_filter = ""
+            if category:
+                category_filter = " AND JSON_CONTAINS(t.primary_categories, %s)"
+                base_params.append(json.dumps(category))
+
+            sentiment_filter = ""
+            if sentiment:
+                sentiment_filter = " AND t.sentiment = %s"
+                base_params.append(sentiment)
+
             cur.execute(f"""
                 SELECT
                     r.review_id, r.asin, r.product_name, r.category, r.rating,
@@ -1595,7 +1607,7 @@ def get_reviews_by_keyword(
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE (t.sub_tags LIKE %s OR t.primary_categories LIKE %s)
-                {pf_sql} {date_filter}
+                {pf_sql} {date_filter} {category_filter} {sentiment_filter}
                 ORDER BY {_rd} DESC
                 LIMIT 500
             """, base_params)

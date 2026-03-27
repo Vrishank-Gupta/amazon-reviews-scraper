@@ -148,7 +148,7 @@ function ReviewCard({ r }) {
 }
 
 // ── Keyword cloud ─────────────────────────────────────────────────────────────
-function WordCloud({ words, onWordClick, activeWord, noSubTagsMsg }) {
+function WordCloud({ words, onWordClick, activeWord, noSubTagsMsg, tone = 'mixed' }) {
   if (!words?.length) return (
     <div style={{ padding:'18px 0', textAlign:'center', color:'var(--text-muted)', fontSize:12, fontStyle:'italic' }}>
       {noSubTagsMsg || 'No sub-tags — click a pie slice to filter'}
@@ -159,8 +159,13 @@ function WordCloud({ words, onWordClick, activeWord, noSubTagsMsg }) {
     <div style={{ display:'flex', flexWrap:'wrap', gap:'6px 12px', alignItems:'center', justifyContent:'center', padding:'16px', background:'var(--surface)', borderRadius:10, border:'1px solid var(--border)', minHeight:80 }}>
       {words.map(w => {
         const size = Math.round(11 + (w.count/max)*26)
-        const nr = w.neg_ratio||0
-        const color = nr>0.6?'#ef4444':nr>0.4?'#f97316':nr>0.2?'#eab308':'#22c55e'
+        const nr = w.neg_ratio || 0
+        const pr = w.pos_ratio || 0
+        const color = tone === 'neg'
+          ? (nr > 0.6 ? '#ef4444' : nr > 0.35 ? '#f97316' : '#f59e0b')
+          : tone === 'pos'
+          ? (pr > 0.6 ? '#22c55e' : pr > 0.35 ? '#14b8a6' : '#60a5fa')
+          : (nr > 0.6 ? '#ef4444' : nr > 0.4 ? '#f97316' : nr > 0.2 ? '#eab308' : '#22c55e')
         const isActive = activeWord===w.word
         return (
           <button key={w.word} onClick={() => onWordClick(isActive?null:w.word)} style={{
@@ -222,17 +227,15 @@ function DrillDown({ row, filters }) {
     const p = new URLSearchParams({ keyword: activeWord, product: row.product_name })
     if (filters.date_from) p.set('date_from', filters.date_from)
     if (filters.date_to)   p.set('date_to',   filters.date_to)
+    if (wcCat) p.set('category', wcCat)
+    if (activeWordSent === 'neg') p.set('sentiment', 'Negative')
+    if (activeWordSent === 'pos') p.set('sentiment', 'Positive')
     fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
       .then(r=>r.json())
-      .then(data => {
-        const effectiveSent = activeWordSent || wcSent
-        const f = effectiveSent==='neg' ? data.filter(r=>r.sentiment==='Negative')
-          : effectiveSent==='pos' ? data.filter(r=>r.sentiment!=='Negative') : data
-        setReviews(f)
-      })
+      .then(setReviews)
       .catch(()=>setReviews([]))
       .finally(()=>setRevLoading(false))
-  }, [activeWord, activeWordSent, wcSent, row.product_name])
+  }, [activeWord, activeWordSent, wcCat, row.product_name, filters.date_from, filters.date_to])
 
   // When a category has no sub-tags, auto-fetch reviews for it directly
   useEffect(() => {
@@ -241,17 +244,15 @@ function DrillDown({ row, filters }) {
     const p = new URLSearchParams({ keyword: wcCat, product: row.product_name })
     if (filters.date_from) p.set('date_from', filters.date_from)
     if (filters.date_to)   p.set('date_to',   filters.date_to)
+    p.set('category', wcCat)
+    if (wcSent === 'neg') p.set('sentiment', 'Negative')
+    if (wcSent === 'pos') p.set('sentiment', 'Positive')
     fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
       .then(r=>r.json())
-      .then(data => {
-        const effectiveSent = activeWordSent || wcSent
-        const f = effectiveSent==='neg' ? data.filter(r=>r.sentiment==='Negative')
-          : effectiveSent==='pos' ? data.filter(r=>r.sentiment!=='Negative') : data
-        setReviews(f)
-      })
+      .then(setReviews)
       .catch(()=>setReviews([]))
       .finally(()=>setRevLoading(false))
-  }, [wcLoading, wcData.length, wcCat, row.product_name, activeWordSent, wcSent])
+  }, [wcLoading, wcData.length, wcCat, row.product_name, wcSent, filters.date_from, filters.date_to])
 
   const handlePieClick = (entry, sentiment) => {
     const cat = entry?.name||entry?.category
@@ -372,6 +373,7 @@ function DrillDown({ row, filters }) {
                 activeWord={activeWordSent === 'neg' ? activeWord : null}
                 onWordClick={w => handleWordClick(w, 'neg')}
                 noSubTagsMsg={wcCat && wcSent === 'neg' ? `No negative sub-tags for "${wcCat}" — showing reviews below` : 'No negative keyword signal yet'}
+                tone="neg"
               />
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
@@ -383,6 +385,7 @@ function DrillDown({ row, filters }) {
                 activeWord={activeWordSent === 'pos' ? activeWord : null}
                 onWordClick={w => handleWordClick(w, 'pos')}
                 noSubTagsMsg={wcCat && wcSent === 'pos' ? `No positive sub-tags for "${wcCat}" — showing reviews below` : 'No positive keyword signal yet'}
+                tone="pos"
               />
             </div>
           </div>
