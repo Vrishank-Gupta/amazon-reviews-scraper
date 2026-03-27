@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchReviews, fetchFilters, fetchStats } from './api'
+import { fetchReviews, fetchFilters, fetchStats, fetchPipelineStatus } from './api'
 import { downloadCSV } from './components/TrendsPage'
 import FilterBar from './components/Filterbar'
 import ReviewsTable from './components/ReviewsTable'
@@ -74,6 +74,7 @@ export default function App() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
   const [reviews, setReviews] = useState([])
   const [options, setOptions] = useState({ tree: {}, products: [], ratings: [] })
+  const [scrapeStatus, setScrapeStatus] = useState(null)
   const [initialLoading, setInitialLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -83,13 +84,18 @@ export default function App() {
       setFilters(f => ({ ...f, product: [], product_category: null }))
     })
     fetchStats()
+    fetchPipelineStatus().then(setScrapeStatus).catch(() => {})
   }, [])
 
   const loadReviews = useCallback(async f => {
     setRefreshing(true)
     try {
-      const data = await fetchReviews(f)
+      const [data, status] = await Promise.all([
+        fetchReviews(f),
+        fetchPipelineStatus().catch(() => null),
+      ])
       setReviews(data)
+      if (status) setScrapeStatus(status)
     } finally {
       setRefreshing(false)
       setInitialLoading(false)
@@ -105,6 +111,17 @@ export default function App() {
   }
 
   const currentTab = TAB_META[tab]
+  const latestScrapeProducts = scrapeStatus?.last_scrape
+    ? (scrapeStatus.asin_breakdown || [])
+        .filter(item => item.last_scrape && item.last_scrape.slice(0, 10) === scrapeStatus.last_scrape.slice(0, 10))
+        .map(item => item.product_name)
+    : []
+  const headerScrapeLabel = scrapeStatus?.last_scrape
+    ? new Date(scrapeStatus.last_scrape).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    : 'Not available'
+  const headerProductLabel = latestScrapeProducts.length
+    ? latestScrapeProducts.join(', ')
+    : 'No products recorded yet'
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
@@ -137,6 +154,37 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 1,
+              maxWidth: 420,
+              padding: '5px 10px',
+              borderRadius: 8,
+              border: '1px solid var(--border)',
+              background: 'rgba(255,255,255,0.02)',
+            }}
+          >
+            <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+              Last Scrape
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text)' }}>
+              {headerScrapeLabel}
+            </div>
+            <div
+              title={headerProductLabel}
+              style={{
+                fontSize: 11,
+                color: 'var(--text-muted)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {headerProductLabel}
+            </div>
+          </div>
           <button
             onClick={() => loadReviews(filters)}
             disabled={refreshing}
