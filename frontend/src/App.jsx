@@ -6,7 +6,7 @@ import ReviewsTable from './components/ReviewsTable'
 import TrendsPage from './components/TrendsPage'
 import AnalysisPage from './components/Analysispage'
 import SummaryPage from './components/Summarypage'
-import { RefreshCw, Download } from 'lucide-react'
+import { RefreshCw, Download, ChevronDown } from 'lucide-react'
 
 const DEFAULT_FILTERS = {
   product_category: null,
@@ -77,6 +77,7 @@ export default function App() {
   const [scrapeStatus, setScrapeStatus] = useState(null)
   const [initialLoading, setInitialLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [scrapeMenuOpen, setScrapeMenuOpen] = useState(false)
 
   useEffect(() => {
     fetchFilters().then(o => {
@@ -96,6 +97,7 @@ export default function App() {
       ])
       setReviews(data)
       if (status) setScrapeStatus(status)
+      setScrapeMenuOpen(false)
     } finally {
       setRefreshing(false)
       setInitialLoading(false)
@@ -121,6 +123,9 @@ export default function App() {
     : 'Not available'
   const headerProductLabel = latestScrapeProducts.length
     ? latestScrapeProducts.join(', ')
+    : 'No products recorded yet'
+  const headerProductSummary = latestScrapeProducts.length
+    ? `${latestScrapeProducts.length} product${latestScrapeProducts.length === 1 ? '' : 's'} updated`
     : 'No products recorded yet'
 
   return (
@@ -156,34 +161,96 @@ export default function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div
             style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 1,
-              maxWidth: 420,
-              padding: '5px 10px',
-              borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'rgba(255,255,255,0.02)',
+              position: 'relative',
             }}
           >
-            <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-              Last Scrape
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text)' }}>
-              {headerScrapeLabel}
-            </div>
-            <div
-              title={headerProductLabel}
+            <button
+              onClick={() => setScrapeMenuOpen(open => !open)}
               style={{
-                fontSize: 11,
-                color: 'var(--text-muted)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                maxWidth: 320,
+                padding: '6px 10px',
+                borderRadius: 8,
+                border: '1px solid var(--border)',
+                background: 'rgba(255,255,255,0.02)',
+                color: 'inherit',
+                cursor: 'pointer',
               }}
             >
-              {headerProductLabel}
-            </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, textAlign: 'left' }}>
+                <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                  Last Scrape
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text)' }}>
+                  {headerScrapeLabel}
+                </div>
+              </div>
+              <div
+                style={{
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  background: 'rgba(255,255,255,0.03)',
+                  fontSize: 10,
+                  letterSpacing: '0.04em',
+                  color: 'var(--text-muted)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span>{headerProductSummary}</span>
+                <ChevronDown size={12} style={{ transform: scrapeMenuOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' }} />
+              </div>
+            </button>
+            {scrapeMenuOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  right: 0,
+                  width: 320,
+                  maxHeight: 260,
+                  overflowY: 'auto',
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: '1px solid var(--border)',
+                  background: 'rgba(14,17,30,0.96)',
+                  boxShadow: '0 16px 36px rgba(0,0,0,0.35)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  zIndex: 120,
+                }}
+              >
+                <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                  Products In Latest Scrape
+                </div>
+                {latestScrapeProducts.length ? latestScrapeProducts.map(product => (
+                  <div
+                    key={product}
+                    style={{
+                      padding: '7px 8px',
+                      borderRadius: 8,
+                      background: 'rgba(255,255,255,0.03)',
+                      color: 'var(--text)',
+                      fontSize: 12,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {product}
+                  </div>
+                )) : (
+                  <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                    No products recorded yet.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <button
             onClick={() => loadReviews(filters)}
