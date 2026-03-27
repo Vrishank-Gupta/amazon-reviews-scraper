@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { appPath, fetchReviews, fetchFilters, fetchStats } from './api'
 import { downloadCSV } from './components/TrendsPage'
-import FilterBar from './components/FilterBar'
+import FilterBar from './components/Filterbar'
 import ReviewsTable from './components/ReviewsTable'
 import TrendsPage from './components/TrendsPage'
-import AnalysisPage from './components/AnalysisPage'
-import SummaryPage from './components/SummaryPage'
+import AnalysisPage from './components/Analysispage'
+import SummaryPage from './components/Summarypage'
 import { RefreshCw, Download, Database } from 'lucide-react'
 
 const DEFAULT_FILTERS = {
