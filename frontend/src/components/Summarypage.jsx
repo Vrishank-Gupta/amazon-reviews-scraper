@@ -27,35 +27,6 @@ function HealthPill({ negPct }) {
   )
 }
 
-function OverviewCards({ kpi, rowCount }) {
-  const total = kpi.total || 0
-  const negative = kpi.negative || 0
-  const positive = kpi.positive || 0
-  const neutral = kpi.neutral || 0
-  const negativePct = total ? ((negative / total) * 100).toFixed(1) : '0.0'
-  const positivePct = total ? ((positive / total) * 100).toFixed(1) : '0.0'
-  const neutralPct = total ? ((neutral / total) * 100).toFixed(1) : '0.0'
-
-  const cards = [
-    { label: 'Feedback Volume', value: total.toLocaleString(), sub: `${rowCount} products · selected period`, color: '#60a5fa' },
-    { label: '1-2 Stars', value: negative.toLocaleString(), sub: `${negativePct}% of reviews`, color: '#ef4444' },
-    { label: '4-5 Stars', value: positive.toLocaleString(), sub: `${positivePct}% of reviews`, color: '#22c55e' },
-    { label: '3 Stars', value: neutral.toLocaleString(), sub: `${neutralPct}% of reviews`, color: '#eab308' },
-  ]
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {cards.map(card => (
-        <div key={card.label} style={{ background: 'var(--surface)', border: `1px solid ${card.color}25`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 5, borderLeft: `3px solid ${card.color}` }}>
-          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{card.label}</div>
-          <div style={{ fontFamily: 'Bebas Neue', fontSize: 30, lineHeight: 1, color: card.color }}>{card.value}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>{card.sub}</div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 function RatingDistribution({ row }) {
   const total = [1, 2, 3, 4, 5].reduce((sum, star) => sum + (row?.[String(star)] || 0), 0)
   if (!row || total === 0) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No rating distribution available yet.</div>
@@ -68,7 +39,7 @@ function RatingDistribution({ row }) {
         const color = star >= 4 ? '#22c55e' : star === 3 ? '#eab308' : '#ef4444'
         return (
           <div key={star} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 20, fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>{star}★</div>
+            <div style={{ width: 20, fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>{star}â˜…</div>
             <div style={{ flex: 1, height: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${percent}%`, background: color, borderRadius: 4 }} />
             </div>
@@ -130,7 +101,7 @@ function ProductDrillDown({ row, filters, ratingDistribution }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#ef4444', marginBottom: 8 }}>Issue Volume</div>
-            {loading ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div> : issueRows.length ? issueRows.map(item => (
+            {loading ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loadingâ€¦</div> : issueRows.length ? issueRows.map(item => (
               <div key={item.category} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 12, padding: '5px 0' }}>
                 <span style={{ color: 'var(--text)' }}>{item.category}</span>
                 <span style={{ color: '#ef4444', fontWeight: 700 }}>{item.count}</span>
@@ -140,7 +111,7 @@ function ProductDrillDown({ row, filters, ratingDistribution }) {
 
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#22c55e', marginBottom: 8 }}>Positive Volume</div>
-            {loading ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div> : positiveRows.length ? positiveRows.map(item => (
+            {loading ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loadingâ€¦</div> : positiveRows.length ? positiveRows.map(item => (
               <div key={item.category} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 12, padding: '5px 0' }}>
                 <span style={{ color: 'var(--text)' }}>{item.category}</span>
                 <span style={{ color: '#22c55e', fontWeight: 700 }}>{item.count}</span>
@@ -166,7 +137,7 @@ function TH({ children, tip, onClick, sortDir }) {
     <th onClick={onClick} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', background: 'var(--surface2)', cursor: onClick ? 'pointer' : 'default', userSelect: 'none' }}>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
         {children}
-        {onClick && <span style={{ opacity: 0.5, fontSize: 9 }}>{sortDir != null ? (sortDir > 0 ? '↑' : '↓') : '↕'}</span>}
+        {onClick && <span style={{ opacity: 0.5, fontSize: 9 }}>{sortDir != null ? (sortDir > 0 ? 'â†‘' : 'â†“') : 'â†•'}</span>}
         {tip && <InfoTip text={tip} />}
       </span>
     </th>
@@ -176,7 +147,6 @@ function TH({ children, tip, onClick, sortDir }) {
 export default function SummaryPage({ filters, allProducts }) {
   const [rows, setRows] = useState([])
   const [ratingDistribution, setRatingDistribution] = useState([])
-  const [analysisData, setAnalysisData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [hasData, setHasData] = useState(false)
   const [drillRow, setDrillRow] = useState(null)
@@ -196,12 +166,10 @@ export default function SummaryPage({ filters, allProducts }) {
     Promise.all([
       fetchSummary(apiParams),
       fetchCxoTrends(apiParams).catch(() => null),
-      fetchAnalysis(apiParams).catch(() => null),
     ])
-      .then(([summaryRows, cxo, analysis]) => {
+      .then(([summaryRows, cxo]) => {
         setRows(summaryRows)
         setRatingDistribution(cxo?.rating_distribution || [])
-        setAnalysisData(analysis)
         setHasData(true)
       })
       .finally(() => setLoading(false))
@@ -243,7 +211,7 @@ export default function SummaryPage({ filters, allProducts }) {
   if (loading && !hasData) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--text-muted)', gap: 10 }}>
-        <span style={{ fontSize: 20 }}>⟳</span> Loading products…
+        <span style={{ fontSize: 20 }}>âŸ³</span> Loading productsâ€¦
       </div>
     )
   }
@@ -254,68 +222,64 @@ export default function SummaryPage({ filters, allProducts }) {
 
   return (
     <Card
-      title="Compare Products"
-      sub="The top review cards stay on the left in a vertical stack, and the product comparison table stays on the right."
-      tip="This is the same compare-products widget, cleaned up the way you asked: no ASIN column, health moved into the pill beside product name, and category grouping to make scanning easier."
+      title="Product Comparison Table"
+      sub="Grouped by category for easier scanning, with drill-down kept at row level."
+      tip="This stays at the bottom of Overview. The KPI cards and Amazon Rating Signal now sit together in the top row."
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
-        <OverviewCards kpi={analysisData?.kpi || {}} rowCount={rows.length} />
-
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <span style={{ fontFamily: 'Bebas Neue', fontSize: 17, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Product Comparison Table</span>
-                <InfoTip text="This is the original comparison table, kept in place and grouped by category. Click a product row to open its drill-down." />
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                Sorted by the selected column and split by category sections.
-              </div>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <span style={{ fontFamily: 'Bebas Neue', fontSize: 17, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Product Comparison Table</span>
+              <InfoTip text="This is the original comparison table, kept in place and grouped by category. Click a product row to open its drill-down." />
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <span><span style={{ color: '#ef4444', fontWeight: 700 }}>↑ red</span> = worse</span>
-              <span><span style={{ color: '#22c55e', fontWeight: 700 }}>↓ green</span> = improved</span>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              Sorted by the selected column and split by category sections.
             </div>
           </div>
-
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <TH onClick={() => handleSort('product_name')} sortDir={sortKey === 'product_name' ? sortDir : null} tip="Product name with health status pill">Product</TH>
-                  <TH onClick={() => handleSort('avg_rating')} sortDir={sortKey === 'avg_rating' ? sortDir : null} tip="Average star rating (1-5) in current period">Avg Rating</TH>
-                  <TH tip="Rating change vs prior period">Δ Rating</TH>
-                  <TH onClick={() => handleSort('review_count')} sortDir={sortKey === 'review_count' ? sortDir : null} tip="Total reviews in current period">Reviews</TH>
-                  <TH tip="Review count change vs prior period">Δ Reviews</TH>
-                  <TH onClick={() => handleSort('neg_pct')} sortDir={sortKey === 'neg_pct' ? sortDir : null} tip="% of reviews tagged Negative">Neg %</TH>
-                  <TH tip="Negative-rate change vs prior period">Δ Neg %</TH>
-                  <TH />
-                </tr>
-              </thead>
-              <tbody>
-                {groupedRows.map(group => (
-                  group.items.map((row, index) => {
-                    const isFirst = index === 0
-                    const isDrill = drillRow?.asin === row.asin
-                    const rowBg = index % 2 === 0 ? 'var(--surface)' : 'var(--surface2)'
-                    return (
-                      <FragmentRow
-                        key={`${group.category}-${row.asin}`}
-                        showCategory={isFirst}
-                        category={group.category}
-                        row={row}
-                        rowBg={rowBg}
-                        isDrill={isDrill}
-                        onToggle={() => setDrillRow(isDrill ? null : row)}
-                        ratingDistribution={ratingLookup[row.product_name]}
-                        filters={apiParams}
-                      />
-                    )
-                  })
-                ))}
-              </tbody>
-            </table>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <span><span style={{ color: '#ef4444', fontWeight: 700 }}>â†‘ red</span> = worse</span>
+            <span><span style={{ color: '#22c55e', fontWeight: 700 }}>â†“ green</span> = improved</span>
           </div>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <TH onClick={() => handleSort('product_name')} sortDir={sortKey === 'product_name' ? sortDir : null} tip="Product name with health status pill">Product</TH>
+                <TH onClick={() => handleSort('avg_rating')} sortDir={sortKey === 'avg_rating' ? sortDir : null} tip="Average star rating (1-5) in current period">Avg Rating</TH>
+                <TH tip="Rating change vs prior period">Î” Rating</TH>
+                <TH onClick={() => handleSort('review_count')} sortDir={sortKey === 'review_count' ? sortDir : null} tip="Total reviews in current period">Reviews</TH>
+                <TH tip="Review count change vs prior period">Î” Reviews</TH>
+                <TH onClick={() => handleSort('neg_pct')} sortDir={sortKey === 'neg_pct' ? sortDir : null} tip="% of reviews tagged Negative">Neg %</TH>
+                <TH tip="Negative-rate change vs prior period">Î” Neg %</TH>
+                <TH />
+              </tr>
+            </thead>
+            <tbody>
+              {groupedRows.map(group => (
+                group.items.map((row, index) => {
+                  const isFirst = index === 0
+                  const isDrill = drillRow?.asin === row.asin
+                  const rowBg = index % 2 === 0 ? 'var(--surface)' : 'var(--surface2)'
+                  return (
+                    <FragmentRow
+                      key={`${group.category}-${row.asin}`}
+                      showCategory={isFirst}
+                      category={group.category}
+                      row={row}
+                      rowBg={rowBg}
+                      isDrill={isDrill}
+                      onToggle={() => setDrillRow(isDrill ? null : row)}
+                      ratingDistribution={ratingLookup[row.product_name]}
+                      filters={apiParams}
+                    />
+                  )
+                })
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </Card>
@@ -355,7 +319,7 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
         </td>
         <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_neg_pct} invertColor /></td>
         <td style={{ padding: '12px 14px', color: 'var(--accent)', fontSize: 12, borderBottom: isDrill ? 'none' : '1px solid var(--border)', fontWeight: 700 }}>
-          {isDrill ? '▲ collapse' : '▼ drill down'}
+          {isDrill ? 'â–² collapse' : 'â–¼ drill down'}
         </td>
       </tr>
       {isDrill && (

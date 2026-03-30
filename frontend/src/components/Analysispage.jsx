@@ -3,10 +3,11 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ComposedChart, Bar, ReferenceLine,
 } from 'recharts'
-import { fetchAnalysis, fetchCxoTrends } from '../api'
+import { fetchAnalysis, fetchCxoTrends, fetchWordCloud } from '../api'
 import { Card } from './shared'
 import RatingTrendChart from './RatingTrendChart'
 import ReviewsDrawer from './ReviewsDrawer'
+import WordCloud from './Wordcloud'
 
 function fmtDay(d) {
   try { return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) } catch { return d }
@@ -48,6 +49,35 @@ function Toggle({ value, onChange, options }) {
 
 function EmptyState({ text = 'No data for selected filters' }) {
   return <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{text}</div>
+}
+
+function OverviewCards({ kpi, productCount }) {
+  const total = kpi.total || 0
+  const negative = kpi.negative || 0
+  const positive = kpi.positive || 0
+  const neutral = kpi.neutral || 0
+  const negativePct = total ? ((negative / total) * 100).toFixed(1) : '0.0'
+  const positivePct = total ? ((positive / total) * 100).toFixed(1) : '0.0'
+  const neutralPct = total ? ((neutral / total) * 100).toFixed(1) : '0.0'
+
+  const cards = [
+    { label: 'Feedback Volume', value: total.toLocaleString(), sub: `${productCount} products · selected period`, color: '#60a5fa' },
+    { label: '1-2 Stars', value: negative.toLocaleString(), sub: `${negativePct}% of reviews`, color: '#ef4444' },
+    { label: '4-5 Stars', value: positive.toLocaleString(), sub: `${positivePct}% of reviews`, color: '#22c55e' },
+    { label: '3 Stars', value: neutral.toLocaleString(), sub: `${neutralPct}% of reviews`, color: '#eab308' },
+  ]
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {cards.map(card => (
+        <div key={card.label} style={{ background: 'var(--surface)', border: `1px solid ${card.color}25`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 5, borderLeft: `3px solid ${card.color}` }}>
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{card.label}</div>
+          <div style={{ fontFamily: 'Bebas Neue', fontSize: 30, lineHeight: 1, color: card.color }}>{card.value}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>{card.sub}</div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function VolumeTip({ active, payload, label }) {
@@ -179,9 +209,9 @@ function CategoryReviewMix({ rows, onSelect }) {
             <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
               <div style={{ width: `${Math.max(scale * 100, 8)}%`, minWidth: 120, maxWidth: '100%' }}>
                 <div style={{ display: 'flex', height: 16, borderRadius: 999, overflow: 'hidden', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
-                  <button onClick={() => row.Negative > 0 && onSelect?.(row.category, 'Negative')} disabled={row.Negative === 0} style={{ width: `${negWidth}%`, minWidth: row.Negative ? 10 : 0, background: '#ef4444', border: 'none', cursor: row.Negative ? 'pointer' : 'default', opacity: row.Negative ? 1 : 0 }} title={`${row.category} • Negative • ${row.Negative} reviews`} />
-                  <button onClick={() => row.Neutral > 0 && onSelect?.(row.category, 'Neutral')} disabled={row.Neutral === 0} style={{ width: `${neuWidth}%`, minWidth: row.Neutral ? 10 : 0, background: '#eab308', border: 'none', cursor: row.Neutral ? 'pointer' : 'default', opacity: row.Neutral ? 1 : 0 }} title={`${row.category} • Neutral • ${row.Neutral} reviews`} />
-                  <button onClick={() => row.Positive > 0 && onSelect?.(row.category, 'Positive')} disabled={row.Positive === 0} style={{ width: `${posWidth}%`, minWidth: row.Positive ? 10 : 0, background: '#22c55e', border: 'none', cursor: row.Positive ? 'pointer' : 'default', opacity: row.Positive ? 1 : 0 }} title={`${row.category} • Positive • ${row.Positive} reviews`} />
+                  <button onClick={() => row.Negative > 0 && onSelect?.(row.category, 'Negative')} disabled={row.Negative === 0} style={{ width: `${negWidth}%`, minWidth: row.Negative ? 10 : 0, background: '#ef4444', border: 'none', cursor: row.Negative ? 'pointer' : 'default', opacity: row.Negative ? 1 : 0 }} title={`${row.category} â€¢ Negative â€¢ ${row.Negative} reviews`} />
+                  <button onClick={() => row.Neutral > 0 && onSelect?.(row.category, 'Neutral')} disabled={row.Neutral === 0} style={{ width: `${neuWidth}%`, minWidth: row.Neutral ? 10 : 0, background: '#eab308', border: 'none', cursor: row.Neutral ? 'pointer' : 'default', opacity: row.Neutral ? 1 : 0 }} title={`${row.category} â€¢ Neutral â€¢ ${row.Neutral} reviews`} />
+                  <button onClick={() => row.Positive > 0 && onSelect?.(row.category, 'Positive')} disabled={row.Positive === 0} style={{ width: `${posWidth}%`, minWidth: row.Positive ? 10 : 0, background: '#22c55e', border: 'none', cursor: row.Positive ? 'pointer' : 'default', opacity: row.Positive ? 1 : 0 }} title={`${row.category} â€¢ Positive â€¢ ${row.Positive} reviews`} />
                 </div>
               </div>
             </div>
@@ -199,6 +229,88 @@ function CategoryReviewMix({ rows, onSelect }) {
   )
 }
 
+function CategoryWordCloudPanel({ category, sentiment, filters, onClose }) {
+  const [words, setWords] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [activeWord, setActiveWord] = useState(null)
+
+  useEffect(() => {
+    if (!category) return
+    setLoading(true)
+    setActiveWord(null)
+    fetchWordCloud(filters, category)
+      .then(payload => setWords(payload || []))
+      .catch(() => setWords([]))
+      .finally(() => setLoading(false))
+  }, [category, sentiment, JSON.stringify(filters)])
+
+  const sentimentKey = sentiment === 'Negative' ? 'negative' : sentiment === 'Positive' ? 'positive' : 'neutral'
+  const sentimentColor = sentiment === 'Negative' ? '#ef4444' : sentiment === 'Positive' ? '#22c55e' : '#eab308'
+  const focusedWords = words
+    .map(word => ({ ...word, count: word[sentimentKey] || 0 }))
+    .filter(word => word.count > 0)
+    .sort((left, right) => right.count - left.count)
+  const allWords = [...words].sort((left, right) => right.count - left.count)
+
+  return (
+    <div style={{ marginTop: 14, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontFamily: 'Bebas Neue', fontSize: 16, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Keyword Drill-Down</span>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: sentimentColor, background: `${sentimentColor}15`, border: `1px solid ${sentimentColor}35`, borderRadius: 999, padding: '3px 8px' }}>
+              {category} · {sentiment}
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            Click a keyword to open the matching reviews. The first cloud is weighted to the section you clicked, and the second shows the full sub-tag mix for that category.
+          </div>
+        </div>
+        <button onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 11, padding: '5px 10px', cursor: 'pointer', fontFamily: 'DM Sans' }}>
+          Close
+        </button>
+      </div>
+
+      {loading ? (
+        <EmptyState text="Loading keyword cloud..." />
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: sentimentColor }}>
+              {sentiment} Keyword Cloud
+            </div>
+            <WordCloud data={focusedWords} activeWord={activeWord} onWordClick={setActiveWord} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+              Full Sub-Tag Cloud
+            </div>
+            <WordCloud data={allWords} activeWord={activeWord} onWordClick={setActiveWord} />
+          </div>
+        </div>
+      )}
+
+      <ReviewsDrawer
+        category={activeWord}
+        label={activeWord}
+        sentiment={sentiment}
+        filters={filters}
+        onClose={() => setActiveWord(null)}
+      />
+
+      {!loading && !allWords.length && (
+        <ReviewsDrawer
+          category={category}
+          label={category}
+          sentiment={sentiment}
+          filters={filters}
+          onClose={onClose}
+        />
+      )}
+    </div>
+  )
+}
+
 export default function AnalysisPage({ filters, allProducts, tree }) {
   const [data, setData] = useState(null)
   const [cxoData, setCxoData] = useState(null)
@@ -210,7 +322,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const [localIssueData, setLocalIssueData] = useState(null)
   const [signalProd, setSignalProd] = useState(undefined)
   const [localTrendData, setLocalTrendData] = useState(null)
-  const [categoryDrawer, setCategoryDrawer] = useState(null)
+  const [categoryCloud, setCategoryCloud] = useState(null)
 
   const scopedProducts = useMemo(() => {
     if (filters.product?.length) return filters.product
@@ -262,9 +374,6 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
   useEffect(() => {
     if (!effectiveIssueFilter) { setLocalIssueData(null); return }
-    const params = new URLSearchParams({ product: effectiveIssueFilter })
-    if (apiParams.date_from) params.set('date_from', apiParams.date_from)
-    if (apiParams.date_to) params.set('date_to', apiParams.date_to)
     fetchAnalysis({ product: [effectiveIssueFilter], date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(setLocalIssueData)
       .catch(() => setLocalIssueData(null))
@@ -280,7 +389,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   if (loading && !hasData) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--text-muted)', gap: 10 }}>
-        <span style={{ fontSize: 20 }}>⟳</span> Loading overview…
+        <span style={{ fontSize: 20 }}>âŸ³</span> Loading overviewâ€¦
       </div>
     )
   }
@@ -288,8 +397,6 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const kpi = data?.kpi || {}
   const trend = data?.daily_trend || []
   const dailyRating = cxoData?.daily_rating || []
-  const negPct = kpi.total ? +((kpi.negative / kpi.total) * 100).toFixed(1) : 0
-  const posPct = kpi.total ? +((kpi.positive / kpi.total) * 100).toFixed(1) : 0
   const momentum = cxoData?.category_momentum || []
   const activeTrend = localTrendData?.daily_trend ?? trend
   const activeDailyRating = localTrendData?.daily_rating ?? dailyRating
@@ -313,19 +420,22 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <Card
-        title="Amazon Rating Signal"
-        tip="Amazon product-page rating snapshots over time, alongside scraped daily review averages."
-      >
-        <RatingTrendChart filters={filters} tree={tree} />
-      </Card>
+      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
+        <OverviewCards kpi={kpi} productCount={scopedProducts.length || allProducts?.length || 0} />
+        <Card
+          title="Amazon Rating Signal"
+          tip="Amazon product-page rating snapshots over time, alongside scraped daily review averages."
+        >
+          <RatingTrendChart filters={filters} tree={tree} />
+        </Card>
+      </div>
 
       <Card
         title="Category Review Mix"
         sub="Horizontal length shows total reviews. Each bar is split into negative, neutral, and positive review volume."
-        tip="Click any colored section to open the matching review drill-down for that category and sentiment."
+        tip="Click any colored section to open the category keyword cloud and sub-tag drill-down for that category and sentiment."
         controls={
-          <select value={effectiveIssueFilter || ''} onChange={event => { setIssueFilter(event.target.value || null); setCategoryDrawer(null) }} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface2)', color: effectiveIssueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize: 11, fontFamily: 'DM Sans', cursor: 'pointer', outline: 'none' }}>
+          <select value={effectiveIssueFilter || ''} onChange={event => { setIssueFilter(event.target.value || null); setCategoryCloud(null) }} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface2)', color: effectiveIssueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize: 11, fontFamily: 'DM Sans', cursor: 'pointer', outline: 'none' }}>
             <option value="">All Products</option>
             {scopedProducts.map(product => <option key={product} value={product}>{product}</option>)}
           </select>
@@ -333,17 +443,18 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
       >
         <CategoryReviewMix
           rows={displayedCategoryBreakdown}
-          onSelect={(category, sentiment) => setCategoryDrawer(current =>
+          onSelect={(category, sentiment) => setCategoryCloud(current =>
             current?.category === category && current?.sentiment === sentiment ? null : { category, sentiment },
           )}
         />
-        <ReviewsDrawer
-          category={categoryDrawer?.category}
-          label={categoryDrawer?.category}
-          sentiment={categoryDrawer?.sentiment}
-          filters={filters}
-          onClose={() => setCategoryDrawer(null)}
-        />
+        {categoryCloud && (
+          <CategoryWordCloudPanel
+            category={categoryCloud.category}
+            sentiment={categoryCloud.sentiment}
+            filters={filters}
+            onClose={() => setCategoryCloud(null)}
+          />
+        )}
       </Card>
 
       <Card
@@ -360,7 +471,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
         }
       >
         {activeTrend.length === 0 ? (
-          <EmptyState text="No trend data — review dates may not be parsed correctly yet." />
+          <EmptyState text="No trend data â€” review dates may not be parsed correctly yet." />
         ) : trendMode === 'rate' ? (
           <ResponsiveContainer width="100%" height={200}>
             <ComposedChart data={trendWithRolling} margin={{ top: 8, right: 40, bottom: 0, left: -10 }}>
@@ -430,11 +541,11 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
                           <span style={{ fontWeight: 700 }}>{point.total || 0}</span>
                         </div>
                         {[
-                          ['5★', point.star_5, '#22c55e'],
-                          ['4★', point.star_4, '#84cc16'],
-                          ['3★', point.star_3, '#eab308'],
-                          ['2★', point.star_2, '#f97316'],
-                          ['1★', point.star_1, '#ef4444'],
+                          ['5â˜…', point.star_5, '#22c55e'],
+                          ['4â˜…', point.star_4, '#84cc16'],
+                          ['3â˜…', point.star_3, '#eab308'],
+                          ['2â˜…', point.star_2, '#f97316'],
+                          ['1â˜…', point.star_1, '#ef4444'],
                         ].map(([labelText, value, color]) => (
                           <div key={labelText} style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
                             <span style={{ color }}>{labelText}</span>
@@ -445,20 +556,20 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
                     </div>
                   )
                 }} />
-                <Bar dataKey="star_1" stackId="stars" fill="#ef4444" name="1★" />
-                <Bar dataKey="star_2" stackId="stars" fill="#f97316" name="2★" />
-                <Bar dataKey="star_3" stackId="stars" fill="#eab308" name="3★" />
-                <Bar dataKey="star_4" stackId="stars" fill="#84cc16" name="4★" />
-                <Bar dataKey="star_5" stackId="stars" fill="#22c55e" name="5★" />
+                <Bar dataKey="star_1" stackId="stars" fill="#ef4444" name="1â˜…" />
+                <Bar dataKey="star_2" stackId="stars" fill="#f97316" name="2â˜…" />
+                <Bar dataKey="star_3" stackId="stars" fill="#eab308" name="3â˜…" />
+                <Bar dataKey="star_4" stackId="stars" fill="#84cc16" name="4â˜…" />
+                <Bar dataKey="star_5" stackId="stars" fill="#22c55e" name="5â˜…" />
               </ComposedChart>
             </ResponsiveContainer>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
               {[
-                ['1★', '#ef4444'],
-                ['2★', '#f97316'],
-                ['3★', '#eab308'],
-                ['4★', '#84cc16'],
-                ['5★', '#22c55e'],
+                ['1â˜…', '#ef4444'],
+                ['2â˜…', '#f97316'],
+                ['3â˜…', '#eab308'],
+                ['4â˜…', '#84cc16'],
+                ['5â˜…', '#22c55e'],
               ].map(([labelText, color]) => (
                 <span key={labelText} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
