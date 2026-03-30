@@ -27,42 +27,31 @@ function HealthPill({ negPct }) {
   )
 }
 
-function ProductCards({ rows, selectedAsin, onSelect }) {
-  const sortedRows = [...rows].sort((left, right) => right.review_count - left.review_count)
+function OverviewCards({ kpi, rowCount }) {
+  const total = kpi.total || 0
+  const negative = kpi.negative || 0
+  const positive = kpi.positive || 0
+  const neutral = kpi.neutral || 0
+  const negativePct = total ? ((negative / total) * 100).toFixed(1) : '0.0'
+  const positivePct = total ? ((positive / total) * 100).toFixed(1) : '0.0'
+  const neutralPct = total ? ((neutral / total) * 100).toFixed(1) : '0.0'
+
+  const cards = [
+    { label: 'Feedback Volume', value: total.toLocaleString(), sub: `${rowCount} products · selected period`, color: '#60a5fa' },
+    { label: '1-2 Stars', value: negative.toLocaleString(), sub: `${negativePct}% of reviews`, color: '#ef4444' },
+    { label: '4-5 Stars', value: positive.toLocaleString(), sub: `${positivePct}% of reviews`, color: '#22c55e' },
+    { label: '3 Stars', value: neutral.toLocaleString(), sub: `${neutralPct}% of reviews`, color: '#eab308' },
+  ]
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {sortedRows.map(row => {
-        const isSelected = selectedAsin === row.asin
-        const negColor = row.neg_pct > 50 ? '#ef4444' : row.neg_pct > 30 ? '#f97316' : '#22c55e'
-        return (
-          <button
-            key={row.asin}
-            onClick={() => onSelect(row)}
-            style={{
-              background: isSelected ? 'rgba(255,78,26,0.08)' : 'var(--surface)',
-              border: `1px solid ${isSelected ? 'rgba(255,78,26,0.28)' : 'var(--border)'}`,
-              borderRadius: 12,
-              padding: '14px 16px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              textAlign: 'left',
-              cursor: 'pointer',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.35 }}>{row.product_name}</div>
-              <HealthPill negPct={row.neg_pct} />
-            </div>
-            <div style={{ fontFamily: 'Bebas Neue', fontSize: 30, lineHeight: 1, color: 'var(--accent)' }}>{row.review_count?.toLocaleString()}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>reviews in selected period</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 11 }}>
-              <span style={{ color: negColor, fontWeight: 700 }}>{row.neg_pct}% negative</span>
-              <span style={{ color: 'var(--text-muted)' }}>{row.avg_rating?.toFixed(1)} avg rating</span>
-            </div>
-          </button>
-        )
-      })}
+      {cards.map(card => (
+        <div key={card.label} style={{ background: 'var(--surface)', border: `1px solid ${card.color}25`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 5, borderLeft: `3px solid ${card.color}` }}>
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{card.label}</div>
+          <div style={{ fontFamily: 'Bebas Neue', fontSize: 30, lineHeight: 1, color: card.color }}>{card.value}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>{card.sub}</div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -187,6 +176,7 @@ function TH({ children, tip, onClick, sortDir }) {
 export default function SummaryPage({ filters, allProducts }) {
   const [rows, setRows] = useState([])
   const [ratingDistribution, setRatingDistribution] = useState([])
+  const [analysisData, setAnalysisData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [hasData, setHasData] = useState(false)
   const [drillRow, setDrillRow] = useState(null)
@@ -206,10 +196,12 @@ export default function SummaryPage({ filters, allProducts }) {
     Promise.all([
       fetchSummary(apiParams),
       fetchCxoTrends(apiParams).catch(() => null),
+      fetchAnalysis(apiParams).catch(() => null),
     ])
-      .then(([summaryRows, cxo]) => {
+      .then(([summaryRows, cxo, analysis]) => {
         setRows(summaryRows)
         setRatingDistribution(cxo?.rating_distribution || [])
+        setAnalysisData(analysis)
         setHasData(true)
       })
       .finally(() => setLoading(false))
@@ -267,7 +259,7 @@ export default function SummaryPage({ filters, allProducts }) {
       tip="This view is optimized for fast product comparison. Health score is still used, but it now lives behind the Good / Watch / Act Now pill beside each product name."
     >
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
-        <ProductCards rows={rows} selectedAsin={drillRow?.asin} onSelect={row => setDrillRow(current => current?.asin === row.asin ? null : row)} />
+        <OverviewCards kpi={analysisData?.kpi || {}} rowCount={rows.length} />
 
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>

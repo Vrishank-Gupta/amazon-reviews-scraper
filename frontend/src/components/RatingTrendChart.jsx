@@ -154,7 +154,7 @@ function getDefaultWidgetProduct({ parentProducts, parentCategory, scopedProduct
   if (widgetValue !== undefined) return widgetValue
   if (parentProducts.length === 1) return parentProducts[0]
   if (parentProducts.length > 1 || parentCategory) return null
-  return scopedProducts[0] || null
+  return null
 }
 
 function SnapshotTable({ rows }) {

@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, ComposedChart, Bar, ReferenceLine,
 } from 'recharts'
 import { fetchAnalysis, fetchCxoTrends } from '../api'
-import { Card, InfoTip } from './shared'
+import { Card } from './shared'
 import RatingTrendChart from './RatingTrendChart'
 import ReviewsDrawer from './ReviewsDrawer'
 
@@ -17,19 +17,6 @@ function getDefaultWidgetProduct({ parentProducts, parentCategory, scopedProduct
   if (parentProducts.length === 1) return parentProducts[0]
   if (parentProducts.length > 1 || parentCategory) return null
   return scopedProducts[0] || null
-}
-
-function KpiTile({ label, value, sub, color, tip }) {
-  return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 6, borderLeft: `3px solid ${color}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{label}</span>
-        <InfoTip text={tip} />
-      </div>
-      <div style={{ fontFamily: 'Bebas Neue', fontSize: 36, lineHeight: 1, color }}>{value ?? '—'}</div>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{sub}</div>
-    </div>
-  )
 }
 
 function Toggle({ value, onChange, options }) {
@@ -326,37 +313,6 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
-        <KpiTile
-          label="Feedback Volume"
-          value={kpi.total?.toLocaleString()}
-          color="#60a5fa"
-          sub={`${allProducts?.length || 0} product${allProducts?.length !== 1 ? 's' : ''} · selected period`}
-          tip="Total scraped reviews in the selected date range."
-        />
-        <KpiTile
-          label="1–2 Stars"
-          value={`${negPct}%`}
-          color={negPct > 50 ? '#ef4444' : negPct > 30 ? '#f97316' : '#22c55e'}
-          sub={<span><strong style={{ color: '#ef4444' }}>{kpi.negative?.toLocaleString()}</strong> reviews</span>}
-          tip="Share of reviews rated 1 or 2 stars."
-        />
-        <KpiTile
-          label="4–5 Stars"
-          value={`${posPct}%`}
-          color="#22c55e"
-          sub={<span><strong style={{ color: '#22c55e' }}>{kpi.positive?.toLocaleString()}</strong> reviews</span>}
-          tip="Share of reviews rated 4 or 5 stars."
-        />
-        <KpiTile
-          label="3 Stars"
-          value={`${kpi.total ? ((kpi.neutral / kpi.total) * 100).toFixed(1) : 0}%`}
-          color="#eab308"
-          sub={<span><strong style={{ color: '#eab308' }}>{kpi.neutral?.toLocaleString()}</strong> reviews</span>}
-          tip="Share of reviews rated 3 stars."
-        />
-      </div>
-
       <Card
         title="Amazon Rating Signal"
         tip="Amazon product-page rating snapshots over time, alongside scraped daily review averages."
