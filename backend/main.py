@@ -1785,7 +1785,19 @@ def get_summary(
                 prior_from = prior_to - timedelta(days=period_days)
             else:
                 period_days = 30
-                d_to = _date.today()
+                review_date_sql = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
+                cur.execute(f"""
+                    SELECT MAX({review_date_sql}) AS latest_review_date
+                    FROM raw_reviews r
+                    WHERE 1=1 {pf_sql}
+                      AND {review_date_sql} IS NOT NULL
+                """, list(base_params))
+                latest_row = cur.fetchone() or {}
+                d_to = latest_row.get("latest_review_date")
+                if not d_to:
+                    return []
+                if hasattr(d_to, "date"):
+                    d_to = d_to.date()
                 d_from = d_to - timedelta(days=30)
                 prior_to = d_from - timedelta(days=1)
                 prior_from = prior_to - timedelta(days=30)
