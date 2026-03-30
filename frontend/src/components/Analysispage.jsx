@@ -387,6 +387,7 @@ function EmergingIssues({ momentum, onSelect }) {
       {items.map(item => {
         const isNew = item.first === 0 && item.second > 0
         const signalColor = isNew ? '#f97316' : '#ef4444'
+        const pctLabel = isNew ? 'New' : (item.pct_change > 0 ? `+${item.pct_change}%` : `${item.pct_change}%`)
         return (
           <button
             key={item.category}
@@ -415,7 +416,7 @@ function EmergingIssues({ momentum, onSelect }) {
               {isNew ? 'NEW' : `${item.change > 0 ? '+' : ''}${item.change}`}
             </div>
             <div style={{ fontSize:11, color:'var(--text-muted)' }}>
-              {item.pct_change > 0 ? `+${item.pct_change}%` : `${item.pct_change}%`}
+              {pctLabel}
             </div>
           </button>
         )

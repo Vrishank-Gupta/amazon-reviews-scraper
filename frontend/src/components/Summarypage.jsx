@@ -194,6 +194,7 @@ function DrillDown({ row, filters }) {
   const [revLoading, setRevLoading] = useState(false)
   const [negPieData, setNegPieData] = useState([])
   const [posPieData, setPosPieData] = useState([])
+  const hasScopedDateFilter = Boolean(filters.date_from || filters.date_to)
 
 
 
@@ -302,10 +303,15 @@ function DrillDown({ row, filters }) {
       {(row.ai_issues?.length || row.ai_positives?.length) ? (
         <div>
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}>
-            ✦ AI Analysis
+            ✦ AI Overall Summary
             <span style={{ background:'rgba(96,165,250,0.1)', border:'1px solid rgba(96,165,250,0.25)', color:'#60a5fa', borderRadius:4, padding:'1px 7px', fontSize:9 }}>GPT-4o-mini</span>
             {row.ai_generated_at && <span style={{ fontWeight:400 }}>· {new Date(row.ai_generated_at).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</span>}
           </div>
+          {hasScopedDateFilter && (
+            <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:10 }}>
+              This AI summary is stored at product level and does not yet change with the selected date range.
+            </div>
+          )}
           <AiBrief row={row} />
         </div>
       ) : null}

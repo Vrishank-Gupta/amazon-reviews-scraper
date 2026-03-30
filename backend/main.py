@@ -1768,6 +1768,7 @@ def get_summary(
                 prior_from = prior_to - timedelta(days=30)
 
             def fetch_period(p_from, p_to):
+                review_date_sql = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
                 params = list(base_params) + [str(p_from), str(p_to)]
                 cur.execute(f"""
                     SELECT
@@ -1780,7 +1781,7 @@ def get_summary(
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
                     WHERE 1=1 {pf_sql}
-                      AND r.scrape_date BETWEEN %s AND %s
+                      AND {review_date_sql} BETWEEN %s AND %s
                     GROUP BY r.asin
                 """, params)
                 return {row["asin"]: row for row in cur.fetchall()}
