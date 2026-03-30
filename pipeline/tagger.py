@@ -1,17 +1,17 @@
 """
 tagger.py
-Fetches untagged reviews from raw_reviews, sends them to GPT-4o-mini
-in batches, and writes sentiment + category tags to review_tags.
+Fetches reviews from raw_reviews, sends them to GPT-4o-mini in batches,
+and writes sentiment + category tags to review_tags.
 """
 import json
 import os
 import sys
+
 import pymysql
 from openai import OpenAI
 
 from utils.taxonomy import TAXONOMY
 
-# ── Config ────────────────────────────────────────────────────────────────────
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -21,15 +21,14 @@ from shared.env import load_project_env
 load_project_env()
 
 BATCH_SIZE = 5
-MODEL      = "gpt-4o-mini"
+MODEL = "gpt-4o-mini"
+RETAG_ALL_REVIEWS = os.getenv("RETAG_ALL_REVIEWS_ON_PIPELINE", "").strip().lower() in {"1", "true", "yes", "on"}
 
-# ── OpenAI ────────────────────────────────────────────────────────────────────
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     raise RuntimeError("OPENAI_API_KEY is not set in .env")
 client = OpenAI(api_key=api_key)
 
-# ── DB ────────────────────────────────────────────────────────────────────────
 conn = pymysql.connect(
     host=os.getenv("DB_HOST", "localhost"),
     user=os.getenv("DB_USER"),
@@ -39,21 +38,26 @@ conn = pymysql.connect(
 )
 cur = conn.cursor()
 
-# ── Fetch untagged reviews ────────────────────────────────────────────────────
-cur.execute("""
+if RETAG_ALL_REVIEWS:
+    print("RETAG_ALL_REVIEWS_ON_PIPELINE is enabled. Clearing existing review tags before tagging.")
+    cur.execute("DELETE FROM review_tags")
+    conn.commit()
+
+cur.execute(
+    """
     SELECT r.review_id, r.asin, r.product_name, r.review
     FROM raw_reviews r
     LEFT JOIN review_tags t ON r.review_id = t.review_id
     WHERE t.review_id IS NULL
-""")
+    """
+)
 rows = cur.fetchall()
-print(f"Untagged reviews to process: {len(rows)}")
+print(f"Reviews to process: {len(rows)}")
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-def chunks(lst, n):
-    for i in range(0, len(lst), n):
-        yield lst[i:i + n]
+def chunks(items, size):
+    for index in range(0, len(items), size):
+        yield items[index:index + size]
 
 
 def build_prompt(review_payload: list) -> str:
@@ -72,7 +76,7 @@ Rules:
 - Classify EACH review independently
 - Only use categories from the taxonomy above
 - Multiple categories are allowed per review
-- Return VALID JSON ONLY — no explanation, no markdown
+- Return VALID JSON ONLY - no explanation, no markdown
 
 Expected output format:
 {{
@@ -91,34 +95,32 @@ Reviews:
 """
 
 
-# ── Tag in batches ────────────────────────────────────────────────────────────
 for batch in chunks(rows, BATCH_SIZE):
-    review_payload = [{"id": r[0], "product": r[2], "text": r[3]} for r in batch]
+    review_payload = [{"id": row[0], "product": row[2], "text": row[3]} for row in batch]
 
     try:
         response = client.chat.completions.create(
             model=MODEL,
             messages=[
                 {"role": "system", "content": "You output strict JSON only."},
-                {"role": "user",   "content": build_prompt(review_payload)},
+                {"role": "user", "content": build_prompt(review_payload)},
             ],
             temperature=0,
         )
         content = response.choices[0].message.content.strip()
-        parsed  = json.loads(content)
-
-    except Exception as e:
-        print(f"Batch failed: {e}")
+        parsed = json.loads(content)
+    except Exception as exc:
+        print(f"Batch failed: {exc}")
         continue
 
-    results = {r["id"]: r for r in parsed.get("results", [])}
+    results = {item["id"]: item for item in parsed.get("results", [])}
 
-    for review_id, asin, _, __ in batch:
+    for review_id, asin, _, _ in batch:
         if review_id not in results:
             print(f"  Missing result for {review_id}")
             continue
 
-        r = results[review_id]
+        result = results[review_id]
         cur.execute(
             """
             INSERT INTO review_tags
@@ -128,9 +130,9 @@ for batch in chunks(rows, BATCH_SIZE):
             (
                 review_id,
                 asin,
-                r.get("sentiment"),
-                json.dumps(r.get("primary_categories", [])),
-                json.dumps(r.get("sub_tags", [])),
+                result.get("sentiment"),
+                json.dumps(result.get("primary_categories", [])),
+                json.dumps(result.get("sub_tags", [])),
             ),
         )
 

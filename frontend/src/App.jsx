@@ -358,7 +358,7 @@ export default function App() {
                   All Reviews <span style={{ color: 'var(--accent)' }}>({reviews.length})</span>
                 </h3>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  Tagged customer reviews with search, grouping, and CSV export.
+                  Tagged customer reviews with search, sorting, and CSV export.
                 </div>
               </div>
               <button

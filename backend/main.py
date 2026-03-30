@@ -1710,6 +1710,7 @@ def get_analysis(
 
             neg_cat = defaultdict(int)
             pos_cat = defaultdict(int)
+            breakdown = defaultdict(lambda: {"Positive": 0, "Negative": 0, "Neutral": 0})
             for row in pie_rows:
                 cats = json.loads(row["primary_categories"] or "[]")
                 for c in cats:
@@ -1717,9 +1718,24 @@ def get_analysis(
                         neg_cat[c] += 1
                     else:
                         pos_cat[c] += 1
+                    breakdown[c][row["sentiment"]] += 1
 
             neg_pie = sorted([{"category": k, "count": v} for k, v in neg_cat.items()], key=lambda x: -x["count"])[:8]
             pos_pie = sorted([{"category": k, "count": v} for k, v in pos_cat.items()], key=lambda x: -x["count"])[:8]
+            category_breakdown = sorted(
+                [
+                    {
+                        "category": category_name,
+                        "Positive": counts["Positive"],
+                        "Negative": counts["Negative"],
+                        "Neutral": counts["Neutral"],
+                        "total": counts["Positive"] + counts["Negative"] + counts["Neutral"],
+                    }
+                    for category_name, counts in breakdown.items()
+                ],
+                key=lambda item: item["total"],
+                reverse=True,
+            )[:10]
 
         return {
             "kpi": {
@@ -1731,6 +1747,7 @@ def get_analysis(
             "daily_trend": daily_trend,
             "neg_pie": neg_pie,
             "pos_pie": pos_pie,
+            "category_breakdown": category_breakdown,
         }
     finally:
         conn.close()
@@ -1811,6 +1828,7 @@ def get_summary(
                 result.append({
                     "asin": asin,
                     "product_name": row["product_name"],
+                    "category": row.get("category"),
                     "avg_rating": curr_rating,
                     "review_count": curr_count,
                     "neg_pct": curr_neg_pct,
@@ -1929,7 +1947,12 @@ def get_rating_trends(
                     DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day,
                     r.product_name,
                     ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 2) as daily_avg,
-                    COUNT(*) as review_count
+                    COUNT(*) as review_count,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 1 THEN 1 ELSE 0 END) as star_1,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 2 THEN 1 ELSE 0 END) as star_2,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 3 THEN 1 ELSE 0 END) as star_3,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 4 THEN 1 ELSE 0 END) as star_4,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 5 THEN 1 ELSE 0 END) as star_5
                 FROM raw_reviews r
                 WHERE 1=1 {pf_sql} {date_filter}
                   AND {_rd} IS NOT NULL
@@ -2000,6 +2023,11 @@ def get_rating_trends(
             product_daily[row["product_name"]][d] = {
                 "daily_avg": float(row["daily_avg"]) if row["daily_avg"] else None,
                 "count":     int(row["review_count"]),
+                "star_1":    int(row["star_1"] or 0),
+                "star_2":    int(row["star_2"] or 0),
+                "star_3":    int(row["star_3"] or 0),
+                "star_4":    int(row["star_4"] or 0),
+                "star_5":    int(row["star_5"] or 0),
             }
 
         # Full product list
@@ -2023,6 +2051,11 @@ def get_rating_trends(
                     "day":           d,
                     "daily_avg":     rev.get("daily_avg"),
                     "count":         rev.get("count", 0),
+                    "star_1":        rev.get("star_1", 0),
+                    "star_2":        rev.get("star_2", 0),
+                    "star_3":        rev.get("star_3", 0),
+                    "star_4":        rev.get("star_4", 0),
+                    "star_5":        rev.get("star_5", 0),
                     "overall":       last_overall,
                     "total_ratings": last_total_ratings,
                 })

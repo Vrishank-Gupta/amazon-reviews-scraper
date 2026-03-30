@@ -67,7 +67,7 @@ function ReviewCard({ r }) {
   )
 }
 
-export default function ReviewsDrawer({ category, label, filters, onClose, productName = null }) {
+export default function ReviewsDrawer({ category, label, filters, onClose, productName = null, sentiment = null }) {
   const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(false)
 
@@ -79,12 +79,13 @@ export default function ReviewsDrawer({ category, label, filters, onClose, produ
     else if (filters?.product?.length) p.set('product', filters.product.join('|||'))
     if (filters?.date_from) p.set('date_from', filters.date_from)
     if (filters?.date_to)   p.set('date_to',   filters.date_to)
+    if (sentiment) p.set('sentiment', sentiment)
     fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
       .then(r => r.json())
       .then(setReviews)
       .catch(() => setReviews([]))
       .finally(() => setLoading(false))
-  }, [category, productName, filters?.product?.join(','), filters?.date_from, filters?.date_to])
+  }, [category, productName, sentiment, filters?.product?.join(','), filters?.date_from, filters?.date_to])
 
   if (!category) return null
 
@@ -118,6 +119,11 @@ export default function ReviewsDrawer({ category, label, filters, onClose, produ
               border:'1px solid rgba(255,78,26,0.3)', borderRadius:10,
               padding:'1px 8px', fontSize:11, fontWeight:600,
             }}>{reviews.length}</span>
+          )}
+          {sentiment && (
+            <span style={{ fontSize:10, color:'var(--text-muted)', background:'var(--surface)', padding:'1px 7px', borderRadius:4, border:'1px solid var(--border)' }}>
+              {sentiment}
+            </span>
           )}
           {!loading && reviews.length > 0 && (
             <div style={{ display:'flex', gap:6 }}>

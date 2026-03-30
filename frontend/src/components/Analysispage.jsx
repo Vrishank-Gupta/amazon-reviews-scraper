@@ -1,26 +1,15 @@
-/**
- * OVERVIEW TAB  — CXO 30-second pulse
- *
- * Layout:
- *  1. Alert banner (auto-verdict)
- *  2. 4 KPI tiles: Total · Neg Rate · Pos Rate · Avg Rating
- *  3. Product health cards (one per product, visual urgency)
- *  4. Top burning issues (ranked horizontal bars)
- *  5. Sentiment trend (compact, toggle volume/rate)
- */
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ComposedChart, Bar, ReferenceLine
+  ResponsiveContainer, ComposedChart, Bar, ReferenceLine,
 } from 'recharts'
-import { ExternalLink } from 'lucide-react'
-import { apiUrl, fetchAnalysis, fetchCxoTrends } from '../api'
-import { InfoTip, Card } from './shared'
+import { fetchAnalysis, fetchCxoTrends } from '../api'
+import { Card, InfoTip } from './shared'
 import RatingTrendChart from './RatingTrendChart'
 import ReviewsDrawer from './ReviewsDrawer'
 
 function fmtDay(d) {
-  try { return new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) } catch { return d }
+  try { return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) } catch { return d }
 }
 
 function getDefaultWidgetProduct({ parentProducts, parentCategory, scopedProducts, widgetValue }) {
@@ -30,343 +19,102 @@ function getDefaultWidgetProduct({ parentProducts, parentCategory, scopedProduct
   return scopedProducts[0] || null
 }
 
-// ── Alert banner ──────────────────────────────────────────────────────────────
-// ── KPI tile ──────────────────────────────────────────────────────────────────
 function KpiTile({ label, value, sub, color, tip }) {
   return (
-    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 18px', display:'flex', flexDirection:'column', gap:6, borderLeft:`3px solid ${color}` }}>
-      <div style={{ display:'flex', alignItems:'center', gap:5 }}>
-        <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>{label}</span>
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 6, borderLeft: `3px solid ${color}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{label}</span>
         <InfoTip text={tip} />
       </div>
-      <div style={{ fontFamily:'Bebas Neue', fontSize:36, lineHeight:1, color }}>{value ?? '—'}</div>
-      <div style={{ fontSize:11, color:'var(--text-muted)' }}>{sub}</div>
+      <div style={{ fontFamily: 'Bebas Neue', fontSize: 36, lineHeight: 1, color }}>{value ?? '—'}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{sub}</div>
     </div>
   )
 }
 
-// ── Inline sub-tag word cloud (shown after clicking an issue row) ─────────────
-function InlineWordCloud({ category, filters }) {
-  const [words, setWords]       = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [activeWord, setActiveWord] = useState(null)
-  const [reviews, setReviews]   = useState([])
-  const [revLoading, setRevLoading] = useState(false)
-
-  useEffect(() => {
-    setLoading(true); setActiveWord(null); setReviews([])
-    const p = new URLSearchParams()
-    if (category) p.set('category', category)  // taxonomy category for drill-down
-    if (filters.product_category) p.set('product_category', filters.product_category)
-    if (filters.product?.length) p.set('product', filters.product.join('|||'))
-    if (filters.date_from) p.set('date_from', filters.date_from)
-    if (filters.date_to)   p.set('date_to',   filters.date_to)
-    fetch(apiUrl(`/api/wordcloud?${p}`))
-      .then(r => r.json()).then(setWords).catch(() => setWords([])).finally(() => setLoading(false))
-  }, [category, JSON.stringify(filters)])
-
-  useEffect(() => {
-    if (!activeWord) { setReviews([]); return }
-    setRevLoading(true)
-    const p = new URLSearchParams({ keyword: activeWord })
-    if (filters.product_category) p.set('product_category', filters.product_category)
-    if (filters.product?.length) p.set('product', filters.product.join('|||'))
-    if (filters.date_from) p.set('date_from', filters.date_from)
-    if (filters.date_to)   p.set('date_to',   filters.date_to)
-    fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
-      .then(r => r.json()).then(setReviews).catch(() => setReviews([])).finally(() => setRevLoading(false))
-  }, [activeWord])
-
-  // When there are no sub-tags, auto-fetch reviews for the category directly
-  useEffect(() => {
-    if (loading || words.length > 0 || !category) return
-    setRevLoading(true)
-    const p = new URLSearchParams({ keyword: category })
-    if (filters.product_category) p.set('product_category', filters.product_category)
-    if (filters.product?.length) p.set('product', filters.product.join('|||'))
-    if (filters.date_from) p.set('date_from', filters.date_from)
-    if (filters.date_to)   p.set('date_to',   filters.date_to)
-    fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
-      .then(r => r.json()).then(setReviews).catch(() => setReviews([])).finally(() => setRevLoading(false))
-  }, [loading, words.length, category, JSON.stringify(filters)])
-
-  if (loading) return <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>Loading sub-tags…</div>
-  if (!words.length) return (
-    <div style={{ marginTop:8, padding:'12px 14px', background:'var(--surface2)', borderRadius:8, border:'1px solid var(--border)' }}>
-      <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:8 }}>
-        Reviews in "{category}"
-        <span style={{ marginLeft:8, fontWeight:400, fontStyle:'italic', textTransform:'none', opacity:0.7 }}>no sub-tags available</span>
-      </div>
-      {revLoading ? (
-        <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>Loading…</div>
-      ) : reviews.length === 0 ? (
-        <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>No reviews found.</div>
-      ) : (
-        <div style={{ maxHeight:280, overflowY:'auto' }}>
-          {reviews.map((r, i) => <ReviewCard key={r.review_id || i} r={r} />)}
-        </div>
-      )}
-    </div>
-  )
-
-  const max = Math.max(...words.map(w => w.count))
-  const sentColor = w => w.neg_ratio > 0.6 ? '#ef4444' : w.neg_ratio > 0.35 ? '#f97316' : w.neg_ratio > 0.15 ? '#eab308' : '#22c55e'
-
+function Toggle({ value, onChange, options }) {
   return (
-    <div style={{ marginTop:8, padding:'12px 14px', background:'var(--surface2)', borderRadius:8, border:'1px solid var(--border)' }}>
-      <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:4 }}>
-        Sub-tags in "{category}"
-        <span style={{ marginLeft:8, fontWeight:400, fontStyle:'italic', textTransform:'none', opacity:0.7 }}>
-          size = frequency · color = sentiment (red=negative, green=positive) · AI-tagged: 1–2★ ≈ Negative, 3★ ≈ Neutral, 4–5★ ≈ Positive
-        </span>
-      </div>
-      <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 10px', alignItems:'center', padding:'8px 0' }}>
-        {words.slice(0, 40).map(w => {
-          const size = Math.round(11 + (w.count / max) * 14)
-          const col  = sentColor(w)
-          const isAW = activeWord === w.word
-          return (
-            <button key={w.word} onClick={() => setActiveWord(isAW ? null : w.word)}
-              title={`${w.count} reviews · neg: ${Math.round(w.neg_ratio*100)}% · pos: ${Math.round(w.pos_ratio*100)}%`}
-              style={{ background: isAW ? `${col}20` : 'transparent', border: `1px solid ${isAW ? col : 'transparent'}`,
-                borderRadius:4, padding:'1px 6px', cursor:'pointer', fontFamily:'DM Sans',
-                fontSize:size, color:col, fontWeight: size > 20 ? 700 : size > 15 ? 600 : 500,
-                opacity: activeWord && !isAW ? 0.3 : 1, transition:'all 0.12s' }}>
-              {w.word}
-            </button>
-          )
-        })}
-      </div>
-
-      {activeWord && (
-        <div style={{ marginTop:8, borderTop:'1px solid var(--border)', paddingTop:10 }}>
-          <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:8, display:'flex', alignItems:'center', gap:8 }}>
-            Reviews mentioning <span style={{ color:'var(--accent)', fontWeight:700 }}>"{activeWord}"</span>
-            {!revLoading && <span style={{ background:'rgba(255,78,26,0.15)', color:'var(--accent)', border:'1px solid rgba(255,78,26,0.3)', borderRadius:10, padding:'1px 8px', fontSize:11, fontWeight:600 }}>{reviews.length}</span>}
-            <button onClick={() => setActiveWord(null)} style={{ marginLeft:'auto', background:'none', border:'1px solid var(--border)', borderRadius:5, color:'var(--text-muted)', fontSize:11, padding:'2px 8px', cursor:'pointer', fontFamily:'DM Sans' }}>Clear ✕</button>
-          </div>
-          {revLoading ? (
-            <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>Loading…</div>
-          ) : reviews.length === 0 ? (
-            <div style={{ padding:'12px 0', color:'var(--text-muted)', fontSize:12 }}>No reviews found.</div>
-          ) : (
-            <div style={{ maxHeight:280, overflowY:'auto' }}>
-              {reviews.map((r, i) => (
-                <ReviewCard key={r.review_id || i} r={r} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Review card (shared between DrillDown and InlineWordCloud) ────────────────
-function ReviewCard({ r }) {
-  const [open, setOpen] = useState(false)
-  const sentColor = r.sentiment === 'Positive' ? '#22c55e' : r.sentiment === 'Negative' ? '#ef4444' : '#eab308'
-  const stars = Math.round(parseFloat(r.rating) || 0)
-  return (
-    <div style={{ padding:'10px 0', borderBottom:'1px solid var(--border)' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:4 }}>
-        <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:4,
-          background:`${sentColor}15`, color:sentColor, border:`1px solid ${sentColor}30` }}>
-          {r.sentiment}
-        </span>
-        <span style={{ fontSize:11, color:'#eab308' }}>{'★'.repeat(stars)}{'☆'.repeat(Math.max(0,5-stars))}</span>
-        <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:'auto' }}>
-          {r.review_date?.replace('Reviewed in India on ','')} · {r.product_name}
-        </span>
-      </div>
-      {r.title && <div style={{ fontSize:12, fontWeight:600, marginBottom:3 }}>{r.title}</div>}
-      <div style={{ fontSize:12, color:'var(--text)', lineHeight:1.5, overflow:'hidden',
-        display: open ? 'block' : '-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical' }}>
-        {r.review}
-      </div>
-      {r.review?.length > 200 && (
-        <button onClick={() => setOpen(o => !o)} style={{ background:'none', border:'none', cursor:'pointer',
-          color:'var(--accent)', fontSize:11, padding:0, textAlign:'left', fontFamily:'DM Sans', marginTop:3 }}>
-          {open ? 'Show less ▲' : 'Read full review ▼'}
-        </button>
-      )}
-      {r.review_url && (
-        <a
-          href={r.review_url}
-          target="_blank"
-          rel="noopener noreferrer"
+    <div style={{ display: 'flex', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 7, padding: 2, gap: 2 }}>
+      {options.map(option => (
+        <button
+          key={option.v}
+          onClick={() => onChange(option.v)}
           style={{
-            marginTop: 8,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '5px 9px',
-            borderRadius: 6,
-            border: '1px solid rgba(255,78,26,0.28)',
-            background: 'rgba(255,78,26,0.08)',
-            color: 'var(--accent)',
+            padding: '3px 10px',
+            borderRadius: 5,
+            border: 'none',
+            cursor: 'pointer',
             fontSize: 11,
             fontWeight: 600,
-            textDecoration: 'none',
+            fontFamily: 'DM Sans',
+            background: value === option.v ? 'var(--accent)' : 'transparent',
+            color: value === option.v ? '#fff' : 'var(--text-muted)',
+            transition: 'all 0.15s',
           }}
         >
-          <ExternalLink size={12} /> Open on Amazon
-        </a>
-      )}
-    </div>
-  )
-}
-
-// ── Burning issues (horizontal ranked bars) ───────────────────────────────────
-function BurningIssues({ negPie, activeCat, onRowClick, filters }) {
-  if (!negPie?.length) return <div style={{ padding:'20px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>No data</div>
-  const max = negPie[0].count
-  const total = negPie.reduce((s,r)=>s+r.count,0)
-  const COLS = ['#ef4444','#f97316','#fbbf24','#a855f7','#e879f9','#f43f5e','#94a3b8','#64748b']
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
-      {negPie.map((item, i) => {
-        const pct = total > 0 ? ((item.count/total)*100).toFixed(0) : 0
-        const w = ((item.count/max)*100).toFixed(1)
-        const c = COLS[i % COLS.length]
-        const isActive = activeCat === item.category
-        return (
-          <div key={item.category}>
-            <div
-              onClick={() => onRowClick && onRowClick(item.category)}
-              style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer',
-                padding:'4px 6px', borderRadius:6, margin:'0 -6px',
-                background: isActive ? 'rgba(255,78,26,0.08)' : 'transparent',
-                border: `1px solid ${isActive ? 'rgba(255,78,26,0.25)' : 'transparent'}`,
-                transition:'background 0.12s',
-              }}
-              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background='rgba(255,78,26,0.05)' }}
-              onMouseLeave={e => { if (!isActive) e.currentTarget.style.background='transparent' }}
-            >
-              <div style={{ width:26, fontSize:10, color:'var(--text-muted)', textAlign:'right', flexShrink:0 }}>#{i+1}</div>
-              <div title={item.category} style={{ width:130, fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flexShrink:0, color: isActive ? 'var(--accent)' : 'var(--text)' }}>{item.category}</div>
-              <div style={{ flex:1, height:8, background:'var(--border)', borderRadius:4, overflow:'hidden' }}>
-                <div style={{ height:'100%', width:`${w}%`, background:c, borderRadius:4, opacity:0.85 }} />
-              </div>
-              <div style={{ width:28, fontSize:12, fontWeight:700, color:c, textAlign:'right', flexShrink:0 }}>{item.count}</div>
-              <div style={{ width:36, fontSize:11, color:'var(--text-muted)', textAlign:'right', flexShrink:0 }}>{pct}%</div>
-              <div style={{ fontSize:10, color: isActive ? 'var(--accent)' : 'var(--text-muted)', flexShrink:0 }}>{isActive ? '▲' : '▼'}</div>
-            </div>
-            {isActive && (
-              <div style={{ marginLeft:32 }}>
-                <InlineWordCloud category={item.category} filters={filters} />
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// ── Trend tooltip ─────────────────────────────────────────────────────────────
-// ── Rich rate tooltip ─────────────────────────────────────────────────────────
-function RateTip({ active, payload, label }) {
-  if (!active || !payload?.length) return null
-  const rolling = payload.find(p => p.dataKey === 'rolling_neg')?.value
-  const daily   = payload.find(p => p.dataKey === 'neg_rate')?.value
-  const pt      = payload[0]?.payload || {}
-  const total   = (pt.Positive||0) + (pt.Negative||0) + (pt.Neutral||0)
-
-  const verdict = rolling == null ? null
-    : rolling > 50 ? { label:'Crisis', color:'#ef4444', icon:'🔴' }
-    : rolling > 30 ? { label:'High — watch closely', color:'#f97316', icon:'⚠️' }
-    : rolling > 20 ? { label:'Elevated', color:'#eab308', icon:'⚠️' }
-    :                { label:'Healthy', color:'#22c55e', icon:'✅' }
-
-  return (
-    <div style={{ background:'#16161f', border:'1px solid var(--border)', borderRadius:10, padding:'12px 16px', fontSize:12, minWidth:200, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}>
-      <div style={{ fontWeight:700, marginBottom:8, color:'var(--text-muted)', fontSize:11, letterSpacing:'0.06em' }}>{fmtDay(label)}</div>
-      {verdict && (
-        <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10, padding:'4px 8px', background:`${verdict.color}12`, border:`1px solid ${verdict.color}30`, borderRadius:6 }}>
-          <span>{verdict.icon}</span>
-          <span style={{ color:verdict.color, fontWeight:700, fontSize:12 }}>{verdict.label}</span>
-        </div>
-      )}
-      <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
-        {rolling != null && (
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:16 }}>
-            <span style={{ color:'var(--text-muted)' }}>7d rolling neg rate</span>
-            <span style={{ fontWeight:700, color:'#ff4e1a', fontSize:14 }}>{rolling}%</span>
-          </div>
-        )}
-        {daily != null && (
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:16 }}>
-            <span style={{ color:'var(--text-muted)' }}>{"Today's neg rate"}</span>
-            <span style={{ fontWeight:600, color:'#ef444490', fontSize:12 }}>{daily}%</span>
-          </div>
-        )}
-        {total > 0 && (
-          <>
-            <div style={{ borderTop:'1px solid var(--border)', margin:'4px 0' }} />
-            <div style={{ display:'flex', justifyContent:'space-between', gap:16 }}>
-              <span style={{ color:'var(--text-muted)' }}>Reviews today</span>
-              <span style={{ fontWeight:600 }}>{total}</span>
-            </div>
-            <div style={{ display:'flex', gap:6 }}>
-              {[['Neg', pt.Negative, '#ef4444'], ['Pos', pt.Positive, '#22c55e'], ['Neu', pt.Neutral, '#eab308']].map(([l,v,c]) => (
-                <div key={l} style={{ flex:1, background:`${c}12`, borderRadius:5, padding:'3px 6px', textAlign:'center' }}>
-                  <div style={{ fontSize:10, color:c, fontWeight:700 }}>{l}</div>
-                  <div style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{v||0}</div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── Volume tooltip ────────────────────────────────────────────────────────────
-function VolumeTip({ active, payload, label }) {
-  if (!active || !payload?.length) return null
-  const total = payload.reduce((s,p) => s + (p.value||0), 0)
-  const neg = payload.find(p=>p.dataKey==='Negative')?.value || 0
-  const negPct = total ? ((neg/total)*100).toFixed(0) : 0
-  return (
-    <div style={{ background:'#16161f', border:'1px solid var(--border)', borderRadius:10, padding:'12px 16px', fontSize:12, minWidth:180, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}>
-      <div style={{ fontWeight:700, marginBottom:8, color:'var(--text-muted)', fontSize:11 }}>{fmtDay(label)}</div>
-      <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
-        {payload.map(p => (
-          <div key={p.dataKey} style={{ display:'flex', justifyContent:'space-between', gap:16, alignItems:'center' }}>
-            <span style={{ display:'flex', alignItems:'center', gap:5, color:'var(--text-muted)' }}>
-              <span style={{ width:8, height:8, borderRadius:'50%', background:p.color, flexShrink:0, display:'inline-block' }} />
-              {p.dataKey}
-            </span>
-            <span style={{ fontWeight:700, color:p.color }}>{p.value}</span>
-          </div>
-        ))}
-        <div style={{ borderTop:'1px solid var(--border)', marginTop:4, paddingTop:6, display:'flex', justifyContent:'space-between' }}>
-          <span style={{ color:'var(--text-muted)' }}>Neg rate today</span>
-          <span style={{ fontWeight:700, color: negPct>50?'#ef4444':negPct>30?'#f97316':'#22c55e' }}>{negPct}%</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function Toggle({ value, options, onChange }) {
-  return (
-    <div style={{ display:'flex', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:7, padding:2, gap:2 }}>
-      {options.map(o => (
-        <button key={o.v} onClick={()=>onChange(o.v)} style={{
-          padding:'3px 10px', borderRadius:5, border:'none', cursor:'pointer', fontSize:11, fontWeight:600, fontFamily:'DM Sans',
-          background:value===o.v?'var(--accent)':'transparent',
-          color:value===o.v?'#fff':'var(--text-muted)', transition:'all 0.15s',
-        }}>{o.l}</button>
+          {option.l}
+        </button>
       ))}
     </div>
   )
 }
 
 function EmptyState({ text = 'No data for selected filters' }) {
-  return <div style={{ padding:'24px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>{text}</div>
+  return <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{text}</div>
+}
+
+function VolumeTip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const point = payload[0]?.payload || {}
+  const total = (point.Positive || 0) + (point.Negative || 0) + (point.Neutral || 0)
+  return (
+    <div style={{ background: '#16161f', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', fontSize: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+      <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtDay(label)}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ color: 'var(--text-muted)' }}>Reviews that day</span>
+          <span style={{ fontWeight: 700 }}>{total}</span>
+        </div>
+        {[
+          ['Negative', point.Negative, '#ef4444'],
+          ['Positive', point.Positive, '#22c55e'],
+          ['Neutral', point.Neutral, '#eab308'],
+        ].map(([labelText, value, color]) => (
+          <div key={labelText} style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+            <span style={{ color }}>{labelText}</span>
+            <span style={{ fontWeight: 700 }}>{value || 0}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RateTip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const rolling = payload.find(point => point.dataKey === 'rolling_neg')?.value
+  const daily = payload.find(point => point.dataKey === 'neg_rate')?.value
+  const point = payload[0]?.payload || {}
+  const total = (point.Positive || 0) + (point.Negative || 0) + (point.Neutral || 0)
+  return (
+    <div style={{ background: '#16161f', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', fontSize: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+      <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtDay(label)}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ color: 'var(--text-muted)' }}>7d rolling neg rate</span>
+          <span style={{ fontWeight: 700, color: '#ff4e1a' }}>{rolling}%</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ color: 'var(--text-muted)' }}>Daily neg rate</span>
+          <span style={{ fontWeight: 700, color: '#ef4444' }}>{daily}%</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ color: 'var(--text-muted)' }}>Reviews that day</span>
+          <span style={{ fontWeight: 700 }}>{total}</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function EmergingIssues({ momentum, onSelect }) {
@@ -383,7 +131,7 @@ function EmergingIssues({ momentum, onSelect }) {
   if (!items.length) return <EmptyState />
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {items.map(item => {
         const isNew = item.first === 0 && item.second > 0
         const signalColor = isNew ? '#f97316' : '#ef4444'
@@ -393,29 +141,29 @@ function EmergingIssues({ momentum, onSelect }) {
             key={item.category}
             onClick={() => onSelect?.(item.category)}
             style={{
-              background:'rgba(255,255,255,0.03)',
-              border:`1px solid ${signalColor}24`,
-              borderRadius:10,
-              padding:'10px 12px',
-              display:'grid',
-              gridTemplateColumns:'1fr auto auto',
-              gap:10,
-              alignItems:'center',
-              cursor:'pointer',
-              color:'inherit',
-              textAlign:'left',
+              background: 'rgba(255,255,255,0.03)',
+              border: `1px solid ${signalColor}24`,
+              borderRadius: 10,
+              padding: '10px 12px',
+              display: 'grid',
+              gridTemplateColumns: '1fr auto auto',
+              gap: 10,
+              alignItems: 'center',
+              cursor: 'pointer',
+              color: 'inherit',
+              textAlign: 'left',
             }}
           >
-            <div style={{ minWidth:0 }}>
-              <div style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{item.category}</div>
-              <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{item.category}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 {isNew ? 'New issue in the recent half of the period' : `Up from ${item.first} to ${item.second} mentions`}
               </div>
             </div>
-            <div style={{ fontSize:11, fontWeight:700, color:signalColor }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: signalColor }}>
               {isNew ? 'NEW' : `${item.change > 0 ? '+' : ''}${item.change}`}
             </div>
-            <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               {pctLabel}
             </div>
           </button>
@@ -425,23 +173,58 @@ function EmergingIssues({ momentum, onSelect }) {
   )
 }
 
-// ── MAIN ──────────────────────────────────────────────────────────────────────
+function CategoryReviewMix({ rows, onSelect }) {
+  if (!rows.length) return <EmptyState />
+  const max = Math.max(...rows.map(row => row.total || 0), 1)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {rows.map(row => {
+        const total = row.total || 0
+        const scale = total / max
+        const negWidth = total ? (row.Negative / total) * 100 : 0
+        const neuWidth = total ? (row.Neutral / total) * 100 : 0
+        const posWidth = total ? (row.Positive / total) * 100 : 0
+
+        return (
+          <div key={row.category} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 54px', gap: 12, alignItems: 'center' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{row.category}</div>
+            <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+              <div style={{ width: `${Math.max(scale * 100, 8)}%`, minWidth: 120, maxWidth: '100%' }}>
+                <div style={{ display: 'flex', height: 16, borderRadius: 999, overflow: 'hidden', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
+                  <button onClick={() => row.Negative > 0 && onSelect?.(row.category, 'Negative')} disabled={row.Negative === 0} style={{ width: `${negWidth}%`, minWidth: row.Negative ? 10 : 0, background: '#ef4444', border: 'none', cursor: row.Negative ? 'pointer' : 'default', opacity: row.Negative ? 1 : 0 }} title={`${row.category} • Negative • ${row.Negative} reviews`} />
+                  <button onClick={() => row.Neutral > 0 && onSelect?.(row.category, 'Neutral')} disabled={row.Neutral === 0} style={{ width: `${neuWidth}%`, minWidth: row.Neutral ? 10 : 0, background: '#eab308', border: 'none', cursor: row.Neutral ? 'pointer' : 'default', opacity: row.Neutral ? 1 : 0 }} title={`${row.category} • Neutral • ${row.Neutral} reviews`} />
+                  <button onClick={() => row.Positive > 0 && onSelect?.(row.category, 'Positive')} disabled={row.Positive === 0} style={{ width: `${posWidth}%`, minWidth: row.Positive ? 10 : 0, background: '#22c55e', border: 'none', cursor: row.Positive ? 'pointer' : 'default', opacity: row.Positive ? 1 : 0 }} title={`${row.category} • Positive • ${row.Positive} reviews`} />
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'right' }}>{total}</div>
+          </div>
+        )
+      })}
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: '#ef4444' }} /> Negative</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: '#eab308' }} /> Neutral</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: '#22c55e' }} /> Positive</span>
+      </div>
+    </div>
+  )
+}
+
 export default function AnalysisPage({ filters, allProducts, tree }) {
-  const [data, setData]       = useState(null)
+  const [data, setData] = useState(null)
   const [cxoData, setCxoData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [hasData, setHasData] = useState(false)
   const [trendMode, setTrendMode] = useState('sentiment')
-  const [drawerCat, setDrawerCat] = useState(null)
-  const [drawerCatPos, setDrawerCatPos] = useState(null)
   const [emergingCat, setEmergingCat] = useState(null)
   const [issueFilter, setIssueFilter] = useState(undefined)
   const [localIssueData, setLocalIssueData] = useState(null)
   const [signalProd, setSignalProd] = useState(undefined)
   const [localTrendData, setLocalTrendData] = useState(null)
-  const [ratingDistProd, setRatingDistProd] = useState(undefined)
+  const [categoryDrawer, setCategoryDrawer] = useState(null)
 
-  // Respect parent filter: only show products in scope
   const scopedProducts = useMemo(() => {
     if (filters.product?.length) return filters.product
     if (filters.product_category) return tree?.[filters.product_category] || []
@@ -461,18 +244,16 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
     widgetValue: signalProd,
   })
 
-  // Reset widget filters if selected product is no longer in scope
   useEffect(() => {
     if (issueFilter && !scopedProducts.includes(issueFilter)) setIssueFilter(undefined)
     if (signalProd && !scopedProducts.includes(signalProd)) setSignalProd(undefined)
-    if (ratingDistProd && !scopedProducts.includes(ratingDistProd)) setRatingDistProd(undefined)
-  }, [JSON.stringify(scopedProducts), issueFilter, signalProd, ratingDistProd])
+  }, [JSON.stringify(scopedProducts), issueFilter, signalProd])
 
   const apiParams = {
     product_category: filters.product_category || null,
-    product:   filters.product?.length ? filters.product : [],
+    product: filters.product?.length ? filters.product : [],
     date_from: filters.date_from,
-    date_to:   filters.date_to,
+    date_to: filters.date_to,
   }
 
   const load = useCallback(() => {
@@ -494,142 +275,137 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
   useEffect(() => {
     if (!effectiveIssueFilter) { setLocalIssueData(null); return }
-    const p = new URLSearchParams({ product: effectiveIssueFilter })
-    if (apiParams.date_from) p.set('date_from', apiParams.date_from)
-    if (apiParams.date_to) p.set('date_to', apiParams.date_to)
-    fetch(apiUrl(`/api/analysis?${p}`))
-      .then(r => r.json())
-      .then(d => setLocalIssueData(d))
+    const params = new URLSearchParams({ product: effectiveIssueFilter })
+    if (apiParams.date_from) params.set('date_from', apiParams.date_from)
+    if (apiParams.date_to) params.set('date_to', apiParams.date_to)
+    fetchAnalysis({ product: [effectiveIssueFilter], date_from: apiParams.date_from, date_to: apiParams.date_to })
+      .then(setLocalIssueData)
       .catch(() => setLocalIssueData(null))
   }, [effectiveIssueFilter, apiParams.date_from, apiParams.date_to])
 
   useEffect(() => {
     if (!effectiveSignalProd) { setLocalTrendData(null); return }
-    const p = new URLSearchParams({ product: effectiveSignalProd })
-    if (apiParams.date_from) p.set('date_from', apiParams.date_from)
-    if (apiParams.date_to) p.set('date_to', apiParams.date_to)
-    fetch(apiUrl(`/api/analysis?${p}`))
-      .then(r => r.json())
-      .then(d => setLocalTrendData(d?.daily_trend ?? null))
+    fetchAnalysis({ product: [effectiveSignalProd], date_from: apiParams.date_from, date_to: apiParams.date_to })
+      .then(payload => setLocalTrendData(payload?.daily_trend ?? null))
       .catch(() => setLocalTrendData(null))
   }, [effectiveSignalProd, apiParams.date_from, apiParams.date_to])
 
-  if (loading && !hasData) return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:200, color:'var(--text-muted)', gap:10 }}>
-      <span style={{ fontSize:20 }}>⟳</span> Loading overview…
-    </div>
-  )
+  if (loading && !hasData) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--text-muted)', gap: 10 }}>
+        <span style={{ fontSize: 20 }}>⟳</span> Loading overview…
+      </div>
+    )
+  }
 
-  const kpi     = data?.kpi || {}
-  const trend   = data?.daily_trend || []
-  const negPie  = data?.neg_pie || []
-  const posPie  = data?.pos_pie || []
-  const negPct  = kpi.total ? +((kpi.negative/kpi.total)*100).toFixed(1) : 0
-  const posPct  = kpi.total ? +((kpi.positive/kpi.total)*100).toFixed(1) : 0
+  const kpi = data?.kpi || {}
+  const trend = data?.daily_trend || []
+  const negPct = kpi.total ? +((kpi.negative / kpi.total) * 100).toFixed(1) : 0
+  const posPct = kpi.total ? +((kpi.positive / kpi.total) * 100).toFixed(1) : 0
   const momentum = cxoData?.category_momentum || []
-  const ratingDistribution = cxoData?.rating_distribution || []
-  const displayedRatingDistribution = ratingDistProd
-    ? ratingDistribution.filter(row => row.product === ratingDistProd)
-    : ratingDistribution
-
-  const displayedNegPie = localIssueData?.neg_pie ?? negPie
-  const displayedPosPie = localIssueData?.pos_pie ?? posPie
-
   const activeTrend = localTrendData ?? trend
+  const displayedCategoryBreakdown = (localIssueData?.category_breakdown ?? data?.category_breakdown ?? []).slice(0, 8)
 
-  // For rolling neg rate on trend
-  const trendWithRolling = activeTrend.map((pt, i, arr) => {
-    const window = arr.slice(Math.max(0,i-6), i+1)
-    const total = window.reduce((s,w)=>s+(w.Positive+w.Negative+w.Neutral),0)
-    const neg   = window.reduce((s,w)=>s+w.Negative,0)
-    return { ...pt, rolling_neg: total ? +(neg/total*100).toFixed(1) : 0, neg_rate: pt.Negative ? +(pt.Negative/(pt.Positive+pt.Negative+pt.Neutral)*100).toFixed(1) : 0 }
+  const trendWithRolling = activeTrend.map((point, index, rows) => {
+    const window = rows.slice(Math.max(0, index - 6), index + 1)
+    const total = window.reduce((sum, row) => sum + (row.Positive + row.Negative + row.Neutral), 0)
+    const negative = window.reduce((sum, row) => sum + row.Negative, 0)
+    return {
+      ...point,
+      rolling_neg: total ? +(negative / total * 100).toFixed(1) : 0,
+      neg_rate: point.Negative ? +(point.Negative / (point.Positive + point.Negative + point.Neutral) * 100).toFixed(1) : 0,
+    }
   })
 
-  // Autoscale Y for rate chart — compute outside JSX so no IIFE needed
-  const rateVals = trendWithRolling.map(d => d.rolling_neg).filter(v => v > 0)
-  const rateMin  = rateVals.length ? Math.max(0, Math.floor(Math.min(...rateVals) / 5) * 5 - 5) : 0
-  const rateMax  = rateVals.length ? Math.min(100, Math.ceil(Math.max(...rateVals) / 5) * 5 + 10) : 100
-
-  const SC = { Positive:'#22c55e', Negative:'#ef4444', Neutral:'#eab308' }
+  const rateVals = trendWithRolling.map(point => point.rolling_neg).filter(value => value > 0)
+  const rateMin = rateVals.length ? Math.max(0, Math.floor(Math.min(...rateVals) / 5) * 5 - 5) : 0
+  const rateMax = rateVals.length ? Math.min(100, Math.ceil(Math.max(...rateVals) / 5) * 5 + 10) : 100
+  const sentimentColors = { Positive: '#22c55e', Negative: '#ef4444', Neutral: '#eab308' }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
-
-      {/* KPI tiles */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
-        <KpiTile label="Feedback Volume" value={kpi.total?.toLocaleString()} color="#60a5fa"
-          sub={`${allProducts?.length||0} product${allProducts?.length!==1?'s':''} · selected period`}
-          tip="Total scraped reviews in the selected date range." />
-        <KpiTile label="1–2 Stars" value={`${negPct}%`}
-          color={negPct>50?'#ef4444':negPct>30?'#f97316':'#22c55e'}
-          sub={<span><strong style={{color:'#ef4444'}}>{kpi.negative?.toLocaleString()}</strong> reviews</span>}
-          tip="Share of reviews rated 1 or 2 stars." />
-        <KpiTile label="4–5 Stars" value={`${posPct}%`}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+        <KpiTile
+          label="Feedback Volume"
+          value={kpi.total?.toLocaleString()}
+          color="#60a5fa"
+          sub={`${allProducts?.length || 0} product${allProducts?.length !== 1 ? 's' : ''} · selected period`}
+          tip="Total scraped reviews in the selected date range."
+        />
+        <KpiTile
+          label="1–2 Stars"
+          value={`${negPct}%`}
+          color={negPct > 50 ? '#ef4444' : negPct > 30 ? '#f97316' : '#22c55e'}
+          sub={<span><strong style={{ color: '#ef4444' }}>{kpi.negative?.toLocaleString()}</strong> reviews</span>}
+          tip="Share of reviews rated 1 or 2 stars."
+        />
+        <KpiTile
+          label="4–5 Stars"
+          value={`${posPct}%`}
           color="#22c55e"
-          sub={<span><strong style={{color:'#22c55e'}}>{kpi.positive?.toLocaleString()}</strong> reviews</span>}
-          tip="Share of reviews rated 4 or 5 stars." />
-        <KpiTile label="3 Stars" value={`${kpi.total?((kpi.neutral/kpi.total)*100).toFixed(1):0}%`}
+          sub={<span><strong style={{ color: '#22c55e' }}>{kpi.positive?.toLocaleString()}</strong> reviews</span>}
+          tip="Share of reviews rated 4 or 5 stars."
+        />
+        <KpiTile
+          label="3 Stars"
+          value={`${kpi.total ? ((kpi.neutral / kpi.total) * 100).toFixed(1) : 0}%`}
           color="#eab308"
-          sub={<span><strong style={{color:'#eab308'}}>{kpi.neutral?.toLocaleString()}</strong> reviews</span>}
-          tip="Share of reviews rated 3 stars." />
+          sub={<span><strong style={{ color: '#eab308' }}>{kpi.neutral?.toLocaleString()}</strong> reviews</span>}
+          tip="Share of reviews rated 3 stars."
+        />
       </div>
 
       <Card
         title="Amazon Rating Signal"
         tip="Amazon product-page rating snapshots over time, alongside scraped daily review averages."
       >
-        <RatingTrendChart filters={filters} allProducts={allProducts} tree={tree} />
+        <RatingTrendChart filters={filters} tree={tree} />
       </Card>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-        <Card
-          title="Top Issues"
-          tip="Issue categories with the most negative reviews, ranked by volume. Click a row to see sub-tags, then click a word to read reviews."
-          controls={
-            <select value={effectiveIssueFilter || ''} onChange={e => { setIssueFilter(e.target.value || null); setDrawerCat(null) }} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
-              <option value="">All Products</option>
-              {scopedProducts.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-          }
-        >
-          <BurningIssues negPie={displayedNegPie} activeCat={drawerCat} onRowClick={cat => setDrawerCat(drawerCat === cat ? null : cat)} filters={filters} />
-        </Card>
+      <Card
+        title="Category Review Mix"
+        sub="Horizontal length shows total reviews. Each bar is split into negative, neutral, and positive review volume."
+        tip="Click any colored section to open the matching review drill-down for that category and sentiment."
+        controls={
+          <select value={effectiveIssueFilter || ''} onChange={event => { setIssueFilter(event.target.value || null); setCategoryDrawer(null) }} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface2)', color: effectiveIssueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize: 11, fontFamily: 'DM Sans', cursor: 'pointer', outline: 'none' }}>
+            <option value="">All Products</option>
+            {scopedProducts.map(product => <option key={product} value={product}>{product}</option>)}
+          </select>
+        }
+      >
+        <CategoryReviewMix
+          rows={displayedCategoryBreakdown}
+          onSelect={(category, sentiment) => setCategoryDrawer(current =>
+            current?.category === category && current?.sentiment === sentiment ? null : { category, sentiment },
+          )}
+        />
+        <ReviewsDrawer
+          category={categoryDrawer?.category}
+          label={categoryDrawer?.category}
+          sentiment={categoryDrawer?.sentiment}
+          filters={filters}
+          onClose={() => setCategoryDrawer(null)}
+        />
+      </Card>
 
-        <Card
-          title="Top Positive Signals"
-          tip="Categories with the most positive reviews. Click a row to see sub-tags, then click a word to read reviews."
-          controls={
-            <select value={effectiveIssueFilter || ''} onChange={e => { setIssueFilter(e.target.value || null); setDrawerCatPos(null) }} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
-              <option value="">All Products</option>
-              {scopedProducts.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-          }
-        >
-          <BurningIssues negPie={displayedPosPie.map(p=>({...p}))} activeCat={drawerCatPos} onRowClick={cat => setDrawerCatPos(drawerCatPos === cat ? null : cat)} filters={filters} />
-        </Card>
-      </div>
-
-      {/* Customer Signal Over Time */}
       <Card
         title="Customer Signal Over Time"
         tip="Neg Rate shows the 7-day rolling problem rate. Sentiment shows daily positive / negative / neutral breakdown."
         controls={
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <select value={effectiveSignalProd || ''} onChange={e => setSignalProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveSignalProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <select value={effectiveSignalProd || ''} onChange={event => setSignalProd(event.target.value || null)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface2)', color: effectiveSignalProd ? 'var(--accent)' : 'var(--text-muted)', fontSize: 11, fontFamily: 'DM Sans', cursor: 'pointer', outline: 'none' }}>
               <option value="">All Products</option>
-              {scopedProducts.map(p => <option key={p} value={p}>{p}</option>)}
+              {scopedProducts.map(product => <option key={product} value={product}>{product}</option>)}
             </select>
-            <Toggle value={trendMode} onChange={setTrendMode} options={[{v:'rate',l:'Neg Rate %'},{v:'sentiment',l:'Sentiment'}]} />
+            <Toggle value={trendMode} onChange={setTrendMode} options={[{ v: 'rate', l: 'Neg Rate %' }, { v: 'sentiment', l: 'Sentiment' }]} />
           </div>
         }
       >
         {activeTrend.length === 0 ? (
-          <div style={{ padding:'24px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
-            No trend data — review dates may not be parsed correctly yet.
-          </div>
+          <EmptyState text="No trend data — review dates may not be parsed correctly yet." />
         ) : trendMode === 'rate' ? (
           <ResponsiveContainer width="100%" height={200}>
-            <ComposedChart data={trendWithRolling} margin={{ top:8, right:40, bottom:0, left:-10 }}>
+            <ComposedChart data={trendWithRolling} margin={{ top: 8, right: 40, bottom: 0, left: -10 }}>
               <defs>
                 <linearGradient id="negGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
@@ -637,88 +413,54 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
-              <YAxis domain={[rateMin, rateMax]} tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`} width={36} />
+              <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+              <YAxis domain={[rateMin, rateMax]} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={value => `${value}%`} width={36} />
               <Tooltip content={<RateTip />} />
-              {rateMax >= 30 && <ReferenceLine y={30} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value:'30%', fill:'#eab308', fontSize:10, position:'insideRight' }} />}
-              {rateMax >= 50 && <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value:'50%', fill:'#ef4444', fontSize:10, position:'insideRight' }} />}
-              <Bar dataKey="neg_rate" fill="#ef4444" opacity={0.12} name="Daily Neg %" radius={[2,2,0,0]} barSize={6} />
-              <Area type="monotone" dataKey="rolling_neg" stroke="#ff4e1a" strokeWidth={2.5} fill="url(#negGrad)" dot={false} activeDot={{ r:5, fill:'#ff4e1a', stroke:'#fff', strokeWidth:2 }} name="7d Rolling" />
+              {rateMax >= 30 && <ReferenceLine y={30} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value: '30%', fill: '#eab308', fontSize: 10, position: 'insideRight' }} />}
+              {rateMax >= 50 && <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value: '50%', fill: '#ef4444', fontSize: 10, position: 'insideRight' }} />}
+              <Bar dataKey="neg_rate" fill="#ef4444" opacity={0.12} name="Daily Neg %" radius={[2, 2, 0, 0]} barSize={6} />
+              <Area type="monotone" dataKey="rolling_neg" stroke="#ff4e1a" strokeWidth={2.5} fill="url(#negGrad)" dot={false} activeDot={{ r: 5, fill: '#ff4e1a', stroke: '#fff', strokeWidth: 2 }} name="7d Rolling" />
             </ComposedChart>
           </ResponsiveContainer>
         ) : (
           <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={activeTrend} margin={{ top:8, right:8, bottom:0, left:-10 }}>
+            <AreaChart data={activeTrend} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
               <defs>
-                {Object.entries(SC).map(([s,c]) => (
-                  <linearGradient key={s} id={`ov-${s}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor={c} stopOpacity={0.35} />
-                    <stop offset="95%" stopColor={c} stopOpacity={0} />
+                {Object.entries(sentimentColors).map(([sentiment, color]) => (
+                  <linearGradient key={sentiment} id={`ov-${sentiment}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={color} stopOpacity={0.35} />
+                    <stop offset="95%" stopColor={color} stopOpacity={0} />
                   </linearGradient>
                 ))}
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="day" tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
-              <YAxis tick={{ fill:'var(--text-muted)', fontSize:10 }} tickLine={false} axisLine={false} width={36} />
+              <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
               <Tooltip content={<VolumeTip />} />
-              {['Negative','Positive','Neutral'].map(s => (
-                <Area key={s} type="monotone" dataKey={s} stroke={SC[s]} strokeWidth={2}
-                  fill={`url(#ov-${s})`} dot={false} activeDot={{ r:4, stroke:'#fff', strokeWidth:1.5 }} />
+              {['Negative', 'Positive', 'Neutral'].map(sentiment => (
+                <Area
+                  key={sentiment}
+                  type="monotone"
+                  dataKey={sentiment}
+                  stroke={sentimentColors[sentiment]}
+                  strokeWidth={2}
+                  fill={`url(#ov-${sentiment})`}
+                  dot={false}
+                  activeDot={{ r: 4, stroke: '#fff', strokeWidth: 1.5 }}
+                />
               ))}
             </AreaChart>
           </ResponsiveContainer>
         )}
       </Card>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-        <Card
-          title="Emerging Issues"
-          tip="Issues that were absent or small in the first half of the selected period and are now growing."
-        >
-          <EmergingIssues momentum={momentum} onSelect={category => setEmergingCat(emergingCat === category ? null : category)} />
-          <ReviewsDrawer category={emergingCat} label={emergingCat} filters={filters} onClose={() => setEmergingCat(null)} />
-        </Card>
-
-        <Card
-          title="Rating Distribution by Product"
-          tip="Horizontal 1-star to 5-star split for each product. A healthy shape is top-heavy at 4-5 stars; a bimodal shape points to inconsistent experience."
-          controls={scopedProducts.length > 1 ? (
-            <select value={ratingDistProd || ''} onChange={event => setRatingDistProd(event.target.value || undefined)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: ratingDistProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
-              <option value="">All Products</option>
-              {scopedProducts.map(product => <option key={product} value={product}>{product}</option>)}
-            </select>
-          ) : null}
-        >
-          {!displayedRatingDistribution.length ? <EmptyState /> : (
-            <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
-              {displayedRatingDistribution.map(row => {
-                const total = [1, 2, 3, 4, 5].reduce((sum, star) => sum + (row[String(star)] || 0), 0)
-                return (
-                  <div key={row.product} style={{ display:'flex', flexDirection:'column', gap:5 }}>
-                    <div style={{ fontSize:12, fontWeight:700 }}>{row.product}</div>
-                    {[5, 4, 3, 2, 1].map(star => {
-                      const count = row[String(star)] || 0
-                      const percent = total > 0 ? (count / total * 100).toFixed(1) : 0
-                      const color = star >= 4 ? '#22c55e' : star === 3 ? '#eab308' : '#ef4444'
-                      return (
-                        <div key={star} style={{ display:'flex', alignItems:'center', gap:8 }}>
-                          <div style={{ width:20, fontSize:11, color:'var(--text-muted)', textAlign:'right' }}>{star}★</div>
-                          <div style={{ flex:1, height:8, background:'var(--border)', borderRadius:4, overflow:'hidden' }}>
-                            <div style={{ height:'100%', width:`${percent}%`, background:color, borderRadius:4 }} />
-                          </div>
-                          <div style={{ width:42, fontSize:11, color, fontWeight:700, textAlign:'right' }}>{percent}%</div>
-                          <div style={{ width:24, fontSize:10, color:'var(--text-muted)', textAlign:'right' }}>{count}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </Card>
-      </div>
-
+      <Card
+        title="Emerging Issues"
+        tip="Issues that were absent or small in the first half of the selected period and are now growing."
+      >
+        <EmergingIssues momentum={momentum} onSelect={category => setEmergingCat(emergingCat === category ? null : category)} />
+        <ReviewsDrawer category={emergingCat} label={emergingCat} filters={filters} onClose={() => setEmergingCat(null)} />
+      </Card>
     </div>
   )
 }
