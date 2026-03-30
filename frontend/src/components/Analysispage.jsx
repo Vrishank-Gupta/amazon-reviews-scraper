@@ -285,8 +285,8 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
   useEffect(() => {
     if (!effectiveSignalProd) { setLocalTrendData(null); return }
-    fetchAnalysis({ product: [effectiveSignalProd], date_from: apiParams.date_from, date_to: apiParams.date_to })
-      .then(payload => setLocalTrendData(payload?.daily_trend ?? null))
+    fetchCxoTrends({ product: [effectiveSignalProd], date_from: apiParams.date_from, date_to: apiParams.date_to })
+      .then(payload => setLocalTrendData(payload || null))
       .catch(() => setLocalTrendData(null))
   }, [effectiveSignalProd, apiParams.date_from, apiParams.date_to])
 
@@ -300,10 +300,12 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
   const kpi = data?.kpi || {}
   const trend = data?.daily_trend || []
+  const dailyRating = cxoData?.daily_rating || []
   const negPct = kpi.total ? +((kpi.negative / kpi.total) * 100).toFixed(1) : 0
   const posPct = kpi.total ? +((kpi.positive / kpi.total) * 100).toFixed(1) : 0
   const momentum = cxoData?.category_momentum || []
-  const activeTrend = localTrendData ?? trend
+  const activeTrend = localTrendData?.daily_trend ?? trend
+  const activeDailyRating = localTrendData?.daily_rating ?? dailyRating
   const displayedCategoryBreakdown = (localIssueData?.category_breakdown ?? data?.category_breakdown ?? []).slice(0, 8)
 
   const trendWithRolling = activeTrend.map((point, index, rows) => {
@@ -390,14 +392,14 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
       <Card
         title="Customer Signal Over Time"
-        tip="Neg Rate shows the 7-day rolling problem rate. Sentiment shows daily positive / negative / neutral breakdown."
+        tip="Neg Rate shows the 7-day rolling problem rate. Sentiment shows daily positive / negative / neutral breakdown. Reviews shows the daily stacked split from 1-star to 5-star."
         controls={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <select value={effectiveSignalProd || ''} onChange={event => setSignalProd(event.target.value || null)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface2)', color: effectiveSignalProd ? 'var(--accent)' : 'var(--text-muted)', fontSize: 11, fontFamily: 'DM Sans', cursor: 'pointer', outline: 'none' }}>
               <option value="">All Products</option>
               {scopedProducts.map(product => <option key={product} value={product}>{product}</option>)}
             </select>
-            <Toggle value={trendMode} onChange={setTrendMode} options={[{ v: 'rate', l: 'Neg Rate %' }, { v: 'sentiment', l: 'Sentiment' }]} />
+            <Toggle value={trendMode} onChange={setTrendMode} options={[{ v: 'rate', l: 'Neg Rate %' }, { v: 'sentiment', l: 'Sentiment' }, { v: 'reviews', l: 'Reviews' }]} />
           </div>
         }
       >
@@ -422,7 +424,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
               <Area type="monotone" dataKey="rolling_neg" stroke="#ff4e1a" strokeWidth={2.5} fill="url(#negGrad)" dot={false} activeDot={{ r: 5, fill: '#ff4e1a', stroke: '#fff', strokeWidth: 2 }} name="7d Rolling" />
             </ComposedChart>
           </ResponsiveContainer>
-        ) : (
+        ) : trendMode === 'sentiment' ? (
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={activeTrend} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
               <defs>
@@ -451,6 +453,64 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
               ))}
             </AreaChart>
           </ResponsiveContainer>
+        ) : !activeDailyRating.length ? (
+          <EmptyState text="No daily review volume available for the selected filters." />
+        ) : (
+          <>
+            <ResponsiveContainer width="100%" height={220}>
+              <ComposedChart data={activeDailyRating} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+                <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
+                <Tooltip content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null
+                  const point = payload[0]?.payload || {}
+                  return (
+                    <div style={{ background: '#16161f', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', fontSize: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+                      <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtDay(label)}</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Total reviews</span>
+                          <span style={{ fontWeight: 700 }}>{point.total || 0}</span>
+                        </div>
+                        {[
+                          ['5★', point.star_5, '#22c55e'],
+                          ['4★', point.star_4, '#84cc16'],
+                          ['3★', point.star_3, '#eab308'],
+                          ['2★', point.star_2, '#f97316'],
+                          ['1★', point.star_1, '#ef4444'],
+                        ].map(([labelText, value, color]) => (
+                          <div key={labelText} style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+                            <span style={{ color }}>{labelText}</span>
+                            <span style={{ fontWeight: 700 }}>{value || 0}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                }} />
+                <Bar dataKey="star_1" stackId="stars" fill="#ef4444" name="1★" />
+                <Bar dataKey="star_2" stackId="stars" fill="#f97316" name="2★" />
+                <Bar dataKey="star_3" stackId="stars" fill="#eab308" name="3★" />
+                <Bar dataKey="star_4" stackId="stars" fill="#84cc16" name="4★" />
+                <Bar dataKey="star_5" stackId="stars" fill="#22c55e" name="5★" />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
+              {[
+                ['1★', '#ef4444'],
+                ['2★', '#f97316'],
+                ['3★', '#eab308'],
+                ['4★', '#84cc16'],
+                ['5★', '#22c55e'],
+              ].map(([labelText, color]) => (
+                <span key={labelText} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
+                  {labelText}
+                </span>
+              ))}
+            </div>
+          </>
         )}
       </Card>
 

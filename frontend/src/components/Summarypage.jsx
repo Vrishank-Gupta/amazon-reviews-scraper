@@ -27,48 +27,42 @@ function HealthPill({ negPct }) {
   )
 }
 
-function VerticalHighlights({ rows }) {
-  const highestRisk = [...rows].sort((left, right) => right.neg_pct - left.neg_pct)[0]
-  const highestVolume = [...rows].sort((left, right) => right.review_count - left.review_count)[0]
-  const bestRated = [...rows].sort((left, right) => right.avg_rating - left.avg_rating)[0]
-  const largestShift = [...rows].sort((left, right) => Math.abs(right.delta_neg_pct || 0) - Math.abs(left.delta_neg_pct || 0))[0]
-
-  const cards = [
-    {
-      label: 'Highest Risk',
-      value: highestRisk?.review_count?.toLocaleString() || '—',
-      sub: highestRisk ? `${highestRisk.product_name} · ${highestRisk.neg_pct}% negative` : 'No data',
-      color: '#ef4444',
-    },
-    {
-      label: 'Highest Volume',
-      value: highestVolume?.review_count?.toLocaleString() || '—',
-      sub: highestVolume ? `${highestVolume.product_name} · biggest review base` : 'No data',
-      color: '#60a5fa',
-    },
-    {
-      label: 'Best Rating',
-      value: bestRated ? bestRated.avg_rating.toFixed(1) : '—',
-      sub: bestRated ? `${bestRated.product_name} · ${bestRated.review_count} reviews` : 'No data',
-      color: '#22c55e',
-    },
-    {
-      label: 'Largest Shift',
-      value: largestShift ? `${largestShift.delta_neg_pct > 0 ? '+' : ''}${largestShift.delta_neg_pct}%` : '—',
-      sub: largestShift ? `${largestShift.product_name} · change vs prior period` : 'No data',
-      color: '#f97316',
-    },
-  ]
-
+function ProductCards({ rows, selectedAsin, onSelect }) {
+  const sortedRows = [...rows].sort((left, right) => right.review_count - left.review_count)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {cards.map(card => (
-        <div key={card.label} style={{ background: 'var(--surface)', border: `1px solid ${card.color}25`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 5, borderLeft: `3px solid ${card.color}` }}>
-          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{card.label}</div>
-          <div style={{ fontFamily: 'Bebas Neue', fontSize: 30, lineHeight: 1, color: card.color }}>{card.value}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>{card.sub}</div>
-        </div>
-      ))}
+      {sortedRows.map(row => {
+        const isSelected = selectedAsin === row.asin
+        const negColor = row.neg_pct > 50 ? '#ef4444' : row.neg_pct > 30 ? '#f97316' : '#22c55e'
+        return (
+          <button
+            key={row.asin}
+            onClick={() => onSelect(row)}
+            style={{
+              background: isSelected ? 'rgba(255,78,26,0.08)' : 'var(--surface)',
+              border: `1px solid ${isSelected ? 'rgba(255,78,26,0.28)' : 'var(--border)'}`,
+              borderRadius: 12,
+              padding: '14px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              textAlign: 'left',
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.35 }}>{row.product_name}</div>
+              <HealthPill negPct={row.neg_pct} />
+            </div>
+            <div style={{ fontFamily: 'Bebas Neue', fontSize: 30, lineHeight: 1, color: 'var(--accent)' }}>{row.review_count?.toLocaleString()}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>reviews in selected period</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 11 }}>
+              <span style={{ color: negColor, fontWeight: 700 }}>{row.neg_pct}% negative</span>
+              <span style={{ color: 'var(--text-muted)' }}>{row.avg_rating?.toFixed(1)} avg rating</span>
+            </div>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -273,7 +267,7 @@ export default function SummaryPage({ filters, allProducts }) {
       tip="This view is optimized for fast product comparison. Health score is still used, but it now lives behind the Good / Watch / Act Now pill beside each product name."
     >
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
-        <VerticalHighlights rows={rows} />
+        <ProductCards rows={rows} selectedAsin={drillRow?.asin} onSelect={row => setDrillRow(current => current?.asin === row.asin ? null : row)} />
 
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>

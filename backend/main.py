@@ -1162,8 +1162,11 @@ def get_cxo_trends(
                 SELECT DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day,
                     ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 3) as avg_rating,
                     COUNT(*) as total,
-                    SUM(CASE WHEN CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1)) < 1.5 THEN 1 ELSE 0 END) as one_star,
-                    SUM(CASE WHEN CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1)) >= 4.5 THEN 1 ELSE 0 END) as five_star
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 1 THEN 1 ELSE 0 END) as star_1,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 2 THEN 1 ELSE 0 END) as star_2,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 3 THEN 1 ELSE 0 END) as star_3,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 4 THEN 1 ELSE 0 END) as star_4,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 5 THEN 1 ELSE 0 END) as star_5
                 FROM raw_reviews r
                 WHERE 1=1 {pf_sql} {date_filter}
                   AND {_rd} IS NOT NULL
@@ -1307,8 +1310,11 @@ def get_cxo_trends(
                 "day": d,
                 "avg_rating": float(r.get("avg_rating") or 0),
                 "total": int(r.get("total") or 0),
-                "one_star": int(r.get("one_star") or 0),
-                "five_star": int(r.get("five_star") or 0),
+                "star_1": int(r.get("star_1") or 0),
+                "star_2": int(r.get("star_2") or 0),
+                "star_3": int(r.get("star_3") or 0),
+                "star_4": int(r.get("star_4") or 0),
+                "star_5": int(r.get("star_5") or 0),
             })
         for i, pt in enumerate(daily_rating):
             window = daily_rating[max(0, i-6):i+1]
