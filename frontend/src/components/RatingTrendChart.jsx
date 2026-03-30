@@ -83,9 +83,9 @@ function ratingColor(overall) {
 }
 
 function renderStars(overall) {
-  if (overall == null) return '—'
+  if (overall == null) return '-'
   const stars = Math.round(Number(overall))
-  return `${'*'.repeat(stars)}${'-'.repeat(Math.max(0, 5 - stars))}`
+  return `${'\u2605'.repeat(stars)}${'\u2606'.repeat(Math.max(0, 5 - stars))}`
 }
 
 function SeriesLegend({ products, colorMap }) {
