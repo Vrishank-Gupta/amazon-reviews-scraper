@@ -254,9 +254,9 @@ export default function SummaryPage({ filters, allProducts }) {
 
   return (
     <Card
-      title="Product Lens"
-      sub="Vertical highlights on the left, grouped product ratings on the right."
-      tip="This view is optimized for fast product comparison. Health score is still used, but it now lives behind the Good / Watch / Act Now pill beside each product name."
+      title="Compare Products"
+      sub="The top review cards stay on the left in a vertical stack, and the product comparison table stays on the right."
+      tip="This is the same compare-products widget, cleaned up the way you asked: no ASIN column, health moved into the pill beside product name, and category grouping to make scanning easier."
     >
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
         <OverviewCards kpi={analysisData?.kpi || {}} rowCount={rows.length} />
@@ -265,8 +265,8 @@ export default function SummaryPage({ filters, allProducts }) {
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <span style={{ fontFamily: 'Bebas Neue', fontSize: 17, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Overall Ratings Table</span>
-                <InfoTip text="Grouped by category so the portfolio is easier to scan. Click a product row to open its drill-down." />
+                <span style={{ fontFamily: 'Bebas Neue', fontSize: 17, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Product Comparison Table</span>
+                <InfoTip text="This is the original comparison table, kept in place and grouped by category. Click a product row to open its drill-down." />
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                 Sorted by the selected column and split by category sections.

@@ -347,8 +347,8 @@ export default function App() {
           </div>
         ) : activeTab === 'analysis' ? (
           <>
-            <AnalysisPage filters={filters} allProducts={options.products} tree={options.tree} />
             <SummaryPage filters={filters} allProducts={options.products} />
+            <AnalysisPage filters={filters} allProducts={options.products} tree={options.tree} />
           </>
         ) : activeTab === 'reviews' ? (
           <div className="glass-panel" style={{ borderRadius: 14, padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
