@@ -1840,8 +1840,8 @@ def get_summary(
                 curr_count = row["review_count"] or 0
                 curr_neg = row["neg_count"] or 0
                 curr_rating = float(row["avg_rating"] or 0)
-                curr_neg_pct = round((curr_neg / curr_count * 100), 1) if curr_count else 0
-                prev_neg_pct = round((prev_neg / prev_count * 100), 1) if prev_count else 0
+                curr_neg_pct = float(round((curr_neg / curr_count * 100), 1)) if curr_count else 0.0
+                prev_neg_pct = float(round((prev_neg / prev_count * 100), 1)) if prev_count else 0.0
                 ai = ai_rows.get(asin, {})
                 result.append({
                     "asin": asin,
