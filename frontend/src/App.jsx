@@ -7,6 +7,7 @@ import TrendsPage from './components/TrendsPage'
 import AnalysisPage from './components/Analysispage'
 import SummaryPage from './components/Summarypage'
 import { RefreshCw, Download, ChevronDown } from 'lucide-react'
+import { SHOW_TRENDS_TAB } from './config/dashboard'
 
 const DEFAULT_FILTERS = {
   product_category: null,
@@ -33,11 +34,11 @@ const TAB_META = {
     subtitle: 'Trace problem-rate movement, issue acceleration, and rating shifts over time.',
   },
   reviews: {
-    label: 'Reviews',
-    emoji: 'Reviews',
+    label: 'All Reviews',
+    emoji: 'All Reviews',
     eyebrow: 'Evidence Layer',
-    title: 'Review Evidence',
-    subtitle: 'Validate every signal with the underlying customer language, tags, ratings, and exports.',
+    title: 'All Reviews',
+    subtitle: 'Validate every signal with the underlying customer language, tags, filters, and exports.',
   },
 }
 
@@ -117,11 +118,19 @@ export default function App() {
     loadReviews(filters)
   }, [filters, loadReviews])
 
+  useEffect(() => {
+    if (!SHOW_TRENDS_TAB && tab === 'trends') {
+      setTab('analysis')
+    }
+  }, [tab])
+
   const handleFilterChange = updates => {
     setFilters(f => ({ ...f, ...updates }))
   }
 
-  const currentTab = TAB_META[tab]
+  const visibleTabs = ['analysis', 'reviews', ...(SHOW_TRENDS_TAB ? ['trends'] : [])]
+  const activeTab = visibleTabs.includes(tab) ? tab : 'analysis'
+  const currentTab = TAB_META[activeTab]
   const latestScrapeProducts = scrapeStatus?.last_scrape
     ? (scrapeStatus.asin_breakdown || [])
         .filter(item => item.last_scrape && item.last_scrape.slice(0, 10) === scrapeStatus.last_scrape.slice(0, 10))
@@ -305,11 +314,11 @@ export default function App() {
         }}
       >
         <div style={{ display: 'flex', gap: 8 }}>
-          <TabBtn active={tab === 'analysis'} onClick={() => setTab('analysis')} emoji={TAB_META.analysis.emoji} />
-          <TabBtn active={tab === 'reviews'} onClick={() => setTab('reviews')} emoji={TAB_META.reviews.emoji} />
-          <TabBtn active={tab === 'trends'} onClick={() => setTab('trends')} emoji={TAB_META.trends.emoji} />
+          {visibleTabs.map(tabKey => (
+            <TabBtn key={tabKey} active={activeTab === tabKey} onClick={() => setTab(tabKey)} emoji={TAB_META[tabKey].emoji} />
+          ))}
         </div>
-        <FilterBar filters={filters} options={options} onChange={handleFilterChange} tab={tab} />
+        <FilterBar filters={filters} options={options} onChange={handleFilterChange} tab={activeTab} />
         <div style={{ height: 2, margin: '4px -28px 0', overflow: 'hidden' }}>
           {refreshing && (
             <div
@@ -336,20 +345,20 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 12, color: 'var(--text-muted)', height: 200 }}>
             <span style={{ fontSize: 24 }}>⟳</span><span>Loading…</span>
           </div>
-        ) : tab === 'analysis' ? (
+        ) : activeTab === 'analysis' ? (
           <>
             <AnalysisPage filters={filters} allProducts={options.products} tree={options.tree} />
             <SummaryPage filters={filters} allProducts={options.products} />
           </>
-        ) : tab === 'reviews' ? (
+        ) : activeTab === 'reviews' ? (
           <div className="glass-panel" style={{ borderRadius: 14, padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <h3 style={{ margin: 0, fontFamily: 'Bebas Neue', fontSize: 18, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
-                  Evidence Explorer <span style={{ color: 'var(--accent)' }}>({reviews.length})</span>
+                  All Reviews <span style={{ color: 'var(--accent)' }}>({reviews.length})</span>
                 </h3>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  Tagged customer reviews, ready for proof, export, and analyst handoff.
+                  Tagged customer reviews with search, grouping, and CSV export.
                 </div>
               </div>
               <button

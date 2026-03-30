@@ -134,7 +134,7 @@ function DateDropdown({ filters, onChange }) {
   )
 }
 
-function Check({ sel }) {
+function Check({ sel, partial = false }) {
   return (
     <span style={{
       width:14, height:14, borderRadius:3, flexShrink:0,
@@ -142,7 +142,7 @@ function Check({ sel }) {
       background: sel?'var(--accent)':'transparent',
       display:'inline-flex', alignItems:'center', justifyContent:'center',
       fontSize:9, color:'#fff',
-    }}>{sel?'✓':''}</span>
+    }}>{sel ? (partial ? '-' : '✓') : ''}</span>
   )
 }
 
@@ -155,6 +155,7 @@ function ProductDropdown({ filters, options, onChange }) {
   const [query, setQuery] = useState('')
 
   const normalizedQuery = query.trim().toLowerCase()
+  const normalizedAll = useMemo(() => [...new Set(all)], [all])
   const filteredCategories = useMemo(() => {
     if (!normalizedQuery) return categories
     return categories.filter(cat => {
@@ -172,34 +173,66 @@ function ProductDropdown({ filters, options, onChange }) {
     return uncategorisedProducts.filter(prod => prod.toLowerCase().includes(normalizedQuery))
   }, [normalizedQuery, uncategorisedProducts])
 
-  const isProdSelected = (prod) => {
-    if (!activeCat && activeProds.length === 0) return true
-    if (activeCat) return (tree[activeCat] || []).includes(prod)
-    return activeProds.includes(prod)
-  }
-  const isCatSelected = (cat) =>
-    activeCat === cat || (!activeCat && activeProds.length === 0)
+  const selectedProducts = useMemo(() => {
+    if (activeCat) return tree[activeCat] || []
+    if (activeProds.length > 0) return activeProds
+    return normalizedAll
+  }, [activeCat, activeProds, normalizedAll, tree])
 
-  const selectCategory = (cat, close) => {
-    onChange({ product_category: cat, product: [] })
-    close()
+  const commitSelectedProducts = nextProducts => {
+    const uniqueProducts = normalizedAll.filter(prod => nextProducts.includes(prod))
+
+    if (uniqueProducts.length === 0 || uniqueProducts.length === normalizedAll.length) {
+      onChange({ product_category: null, product: [] })
+      return
+    }
+
+    const matchingCategory = categories.find(cat => {
+      const catProducts = tree[cat] || []
+      return catProducts.length > 0
+        && catProducts.length === uniqueProducts.length
+        && catProducts.every(prod => uniqueProducts.includes(prod))
+    })
+
+    if (matchingCategory) {
+      onChange({ product_category: matchingCategory, product: [] })
+      return
+    }
+
+    onChange({ product_category: null, product: uniqueProducts })
   }
+
+  const isProdSelected = prod => selectedProducts.includes(prod)
+  const isCatSelected = cat => {
+    const catProducts = tree[cat] || []
+    return catProducts.length > 0 && catProducts.every(prod => selectedProducts.includes(prod))
+  }
+  const isCatPartial = cat => {
+    const catProducts = tree[cat] || []
+    const selectedCount = catProducts.filter(prod => selectedProducts.includes(prod)).length
+    return selectedCount > 0 && selectedCount < catProducts.length
+  }
+
+  const toggleCategory = cat => {
+    const catProducts = tree[cat] || []
+    if (!catProducts.length) return
+
+    const current = new Set(selectedProducts)
+    const fullySelected = catProducts.every(prod => current.has(prod))
+    if (fullySelected) catProducts.forEach(prod => current.delete(prod))
+    else catProducts.forEach(prod => current.add(prod))
+    commitSelectedProducts([...current])
+  }
+
   const selectAll = (close) => {
     onChange({ product_category: null, product: [] })
     close()
   }
   const toggleProduct = (prod) => {
-    if (activeProds.length === 0 && !activeCat) {
-      onChange({ product_category: null, product: [prod] })
-      return
-    }
-    let current = activeProds.length > 0
-      ? [...activeProds]
-      : [...(tree[activeCat] || [])]
-    if (current.includes(prod)) current = current.filter(p => p !== prod)
-    else current = [...current, prod]
-    if (current.length === all.length) onChange({ product_category: null, product: [] })
-    else onChange({ product_category: null, product: current })
+    const current = new Set(selectedProducts)
+    if (current.has(prod)) current.delete(prod)
+    else current.add(prod)
+    commitSelectedProducts([...current])
   }
 
   const chipLabel = (() => {
@@ -212,7 +245,7 @@ function ProductDropdown({ filters, options, onChange }) {
   const isFiltered = !!(activeCat || activeProds.length > 0)
 
   return (
-    <Dropdown trigger={() => <PillBtn label={chipLabel} active={isFiltered} icon={<Package size={12} />} />} minWidth={260}>
+    <Dropdown trigger={() => <PillBtn label={chipLabel} active={isFiltered} icon={<Package size={12} />} />} minWidth={324}>
       {(close) => (
         <div style={{ maxHeight:340, overflowY:'auto' }}>
           <div style={{ padding:10, borderBottom:'1px solid var(--border)', background:'#14141e', position:'sticky', top:0, zIndex:1 }}>
@@ -245,16 +278,16 @@ function ProductDropdown({ filters, options, onChange }) {
             const catSel = isCatSelected(cat)
             return (
               <div key={cat}>
-                <button onClick={() => selectCategory(cat, close)} style={{
+                <button onClick={() => toggleCategory(cat)} style={{
                   width:'100%', padding:'8px 14px', textAlign:'left',
-                  background: catSel?'rgba(255,78,26,0.06)':'transparent',
+                  background: catSel || isCatPartial(cat) ? 'rgba(255,78,26,0.06)' : 'transparent',
                   border:'none', borderBottom:'1px solid var(--border)',
-                  color: catSel?'var(--accent)':'var(--text)',
+                  color: catSel || isCatPartial(cat) ? 'var(--accent)' : 'var(--text)',
                   fontSize:11, fontWeight:700, cursor:'pointer',
                   display:'flex', alignItems:'center', gap:7,
                   letterSpacing:'0.04em', textTransform:'uppercase',
                 }}>
-                  <Check sel={catSel} />
+                  <Check sel={catSel || isCatPartial(cat)} partial={isCatPartial(cat)} />
                   📁 {cat}
                   <span style={{ marginLeft:'auto', fontSize:10, color:'var(--text-muted)', fontWeight:400 }}>{visibleProds.length}</span>
                 </button>

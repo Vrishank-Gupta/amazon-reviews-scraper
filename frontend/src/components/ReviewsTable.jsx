@@ -65,6 +65,21 @@ function Stars({ rating }) {
 
 function ReviewRow({ row, expanded, setExpanded }) {
   const isExpanded = expanded === row.review_id
+  const canExpand = (row.review || '').length > 140 || (row.review || '').includes('\n')
+  const reviewBody = (
+    <span
+      style={{
+        overflow: isExpanded ? 'visible' : 'hidden',
+        textOverflow: isExpanded ? 'unset' : 'ellipsis',
+        whiteSpace: isExpanded ? 'normal' : 'nowrap',
+        display: 'block',
+        lineHeight: 1.5,
+        flex: 1,
+      }}
+    >
+      {row.review}
+    </span>
+  )
 
   return (
     <tr
@@ -92,38 +107,33 @@ function ReviewRow({ row, expanded, setExpanded }) {
         </div>
       </td>
       <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', maxWidth: 420 }}>
-        <button
-          onClick={() => setExpanded(isExpanded ? null : row.review_id)}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text)',
-            fontSize: 12,
-            textAlign: 'left',
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 6,
-            padding: 0,
-            width: '100%',
-          }}
-        >
-          <span
+        {canExpand ? (
+          <button
+            onClick={() => setExpanded(isExpanded ? null : row.review_id)}
             style={{
-              overflow: isExpanded ? 'visible' : 'hidden',
-              textOverflow: isExpanded ? 'unset' : 'ellipsis',
-              whiteSpace: isExpanded ? 'normal' : 'nowrap',
-              display: 'block',
-              lineHeight: 1.5,
-              flex: 1,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--text)',
+              fontSize: 12,
+              textAlign: 'left',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 6,
+              padding: 0,
+              width: '100%',
             }}
           >
+            {reviewBody}
+            {isExpanded
+              ? <ChevronUp size={14} style={{ flexShrink: 0, marginTop: 2, color: 'var(--accent)' }} />
+              : <ChevronDown size={14} style={{ flexShrink: 0, marginTop: 2, color: 'var(--text-muted)' }} />}
+          </button>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5 }}>
             {row.review}
-          </span>
-          {isExpanded
-            ? <ChevronUp size={14} style={{ flexShrink: 0, marginTop: 2, color: 'var(--accent)' }} />
-            : <ChevronDown size={14} style={{ flexShrink: 0, marginTop: 2, color: 'var(--text-muted)' }} />}
-        </button>
+          </div>
+        )}
       </td>
       <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
         {row.review_url ? (
@@ -402,13 +412,12 @@ export default function ReviewsTable({ data }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 12 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
           {[
-            { label: 'Evidence Set', value: evidenceStats.total, color: 'var(--accent)' },
+            { label: 'Review Set', value: evidenceStats.total, color: 'var(--accent)' },
             { label: 'Negative', value: evidenceStats.negative, color: '#ef4444' },
             { label: 'Positive', value: evidenceStats.positive, color: '#22c55e' },
             { label: 'Neutral', value: evidenceStats.neutral, color: '#eab308' },
-            { label: 'Avg Stars', value: evidenceStats.avgStars, color: '#60a5fa' },
           ].map(item => (
             <div key={item.label} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${item.color}22`, borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{item.label}</div>
@@ -418,10 +427,10 @@ export default function ReviewsTable({ data }) {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
           <div>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Evidence Narrative</div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Review Narrative</div>
             <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.65 }}>
               {evidenceStats.total
-                ? <>This filtered set contains <strong>{evidenceStats.total}</strong> reviews with <strong style={{ color: '#ef4444' }}>{evidenceStats.negative}</strong> negative and <strong style={{ color: '#22c55e' }}>{evidenceStats.positive}</strong> positive signals. {topCategory ? <>The largest product category in view is <strong>{topCategory[0]}</strong>.</> : null}</>
+                ? <>This view contains <strong>{evidenceStats.total}</strong> reviews with <strong style={{ color: '#ef4444' }}>{evidenceStats.negative}</strong> negative and <strong style={{ color: '#22c55e' }}>{evidenceStats.positive}</strong> positive signals. {topCategory ? <>The largest category in view is <strong>{topCategory[0]}</strong>.</> : null}</>
                 : 'No reviews match the current filters yet.'}
             </div>
           </div>
@@ -442,7 +451,7 @@ export default function ReviewsTable({ data }) {
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          Reviews are grouped by category first, then by product, so you can drill down without losing the portfolio structure.
+          Reviews stay grouped by category first, then by product, so the context stays intact while you drill down.
         </div>
         <button
           onClick={() => toggleSort('category')}

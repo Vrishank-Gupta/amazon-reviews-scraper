@@ -536,11 +536,11 @@ export default function SummaryPage({ filters, allProducts }) {
         <div style={{ padding:'14px 16px', borderBottom:'1px solid var(--border)', background:'var(--surface2)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <div>
             <div style={{ display:'flex', alignItems:'center', gap:7 }}>
-              <span style={{ fontFamily:'Bebas Neue', fontSize:17, letterSpacing:'0.06em', color:'var(--text-muted)' }}>Compare Products</span>
+              <span style={{ fontFamily:'Bebas Neue', fontSize:17, letterSpacing:'0.06em', color:'var(--text-muted)' }}>Product Overview</span>
               <InfoTip text="Per-product metrics vs prior equivalent period. Click a row to expand: AI brief + category pies + keyword cloud + actual reviews. Sort by any column." />
             </div>
             <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>
-              Start with the comparison row, then expand any product for AI brief, issue mix, and review proof
+              Start with the product scan, then expand any row for AI brief, issue mix, and review proof
             </div>
           </div>
           <div style={{ fontSize:11, color:'var(--text-muted)', display:'flex', gap:10 }}>
@@ -555,7 +555,6 @@ export default function SummaryPage({ filters, allProducts }) {
               <tr>
                 <TH onClick={()=>handleSort('product_name')} sortDir={sortKey==='product_name'?sortDir:null}
                   tip="Product name">Product</TH>
-                <TH tip="Amazon ASIN">ASIN</TH>
                 <TH onClick={()=>handleSort('avg_rating')} sortDir={sortKey==='avg_rating'?sortDir:null}
                   tip="Average star rating (1–5) in current period">Avg Rating</TH>
                 <TH tip="Rating change vs prior period. Lower is worse (red ↑ means rating dropped)">Δ Rating</TH>
@@ -584,7 +583,6 @@ export default function SummaryPage({ filters, allProducts }) {
                       <td title={row.product_name||row.asin} style={{ padding:'12px 14px', fontSize:13, fontWeight:600, borderBottom:isDrill?'none':'1px solid var(--border)', maxWidth:170, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                         {row.product_name||row.asin}
                       </td>
-                      <td style={{ padding:'12px 14px', fontSize:11, color:'var(--text-muted)', borderBottom:isDrill?'none':'1px solid var(--border)', whiteSpace:'nowrap' }}>{row.asin}</td>
                       <td style={{ padding:'12px 14px', borderBottom:isDrill?'none':'1px solid var(--border)' }}>
                         <StarLabel rating={row.avg_rating} />
                         <div style={{ height:3, background:'var(--border)', borderRadius:2, marginTop:4, width:64 }}>
@@ -603,7 +601,7 @@ export default function SummaryPage({ filters, allProducts }) {
                     </tr>
                     {isDrill && (
                       <tr key={`drill-${row.asin}`}>
-                        <td colSpan={10} style={{ padding:0, borderBottom:'1px solid var(--border)' }}>
+                        <td colSpan={9} style={{ padding:0, borderBottom:'1px solid var(--border)' }}>
                           <DrillDown row={row} filters={apiParams} />
                         </td>
                       </tr>

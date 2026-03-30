@@ -14,9 +14,10 @@ import {
   ResponsiveContainer, ComposedChart, Bar, ReferenceLine
 } from 'recharts'
 import { ExternalLink } from 'lucide-react'
-import { apiUrl, fetchAnalysis } from '../api'
+import { apiUrl, fetchAnalysis, fetchCxoTrends } from '../api'
 import { InfoTip, Card } from './shared'
 import RatingTrendChart from './RatingTrendChart'
+import ReviewsDrawer from './ReviewsDrawer'
 
 function fmtDay(d) {
   try { return new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) } catch { return d }
@@ -364,18 +365,80 @@ function Toggle({ value, options, onChange }) {
   )
 }
 
+function EmptyState({ text = 'No data for selected filters' }) {
+  return <div style={{ padding:'24px 0', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>{text}</div>
+}
+
+function EmergingIssues({ momentum, onSelect }) {
+  const items = [...(momentum || [])]
+    .filter(item => (item.second || 0) > 0 && ((item.first === 0 && item.second > 0) || (item.change || 0) > 0))
+    .sort((left, right) => {
+      const leftIsNew = left.first === 0 ? 1 : 0
+      const rightIsNew = right.first === 0 ? 1 : 0
+      if (leftIsNew !== rightIsNew) return rightIsNew - leftIsNew
+      return (right.change || 0) - (left.change || 0)
+    })
+    .slice(0, 5)
+
+  if (!items.length) return <EmptyState />
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+      {items.map(item => {
+        const isNew = item.first === 0 && item.second > 0
+        const signalColor = isNew ? '#f97316' : '#ef4444'
+        return (
+          <button
+            key={item.category}
+            onClick={() => onSelect?.(item.category)}
+            style={{
+              background:'rgba(255,255,255,0.03)',
+              border:`1px solid ${signalColor}24`,
+              borderRadius:10,
+              padding:'10px 12px',
+              display:'grid',
+              gridTemplateColumns:'1fr auto auto',
+              gap:10,
+              alignItems:'center',
+              cursor:'pointer',
+              color:'inherit',
+              textAlign:'left',
+            }}
+          >
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{item.category}</div>
+              <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+                {isNew ? 'New issue in the recent half of the period' : `Up from ${item.first} to ${item.second} mentions`}
+              </div>
+            </div>
+            <div style={{ fontSize:11, fontWeight:700, color:signalColor }}>
+              {isNew ? 'NEW' : `${item.change > 0 ? '+' : ''}${item.change}`}
+            </div>
+            <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+              {item.pct_change > 0 ? `+${item.pct_change}%` : `${item.pct_change}%`}
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 export default function AnalysisPage({ filters, allProducts, tree }) {
   const [data, setData]       = useState(null)
+  const [cxoData, setCxoData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [hasData, setHasData] = useState(false)
   const [trendMode, setTrendMode] = useState('sentiment')
   const [drawerCat, setDrawerCat] = useState(null)
   const [drawerCatPos, setDrawerCatPos] = useState(null)
+  const [emergingCat, setEmergingCat] = useState(null)
   const [issueFilter, setIssueFilter] = useState(undefined)
   const [localIssueData, setLocalIssueData] = useState(null)
   const [signalProd, setSignalProd] = useState(undefined)
   const [localTrendData, setLocalTrendData] = useState(null)
+  const [ratingDistProd, setRatingDistProd] = useState(undefined)
 
   // Respect parent filter: only show products in scope
   const scopedProducts = useMemo(() => {
@@ -401,7 +464,8 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   useEffect(() => {
     if (issueFilter && !scopedProducts.includes(issueFilter)) setIssueFilter(undefined)
     if (signalProd && !scopedProducts.includes(signalProd)) setSignalProd(undefined)
-  }, [JSON.stringify(scopedProducts), issueFilter, signalProd])
+    if (ratingDistProd && !scopedProducts.includes(ratingDistProd)) setRatingDistProd(undefined)
+  }, [JSON.stringify(scopedProducts), issueFilter, signalProd, ratingDistProd])
 
   const apiParams = {
     product_category: filters.product_category || null,
@@ -413,9 +477,13 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const load = useCallback(() => {
     if (!allProducts?.length) return
     setLoading(true)
-    fetchAnalysis(apiParams)
-      .then(analysis => {
+    Promise.all([
+      fetchAnalysis(apiParams),
+      fetchCxoTrends(apiParams).catch(() => null),
+    ])
+      .then(([analysis, cxo]) => {
         setData(analysis)
+        setCxoData(cxo)
         setHasData(true)
       })
       .finally(() => setLoading(false))
@@ -457,6 +525,11 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const posPie  = data?.pos_pie || []
   const negPct  = kpi.total ? +((kpi.negative/kpi.total)*100).toFixed(1) : 0
   const posPct  = kpi.total ? +((kpi.positive/kpi.total)*100).toFixed(1) : 0
+  const momentum = cxoData?.category_momentum || []
+  const ratingDistribution = cxoData?.rating_distribution || []
+  const displayedRatingDistribution = ratingDistProd
+    ? ratingDistribution.filter(row => row.product === ratingDistProd)
+    : ratingDistribution
 
   const displayedNegPie = localIssueData?.neg_pie ?? negPie
   const displayedPosPie = localIssueData?.pos_pie ?? posPie
@@ -595,6 +668,55 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
           </ResponsiveContainer>
         )}
       </Card>
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+        <Card
+          title="Emerging Issues"
+          tip="Issues that were absent or small in the first half of the selected period and are now growing."
+        >
+          <EmergingIssues momentum={momentum} onSelect={category => setEmergingCat(emergingCat === category ? null : category)} />
+          <ReviewsDrawer category={emergingCat} label={emergingCat} filters={filters} onClose={() => setEmergingCat(null)} />
+        </Card>
+
+        <Card
+          title="Rating Distribution by Product"
+          tip="Horizontal 1-star to 5-star split for each product. A healthy shape is top-heavy at 4-5 stars; a bimodal shape points to inconsistent experience."
+          controls={scopedProducts.length > 1 ? (
+            <select value={ratingDistProd || ''} onChange={event => setRatingDistProd(event.target.value || undefined)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: ratingDistProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+              <option value="">All Products</option>
+              {scopedProducts.map(product => <option key={product} value={product}>{product}</option>)}
+            </select>
+          ) : null}
+        >
+          {!displayedRatingDistribution.length ? <EmptyState /> : (
+            <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
+              {displayedRatingDistribution.map(row => {
+                const total = [1, 2, 3, 4, 5].reduce((sum, star) => sum + (row[String(star)] || 0), 0)
+                return (
+                  <div key={row.product} style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                    <div style={{ fontSize:12, fontWeight:700 }}>{row.product}</div>
+                    {[5, 4, 3, 2, 1].map(star => {
+                      const count = row[String(star)] || 0
+                      const percent = total > 0 ? (count / total * 100).toFixed(1) : 0
+                      const color = star >= 4 ? '#22c55e' : star === 3 ? '#eab308' : '#ef4444'
+                      return (
+                        <div key={star} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                          <div style={{ width:20, fontSize:11, color:'var(--text-muted)', textAlign:'right' }}>{star}★</div>
+                          <div style={{ flex:1, height:8, background:'var(--border)', borderRadius:4, overflow:'hidden' }}>
+                            <div style={{ height:'100%', width:`${percent}%`, background:color, borderRadius:4 }} />
+                          </div>
+                          <div style={{ width:42, fontSize:11, color, fontWeight:700, textAlign:'right' }}>{percent}%</div>
+                          <div style={{ width:24, fontSize:10, color:'var(--text-muted)', textAlign:'right' }}>{count}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
 
     </div>
   )
