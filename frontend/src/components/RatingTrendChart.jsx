@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ExternalLink } from 'lucide-react'
 import {
   Bar,
   CartesianGrid,
@@ -76,10 +75,6 @@ function fillPerProduct(spine, products, byDay, field) {
   return filled
 }
 
-function amazonProductUrl(asin) {
-  return asin ? `https://www.amazon.in/dp/${asin}` : null
-}
-
 function ratingColor(overall) {
   if (overall == null) return 'var(--text)'
   if (overall >= 4) return '#22c55e'
@@ -90,7 +85,7 @@ function ratingColor(overall) {
 function renderStars(overall) {
   if (overall == null) return '—'
   const stars = Math.round(Number(overall))
-  return `${'★'.repeat(stars)}${'☆'.repeat(Math.max(0, 5 - stars))}`
+  return `${'*'.repeat(stars)}${'-'.repeat(Math.max(0, 5 - stars))}`
 }
 
 function SeriesLegend({ products, colorMap }) {
@@ -171,7 +166,7 @@ function SnapshotTable({ rows }) {
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            {['Category', 'Product', 'Amazon Overall Rating', 'Amazon Review Count', 'Product Page'].map(label => (
+            {['Category', 'Product', 'Amazon Overall Rating', 'Amazon Review Count'].map(label => (
               <th
                 key={label}
                 style={{
@@ -198,32 +193,10 @@ function SnapshotTable({ rows }) {
               <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{row.category}</td>
               <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700 }}>{row.product}</td>
               <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700, color: ratingColor(row.overall) }}>
-                {row.overall != null ? `${Number(row.overall).toFixed(1)} ${renderStars(row.overall)}` : '—'}
+                {row.overall != null ? `${Number(row.overall).toFixed(1)} ${renderStars(row.overall)}` : '-'}
               </td>
               <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                {row.total_ratings != null ? Number(row.total_ratings).toLocaleString() : '—'}
-              </td>
-              <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-                {row.asin ? (
-                  <a
-                    href={amazonProductUrl(row.asin)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      color: 'var(--accent)',
-                      textDecoration: 'none',
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    <ExternalLink size={13} /> Open on Amazon
-                  </a>
-                ) : (
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Not available</span>
-                )}
+                {row.total_ratings != null ? Number(row.total_ratings).toLocaleString() : '-'}
               </td>
             </tr>
           ))}

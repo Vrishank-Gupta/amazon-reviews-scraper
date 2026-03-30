@@ -1,7 +1,15 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ComposedChart, Bar, ReferenceLine,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  ComposedChart,
+  Bar,
+  ReferenceLine,
 } from 'recharts'
 import { fetchAnalysis, fetchCxoTrends, fetchWordCloud } from '../api'
 import { Card } from './shared'
@@ -9,8 +17,12 @@ import RatingTrendChart from './RatingTrendChart'
 import ReviewsDrawer from './ReviewsDrawer'
 import WordCloud from './Wordcloud'
 
-function fmtDay(d) {
-  try { return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) } catch { return d }
+function fmtDay(day) {
+  try {
+    return new Date(day).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  } catch {
+    return day
+  }
 }
 
 function getDefaultWidgetProduct({ parentProducts, parentCategory, scopedProducts, widgetValue }) {
@@ -47,8 +59,49 @@ function Toggle({ value, onChange, options }) {
   )
 }
 
-function EmptyState({ text = 'No data for selected filters' }) {
+function EmptyState({ text = 'No data for selected filters.' }) {
   return <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{text}</div>
+}
+
+function KeywordToneTabs({ value, onChange }) {
+  const options = [
+    ['mixed', 'Mixed'],
+    ['negative', 'Negative'],
+    ['neutral', 'Neutral'],
+    ['positive', 'Positive'],
+  ]
+
+  return (
+    <div style={{ display: 'flex', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 7, padding: 2, gap: 2, flexWrap: 'wrap' }}>
+      {options.map(([tone, label]) => (
+        <button
+          key={tone}
+          onClick={() => onChange(tone)}
+          style={{
+            padding: '3px 10px',
+            borderRadius: 5,
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: 11,
+            fontWeight: 600,
+            fontFamily: 'DM Sans',
+            background: value === tone ? 'var(--accent)' : 'transparent',
+            color: value === tone ? '#fff' : 'var(--text-muted)',
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function buildWordRows(words, tone) {
+  const countKey = tone === 'mixed' ? 'count' : tone
+  return (words || [])
+    .map(word => ({ ...word, count: tone === 'mixed' ? word.count : (word[countKey] || 0) }))
+    .filter(word => word.count > 0)
+    .sort((left, right) => right.count - left.count)
 }
 
 function OverviewCards({ kpi, productCount }) {
@@ -61,7 +114,7 @@ function OverviewCards({ kpi, productCount }) {
   const neutralPct = total ? ((neutral / total) * 100).toFixed(1) : '0.0'
 
   const cards = [
-    { label: 'Feedback Volume', value: total.toLocaleString(), sub: `${productCount} products · selected period`, color: '#60a5fa' },
+    { label: 'Feedback Volume', value: total.toLocaleString(), sub: `${productCount} products - selected period`, color: '#60a5fa' },
     { label: '1-2 Stars', value: negative.toLocaleString(), sub: `${negativePct}% of reviews`, color: '#ef4444' },
     { label: '4-5 Stars', value: positive.toLocaleString(), sub: `${positivePct}% of reviews`, color: '#22c55e' },
     { label: '3 Stars', value: neutral.toLocaleString(), sub: `${neutralPct}% of reviews`, color: '#eab308' },
@@ -84,6 +137,7 @@ function VolumeTip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   const point = payload[0]?.payload || {}
   const total = (point.Positive || 0) + (point.Negative || 0) + (point.Neutral || 0)
+
   return (
     <div style={{ background: '#16161f', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', fontSize: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
       <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtDay(label)}</div>
@@ -96,9 +150,9 @@ function VolumeTip({ active, payload, label }) {
           ['Negative', point.Negative, '#ef4444'],
           ['Positive', point.Positive, '#22c55e'],
           ['Neutral', point.Neutral, '#eab308'],
-        ].map(([labelText, value, color]) => (
-          <div key={labelText} style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-            <span style={{ color }}>{labelText}</span>
+        ].map(([text, value, color]) => (
+          <div key={text} style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+            <span style={{ color }}>{text}</span>
             <span style={{ fontWeight: 700 }}>{value || 0}</span>
           </div>
         ))}
@@ -113,6 +167,7 @@ function RateTip({ active, payload, label }) {
   const daily = payload.find(point => point.dataKey === 'neg_rate')?.value
   const point = payload[0]?.payload || {}
   const total = (point.Positive || 0) + (point.Negative || 0) + (point.Neutral || 0)
+
   return (
     <div style={{ background: '#16161f', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', fontSize: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
       <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtDay(label)}</div>
@@ -153,6 +208,7 @@ function EmergingIssues({ momentum, onSelect }) {
         const isNew = item.first === 0 && item.second > 0
         const signalColor = isNew ? '#f97316' : '#ef4444'
         const pctLabel = isNew ? 'New' : (item.pct_change > 0 ? `+${item.pct_change}%` : `${item.pct_change}%`)
+
         return (
           <button
             key={item.category}
@@ -180,9 +236,7 @@ function EmergingIssues({ momentum, onSelect }) {
             <div style={{ fontSize: 11, fontWeight: 700, color: signalColor }}>
               {isNew ? 'NEW' : `${item.change > 0 ? '+' : ''}${item.change}`}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              {pctLabel}
-            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{pctLabel}</div>
           </button>
         )
       })}
@@ -209,9 +263,9 @@ function CategoryReviewMix({ rows, onSelect }) {
             <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
               <div style={{ width: `${Math.max(scale * 100, 8)}%`, minWidth: 120, maxWidth: '100%' }}>
                 <div style={{ display: 'flex', height: 16, borderRadius: 999, overflow: 'hidden', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
-                  <button onClick={() => row.Negative > 0 && onSelect?.(row.category, 'Negative')} disabled={row.Negative === 0} style={{ width: `${negWidth}%`, minWidth: row.Negative ? 10 : 0, background: '#ef4444', border: 'none', cursor: row.Negative ? 'pointer' : 'default', opacity: row.Negative ? 1 : 0 }} title={`${row.category} â€¢ Negative â€¢ ${row.Negative} reviews`} />
-                  <button onClick={() => row.Neutral > 0 && onSelect?.(row.category, 'Neutral')} disabled={row.Neutral === 0} style={{ width: `${neuWidth}%`, minWidth: row.Neutral ? 10 : 0, background: '#eab308', border: 'none', cursor: row.Neutral ? 'pointer' : 'default', opacity: row.Neutral ? 1 : 0 }} title={`${row.category} â€¢ Neutral â€¢ ${row.Neutral} reviews`} />
-                  <button onClick={() => row.Positive > 0 && onSelect?.(row.category, 'Positive')} disabled={row.Positive === 0} style={{ width: `${posWidth}%`, minWidth: row.Positive ? 10 : 0, background: '#22c55e', border: 'none', cursor: row.Positive ? 'pointer' : 'default', opacity: row.Positive ? 1 : 0 }} title={`${row.category} â€¢ Positive â€¢ ${row.Positive} reviews`} />
+                  <button onClick={() => row.Negative > 0 && onSelect?.(row.category, 'Negative')} disabled={row.Negative === 0} style={{ width: `${negWidth}%`, minWidth: row.Negative ? 10 : 0, background: '#ef4444', border: 'none', cursor: row.Negative ? 'pointer' : 'default', opacity: row.Negative ? 1 : 0 }} title={`${row.category} - Negative - ${row.Negative} reviews`} />
+                  <button onClick={() => row.Neutral > 0 && onSelect?.(row.category, 'Neutral')} disabled={row.Neutral === 0} style={{ width: `${neuWidth}%`, minWidth: row.Neutral ? 10 : 0, background: '#eab308', border: 'none', cursor: row.Neutral ? 'pointer' : 'default', opacity: row.Neutral ? 1 : 0 }} title={`${row.category} - Neutral - ${row.Neutral} reviews`} />
+                  <button onClick={() => row.Positive > 0 && onSelect?.(row.category, 'Positive')} disabled={row.Positive === 0} style={{ width: `${posWidth}%`, minWidth: row.Positive ? 10 : 0, background: '#22c55e', border: 'none', cursor: row.Positive ? 'pointer' : 'default', opacity: row.Positive ? 1 : 0 }} title={`${row.category} - Positive - ${row.Positive} reviews`} />
                 </div>
               </div>
             </div>
@@ -233,6 +287,12 @@ function CategoryWordCloudPanel({ category, sentiment, filters, onClose }) {
   const [words, setWords] = useState([])
   const [loading, setLoading] = useState(true)
   const [activeWord, setActiveWord] = useState(null)
+  const defaultTone = sentiment === 'Negative' ? 'negative' : sentiment === 'Positive' ? 'positive' : sentiment === 'Neutral' ? 'neutral' : 'mixed'
+  const [tone, setTone] = useState(defaultTone)
+
+  useEffect(() => {
+    setTone(defaultTone)
+  }, [defaultTone, category, sentiment])
 
   useEffect(() => {
     if (!category) return
@@ -242,15 +302,12 @@ function CategoryWordCloudPanel({ category, sentiment, filters, onClose }) {
       .then(payload => setWords(payload || []))
       .catch(() => setWords([]))
       .finally(() => setLoading(false))
-  }, [category, sentiment, JSON.stringify(filters)])
+  }, [category, JSON.stringify(filters)])
 
-  const sentimentKey = sentiment === 'Negative' ? 'negative' : sentiment === 'Positive' ? 'positive' : 'neutral'
-  const sentimentColor = sentiment === 'Negative' ? '#ef4444' : sentiment === 'Positive' ? '#22c55e' : '#eab308'
-  const focusedWords = words
-    .map(word => ({ ...word, count: word[sentimentKey] || 0 }))
-    .filter(word => word.count > 0)
-    .sort((left, right) => right.count - left.count)
-  const allWords = [...words].sort((left, right) => right.count - left.count)
+  const toneLabel = tone.charAt(0).toUpperCase() + tone.slice(1)
+  const toneColor = tone === 'negative' ? '#ef4444' : tone === 'positive' ? '#22c55e' : tone === 'neutral' ? '#eab308' : 'var(--text-muted)'
+  const wordRows = buildWordRows(words, tone)
+  const drawerSentiment = tone === 'mixed' ? null : toneLabel
 
   return (
     <div style={{ marginTop: 14, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -258,55 +315,38 @@ function CategoryWordCloudPanel({ category, sentiment, filters, onClose }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontFamily: 'Bebas Neue', fontSize: 16, letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Keyword Drill-Down</span>
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: sentimentColor, background: `${sentimentColor}15`, border: `1px solid ${sentimentColor}35`, borderRadius: 999, padding: '3px 8px' }}>
-              {category} · {sentiment}
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: toneColor, background: `${toneColor}15`, border: `1px solid ${toneColor}35`, borderRadius: 999, padding: '3px 8px' }}>
+              {category} - {toneLabel}
             </span>
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            Click a keyword to open the matching reviews. The first cloud is weighted to the section you clicked, and the second shows the full sub-tag mix for that category.
+            Click a keyword to open matching reviews for this category. Use the tone tabs to switch between mixed, negative, neutral, and positive keyword views.
           </div>
         </div>
-        <button onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 11, padding: '5px 10px', cursor: 'pointer', fontFamily: 'DM Sans' }}>
-          Close
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <KeywordToneTabs value={tone} onChange={setTone} />
+          <button onClick={onClose} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 11, padding: '5px 10px', cursor: 'pointer', fontFamily: 'DM Sans' }}>
+            Close
+          </button>
+        </div>
       </div>
 
       {loading ? (
         <EmptyState text="Loading keyword cloud..." />
+      ) : !wordRows.length ? (
+        <EmptyState text="No keyword data for this category in the selected filters." />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: sentimentColor }}>
-              {sentiment} Keyword Cloud
-            </div>
-            <WordCloud data={focusedWords} activeWord={activeWord} onWordClick={setActiveWord} />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-              Full Sub-Tag Cloud
-            </div>
-            <WordCloud data={allWords} activeWord={activeWord} onWordClick={setActiveWord} />
-          </div>
-        </div>
+        <WordCloud data={wordRows} activeWord={activeWord} onWordClick={setActiveWord} />
       )}
 
       <ReviewsDrawer
         category={activeWord}
         label={activeWord}
-        sentiment={sentiment}
+        sentiment={drawerSentiment}
+        taxonomyCategory={category}
         filters={filters}
         onClose={() => setActiveWord(null)}
       />
-
-      {!loading && !allWords.length && (
-        <ReviewsDrawer
-          category={category}
-          label={category}
-          sentiment={sentiment}
-          filters={filters}
-          onClose={onClose}
-        />
-      )}
     </div>
   )
 }
@@ -373,14 +413,20 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    if (!effectiveIssueFilter) { setLocalIssueData(null); return }
+    if (!effectiveIssueFilter) {
+      setLocalIssueData(null)
+      return
+    }
     fetchAnalysis({ product: [effectiveIssueFilter], date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(setLocalIssueData)
       .catch(() => setLocalIssueData(null))
   }, [effectiveIssueFilter, apiParams.date_from, apiParams.date_to])
 
   useEffect(() => {
-    if (!effectiveSignalProd) { setLocalTrendData(null); return }
+    if (!effectiveSignalProd) {
+      setLocalTrendData(null)
+      return
+    }
     fetchCxoTrends({ product: [effectiveSignalProd], date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(payload => setLocalTrendData(payload || null))
       .catch(() => setLocalTrendData(null))
@@ -389,7 +435,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   if (loading && !hasData) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--text-muted)', gap: 10 }}>
-        <span style={{ fontSize: 20 }}>âŸ³</span> Loading overviewâ€¦
+        <span style={{ fontSize: 20 }}>...</span> Loading overview...
       </div>
     )
   }
@@ -408,8 +454,8 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
     const negative = window.reduce((sum, row) => sum + row.Negative, 0)
     return {
       ...point,
-      rolling_neg: total ? +(negative / total * 100).toFixed(1) : 0,
-      neg_rate: point.Negative ? +(point.Negative / (point.Positive + point.Negative + point.Neutral) * 100).toFixed(1) : 0,
+      rolling_neg: total ? +((negative / total) * 100).toFixed(1) : 0,
+      neg_rate: point.Negative ? +((point.Negative / (point.Positive + point.Negative + point.Neutral)) * 100).toFixed(1) : 0,
     }
   })
 
@@ -422,10 +468,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
         <OverviewCards kpi={kpi} productCount={scopedProducts.length || allProducts?.length || 0} />
-        <Card
-          title="Amazon Rating Signal"
-          tip="Amazon product-page rating snapshots over time, alongside scraped daily review averages."
-        >
+        <Card title="Amazon Rating Signal" tip="Amazon product-page rating snapshots over time, alongside scraped daily review averages.">
           <RatingTrendChart filters={filters} tree={tree} />
         </Card>
       </div>
@@ -433,7 +476,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
       <Card
         title="Category Review Mix"
         sub="Horizontal length shows total reviews. Each bar is split into negative, neutral, and positive review volume."
-        tip="Click any colored section to open the category keyword cloud and sub-tag drill-down for that category and sentiment."
+        tip="Click any colored section to open the category keyword cloud for that category and sentiment."
         controls={
           <select value={effectiveIssueFilter || ''} onChange={event => { setIssueFilter(event.target.value || null); setCategoryCloud(null) }} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface2)', color: effectiveIssueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize: 11, fontFamily: 'DM Sans', cursor: 'pointer', outline: 'none' }}>
             <option value="">All Products</option>
@@ -441,25 +484,13 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
           </select>
         }
       >
-        <CategoryReviewMix
-          rows={displayedCategoryBreakdown}
-          onSelect={(category, sentiment) => setCategoryCloud(current =>
-            current?.category === category && current?.sentiment === sentiment ? null : { category, sentiment },
-          )}
-        />
-        {categoryCloud && (
-          <CategoryWordCloudPanel
-            category={categoryCloud.category}
-            sentiment={categoryCloud.sentiment}
-            filters={filters}
-            onClose={() => setCategoryCloud(null)}
-          />
-        )}
+        <CategoryReviewMix rows={displayedCategoryBreakdown} onSelect={(category, sentiment) => setCategoryCloud(current => current?.category === category && current?.sentiment === sentiment ? null : { category, sentiment })} />
+        {categoryCloud && <CategoryWordCloudPanel category={categoryCloud.category} sentiment={categoryCloud.sentiment} filters={filters} onClose={() => setCategoryCloud(null)} />}
       </Card>
 
       <Card
         title="Customer Signal Over Time"
-        tip="Neg Rate shows the 7-day rolling problem rate. Sentiment shows daily positive / negative / neutral breakdown. Reviews shows the daily stacked split from 1-star to 5-star."
+        tip="Neg Rate shows the 7-day rolling problem rate. Sentiment shows daily positive, negative, and neutral breakdown. Reviews shows the daily stacked split from 1-star to 5-star."
         controls={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <select value={effectiveSignalProd || ''} onChange={event => setSignalProd(event.target.value || null)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface2)', color: effectiveSignalProd ? 'var(--accent)' : 'var(--text-muted)', fontSize: 11, fontFamily: 'DM Sans', cursor: 'pointer', outline: 'none' }}>
@@ -471,7 +502,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
         }
       >
         {activeTrend.length === 0 ? (
-          <EmptyState text="No trend data â€” review dates may not be parsed correctly yet." />
+          <EmptyState text="No trend data - review dates may not be parsed correctly yet." />
         ) : trendMode === 'rate' ? (
           <ResponsiveContainer width="100%" height={200}>
             <ComposedChart data={trendWithRolling} margin={{ top: 8, right: 40, bottom: 0, left: -10 }}>
@@ -507,16 +538,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
               <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
               <Tooltip content={<VolumeTip />} />
               {['Negative', 'Positive', 'Neutral'].map(sentiment => (
-                <Area
-                  key={sentiment}
-                  type="monotone"
-                  dataKey={sentiment}
-                  stroke={sentimentColors[sentiment]}
-                  strokeWidth={2}
-                  fill={`url(#ov-${sentiment})`}
-                  dot={false}
-                  activeDot={{ r: 4, stroke: '#fff', strokeWidth: 1.5 }}
-                />
+                <Area key={sentiment} type="monotone" dataKey={sentiment} stroke={sentimentColors[sentiment]} strokeWidth={2} fill={`url(#ov-${sentiment})`} dot={false} activeDot={{ r: 4, stroke: '#fff', strokeWidth: 1.5 }} />
               ))}
             </AreaChart>
           </ResponsiveContainer>
@@ -541,14 +563,14 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
                           <span style={{ fontWeight: 700 }}>{point.total || 0}</span>
                         </div>
                         {[
-                          ['5â˜…', point.star_5, '#22c55e'],
-                          ['4â˜…', point.star_4, '#84cc16'],
-                          ['3â˜…', point.star_3, '#eab308'],
-                          ['2â˜…', point.star_2, '#f97316'],
-                          ['1â˜…', point.star_1, '#ef4444'],
-                        ].map(([labelText, value, color]) => (
-                          <div key={labelText} style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-                            <span style={{ color }}>{labelText}</span>
+                          ['5 star', point.star_5, '#22c55e'],
+                          ['4 star', point.star_4, '#84cc16'],
+                          ['3 star', point.star_3, '#eab308'],
+                          ['2 star', point.star_2, '#f97316'],
+                          ['1 star', point.star_1, '#ef4444'],
+                        ].map(([text, value, color]) => (
+                          <div key={text} style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+                            <span style={{ color }}>{text}</span>
                             <span style={{ fontWeight: 700 }}>{value || 0}</span>
                           </div>
                         ))}
@@ -556,24 +578,24 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
                     </div>
                   )
                 }} />
-                <Bar dataKey="star_1" stackId="stars" fill="#ef4444" name="1â˜…" />
-                <Bar dataKey="star_2" stackId="stars" fill="#f97316" name="2â˜…" />
-                <Bar dataKey="star_3" stackId="stars" fill="#eab308" name="3â˜…" />
-                <Bar dataKey="star_4" stackId="stars" fill="#84cc16" name="4â˜…" />
-                <Bar dataKey="star_5" stackId="stars" fill="#22c55e" name="5â˜…" />
+                <Bar dataKey="star_1" stackId="stars" fill="#ef4444" name="1 star" />
+                <Bar dataKey="star_2" stackId="stars" fill="#f97316" name="2 star" />
+                <Bar dataKey="star_3" stackId="stars" fill="#eab308" name="3 star" />
+                <Bar dataKey="star_4" stackId="stars" fill="#84cc16" name="4 star" />
+                <Bar dataKey="star_5" stackId="stars" fill="#22c55e" name="5 star" />
               </ComposedChart>
             </ResponsiveContainer>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
               {[
-                ['1â˜…', '#ef4444'],
-                ['2â˜…', '#f97316'],
-                ['3â˜…', '#eab308'],
-                ['4â˜…', '#84cc16'],
-                ['5â˜…', '#22c55e'],
-              ].map(([labelText, color]) => (
-                <span key={labelText} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                ['1 star', '#ef4444'],
+                ['2 star', '#f97316'],
+                ['3 star', '#eab308'],
+                ['4 star', '#84cc16'],
+                ['5 star', '#22c55e'],
+              ].map(([text, color]) => (
+                <span key={text} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
-                  {labelText}
+                  {text}
                 </span>
               ))}
             </div>
@@ -581,10 +603,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
         )}
       </Card>
 
-      <Card
-        title="Emerging Issues"
-        tip="Issues that were absent or small in the first half of the selected period and are now growing."
-      >
+      <Card title="Emerging Issues" tip="Issues that were absent or small in the first half of the selected period and are now growing.">
         <EmergingIssues momentum={momentum} onSelect={category => setEmergingCat(emergingCat === category ? null : category)} />
         <ReviewsDrawer category={emergingCat} label={emergingCat} filters={filters} onClose={() => setEmergingCat(null)} />
       </Card>
