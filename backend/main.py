@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import pymysql
@@ -9,6 +10,12 @@ import csv
 import subprocess
 import os
 import sys
+import smtplib
+import secrets
+import random
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timedelta
 from typing import Optional
 from collections import defaultdict
 
@@ -31,7 +38,127 @@ app.add_middleware(
     allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Session-Token"],
 )
+
+# ── Auth config ───────────────────────────────────────────────────────────────
+SMTP_HOST = os.getenv("SMTP_HOST", "email-smtp.eu-west-1.amazonaws.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_SENDER = os.getenv("SMTP_SENDER", "admin@quboworld.com")
+ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "@heroelectronix.com")
+OTP_EXPIRY_MINUTES = 10
+SESSION_EXPIRY_DAYS = 7
+
+_AUTH_PUBLIC_PATHS = {
+    "/health",
+    "/api/auth/request-otp",
+    "/api/auth/verify-otp",
+    "/api/auth/verify-session",
+    "/api/auth/logout",
+}
+
+AUTH_TABLE_OTP_SQL = """
+CREATE TABLE IF NOT EXISTS auth_otps (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  otp CHAR(6) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_auth_otps_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+"""
+
+AUTH_TABLE_SESSION_SQL = """
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  token CHAR(64) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_auth_sessions_token (token),
+  INDEX idx_auth_sessions_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+"""
+
+
+def ensure_auth_tables(conn):
+    try:
+        with conn.cursor() as cur:
+            cur.execute(AUTH_TABLE_OTP_SQL)
+            cur.execute(AUTH_TABLE_SESSION_SQL)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+
+def send_otp_email(to_email: str, otp: str):
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"Your VOC Dashboard Login Code: {otp}"
+    msg["From"] = SMTP_SENDER
+    msg["To"] = to_email
+
+    plain = (
+        f"Your VOC Dashboard one-time login code is: {otp}\n\n"
+        f"This code expires in {OTP_EXPIRY_MINUTES} minutes.\n\n"
+        "If you did not request this, please ignore this email."
+    )
+    html = f"""
+    <html><body style="font-family:sans-serif;background:#0a0c18;color:#e0e0e0;padding:32px;">
+      <div style="max-width:480px;margin:0 auto;background:#141726;border-radius:12px;padding:32px;border:1px solid #1e2237;">
+        <div style="font-size:22px;font-weight:700;color:#ff4e1a;letter-spacing:0.08em;margin-bottom:8px;">VOC Dashboard</div>
+        <div style="font-size:13px;color:#8a8fa8;margin-bottom:28px;">Qubo by Hero Electronix</div>
+        <p style="font-size:14px;color:#c0c4d6;margin-bottom:24px;">Your one-time login code is:</p>
+        <div style="font-size:36px;font-weight:700;letter-spacing:0.18em;color:#ffffff;background:#1e2237;border-radius:8px;padding:16px 24px;text-align:center;margin-bottom:24px;">{otp}</div>
+        <p style="font-size:12px;color:#8a8fa8;">This code expires in <strong>{OTP_EXPIRY_MINUTES} minutes</strong>.<br>
+        If you did not request this, ignore this email — your account is safe.</p>
+      </div>
+    </body></html>
+    """
+    msg.attach(MIMEText(plain, "plain"))
+    msg.attach(MIMEText(html, "html"))
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.sendmail(SMTP_SENDER, to_email, msg.as_string())
+
+
+# ── Auth middleware ───────────────────────────────────────────────────────────
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    # Let OPTIONS (CORS preflight) and public paths through
+    if request.method == "OPTIONS" or not path.startswith("/api/") or path in _AUTH_PUBLIC_PATHS:
+        return await call_next(request)
+
+    token = request.headers.get("X-Session-Token", "").strip()
+    if not token:
+        return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+
+    conn = get_conn()
+    valid = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM auth_sessions WHERE token=%s AND expires_at > NOW()",
+                (token,),
+            )
+            valid = cur.fetchone() is not None
+    except pymysql.err.ProgrammingError as exc:
+        if exc.args and exc.args[0] == 1146:
+            valid = False
+        else:
+            raise
+    finally:
+        conn.close()
+
+    if not valid:
+        return JSONResponse(status_code=401, content={"detail": "Invalid or expired session"})
+
+    return await call_next(request)
 
 
 # ── ASIN map — loaded once at startup from asins.csv ─────────────────────────
@@ -2146,3 +2273,120 @@ def stub_pipeline_status(): return {}
 
 @app.get("/api/replacements")
 def stub_replacements(): return []
+
+
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+
+class OTPRequest(BaseModel):
+    email: str
+
+class OTPVerify(BaseModel):
+    email: str
+    otp: str
+
+
+@app.post("/api/auth/request-otp")
+def auth_request_otp(req: OTPRequest):
+    email = req.email.strip().lower()
+    if not email.endswith(ALLOWED_EMAIL_DOMAIN):
+        raise HTTPException(status_code=400, detail=f"Only {ALLOWED_EMAIL_DOMAIN} email addresses are allowed")
+
+    otp = f"{random.randint(0, 999999):06d}"
+    expires_at = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
+
+    conn = get_conn()
+    try:
+        ensure_auth_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute("UPDATE auth_otps SET used=1 WHERE email=%s AND used=0", (email,))
+            cur.execute(
+                "INSERT INTO auth_otps (email, otp, expires_at) VALUES (%s, %s, %s)",
+                (email, otp, expires_at),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        send_otp_email(email, otp)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to send OTP email: {exc}")
+
+    return {"message": "OTP sent to your email"}
+
+
+@app.post("/api/auth/verify-otp")
+def auth_verify_otp(req: OTPVerify):
+    email = req.email.strip().lower()
+    otp = req.otp.strip()
+
+    conn = get_conn()
+    try:
+        ensure_auth_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id FROM auth_otps
+                WHERE email=%s AND otp=%s AND used=0 AND expires_at > NOW()
+                ORDER BY id DESC LIMIT 1
+                """,
+                (email, otp),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+            cur.execute("UPDATE auth_otps SET used=1 WHERE id=%s", (row["id"],))
+
+            token = secrets.token_hex(32)
+            session_expires = datetime.utcnow() + timedelta(days=SESSION_EXPIRY_DAYS)
+            cur.execute(
+                "INSERT INTO auth_sessions (email, token, expires_at) VALUES (%s, %s, %s)",
+                (email, token, session_expires),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"token": token, "expires_at": session_expires.isoformat(), "email": email}
+
+
+@app.get("/api/auth/verify-session")
+def auth_verify_session(request: Request):
+    token = request.headers.get("X-Session-Token", "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="No session token provided")
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT email, expires_at FROM auth_sessions WHERE token=%s AND expires_at > NOW()",
+                (token,),
+            )
+            row = cur.fetchone()
+    except pymysql.err.ProgrammingError as exc:
+        if exc.args and exc.args[0] == 1146:
+            raise HTTPException(status_code=401, detail="Invalid session")
+        raise
+    finally:
+        conn.close()
+
+    if not row:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    return {"email": row["email"], "expires_at": str(row["expires_at"])}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    token = request.headers.get("X-Session-Token", "").strip()
+    if token:
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM auth_sessions WHERE token=%s", (token,))
+            conn.commit()
+        finally:
+            conn.close()
+    return {"message": "Logged out"}

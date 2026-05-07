@@ -14,3 +14,6 @@ logs/
 
 # Chrome profile — stores Amazon login session, never commit
 chrome-profile/
+
+# Claude Code memory/session files
+.claude/

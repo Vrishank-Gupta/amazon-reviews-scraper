@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import ProductPerformanceScorecard from './ProductPerformanceScorecard'
 import ReviewsDrawer from './ReviewsDrawer'
-import { apiUrl } from '../api'
+import { apiUrl, authHeaders } from '../api'
 import {
   AreaChart, Area, LineChart, Line,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -413,7 +413,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
     else if (selectedProducts.length) p.set('product', selectedProducts.join('|||'))
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo)   p.set('date_to',   dateTo)
-    fetch(apiUrl(`/api/trends/cxo?${p}`))
+    fetch(apiUrl(`/api/trends/cxo?${p}`), { headers: authHeaders() })
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); setHasData(true) })
       .catch(() => setLoading(false))
@@ -458,7 +458,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
     const p = new URLSearchParams({ product: effectiveIssueProd })
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo)   p.set('date_to', dateTo)
-    fetch(apiUrl(`/api/trends/cxo?${p}`))
+    fetch(apiUrl(`/api/trends/cxo?${p}`), { headers: authHeaders() })
       .then(r => r.json())
       .then(d => {
         setLocalMomentum(d?.category_momentum || [])

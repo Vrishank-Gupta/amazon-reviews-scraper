@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { apiUrl } from '../api'
+import { apiUrl, authHeaders } from '../api'
 import { SHOW_AMAZON_RATING_HISTORY } from '../config/dashboard'
 
 const PALETTE = ['#ff4e1a', '#ff8c42', '#ffd166', '#06d6a0', '#60a5fa', '#a855f7', '#ec4899', '#14b8a6']
@@ -225,7 +225,7 @@ export default function RatingTrendChart({ filters, tree }) {
     if (dateFrom) params.set('date_from', dateFrom)
     if (dateTo) params.set('date_to', dateTo)
 
-    fetch(apiUrl(`/api/trends/rating?${params}`))
+    fetch(apiUrl(`/api/trends/rating?${params}`), { headers: authHeaders() })
       .then(response => response.json())
       .then(payload => {
         setData(payload)

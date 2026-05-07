@@ -1,37 +1,21 @@
-# taxonomy.py
-#
-# VOC taxonomy for Qubo (Hero Electronix) — Cam360 3MP & Dashcam ProX
-# Built from analysis of 243 actual Amazon.in reviews (Feb–Mar 2026).
-#
-# Design principles:
-#   - Every category maps to a clear business owner (Product / App / CX / Ops)
-#   - Sub-tags are specific enough to drive R&D and CX decisions
-#   - Negative and positive sub-tags coexist so the same taxonomy scores both
-#   - Cam360 and Dashcam ProX share the core taxonomy; product-specific issues
-#     are captured in dedicated categories at the bottom
-#
-# KEY CHANGES from previous version:
-#   - "Hardware Issues" + "Hardware & Build Quality" merged → "Hardware Reliability"
-#   - "App Issues" + "App & Software" merged → "App Performance" + "App Features" (split by type)
-#   - "Customer Support" + "Service Issues" merged → "Customer Support & Service"
-#   - "Connectivity & Setup" split into "Wi-Fi Setup" vs "Wi-Fi Stability" (different root causes / owners)
-#   - "Video & Image Quality" split into Daytime / Night / Audio (different hardware owners)
-#   - NEW: "Overheating" — dashcam thermal shutdown is safety-critical (missed accident footage)
-#   - NEW: "False / Excessive Alerts" — firmware-triggered alert floods on Cam360
-#   - NEW: "Subscription & Paywall" — multi-user / cloud cost complaints emerging
-#   - NEW: "Windshield Glare" — dashcam optical gap, needs CPL filter (not included)
-#   - NEW: "Recording Reliability" — hardware-level recording failure distinct from app bugs
-
+# We are building a taxonomy of common themes in Qubo product reviews from Amazon, based on manual review of hundreds of reviews across multiple products. 
+# This taxonomy will be used to categorise and summarise review content at scale, to identify key pain points and areas of improvement 
+# for Qubo products and customer experience. It follows a hierarchical structure with high-level categories (e.g. Video Quality) and 
+# specific issues / praises within each category (e.g. Blurry footage, Clear footage). The devices can be Smart cameras (Cam360, bullet cameras, indoor cameras), 
+# or Dashcams, or Smart Home devices (Plugs, Bulbs, etc.) or Smart Door Locks, Video Doorbells, etc. The reviews may contain 
+# feedback on any aspect of the product or customer experience, and we will categorise them into this taxonomy to identify common themes and insights.
+# the 2 level hierarchy is represented as a dictionary of lists, where the keys are the high-level categories and the values are lists of 
+# specific issues / praises within each category. The keys represent the main themes that customers talk about in their reviews, 
+# and the values represent the specific feedback that customers give within each theme. Keys have to be unique, but values can be repeated across different keys 
+# (e.g. "Clear footage at night" can be a praise for both Video Quality and Night Vision). Following are a few we have identified so far, 
+# based on manual review of hundreds of reviews across multiple Qubo products. Some might be wrong and redundant, some might need to be added as per product.
 
 TAXONOMY = {
 
-    # ── VIDEO QUALITY — DAYTIME ──────────────────────────────────────────────
-    # Owner: Hardware / Optics team
-    # Signal: clarity complaints, resolution vs advertised, competitor comparisons
     "Video Quality — Daytime": [
-        "Blurry or low resolution (not matching advertised spec)",
+        "Blurry or low resolution",
         "Faces or number plates not readable",
-        "Poor clarity beyond 10 feet",
+        "Poor clarity in bright sunlight",
         "Colour accuracy / washed out footage",
         "Wide angle distortion",
         "Rear camera blurry (dashcam)",
@@ -40,8 +24,6 @@ TAXONOMY = {
         "Wide angle covers full road / room",
     ],
 
-    # ── VIDEO QUALITY — NIGHT & LOW LIGHT ───────────────────────────────────
-    # Owner: Hardware / Optics team
     "Video Quality — Night & Low Light": [
         "Poor night vision",
         "IR overexposure or washed out at night",
@@ -51,9 +33,7 @@ TAXONOMY = {
         "Balanced IR without overexposure",
     ],
 
-    # ── AUDIO QUALITY ────────────────────────────────────────────────────────
-    # Owner: Hardware team
-    # Note: audio-video sync lag found in Cam360 reviews; wind noise in Dashcam ProX
+    
     "Audio Quality": [
         "Audio-video sync issue (audio ahead of video)",
         "Speaker too weak or inaudible",
@@ -65,10 +45,7 @@ TAXONOMY = {
         "Audible siren / alarm",
     ],
 
-    # ── APP PERFORMANCE ──────────────────────────────────────────────────────
-    # Owner: App / Software team
-    # Signal: stability, speed, live view reliability
-    # Note: live view lag is the #1 app complaint across both products
+   
     "App Performance": [
         "App crashes or freezes frequently",
         "Live view lags or buffers",
@@ -80,9 +57,7 @@ TAXONOMY = {
         "Stable app with no crashes",
     ],
 
-    # ── APP FEATURES ─────────────────────────────────────────────────────────
-    # Owner: Product / App team
-    # Note: recording UI confusion, multi-user paywall, watermark removal are real documented gaps
+    
     "App Features": [
         "Recording / timeline navigation confusing",
         "Cannot split or trim recordings in app",
@@ -97,10 +72,7 @@ TAXONOMY = {
         "App manages multiple devices well",
     ],
 
-    # ── WI-FI SETUP (FIRST-TIME PAIRING) ────────────────────────────────────
-    # Owner: Firmware / Onboarding team
-    # Signal: one-time failures at install — QR scan, initial pairing, router compatibility
-    # SEPARATE from Wi-Fi Stability — setup failures are onboarding bugs, instability is firmware
+   
     "Wi-Fi Setup": [
         "QR code does not scan during setup",
         "Cannot connect to Wi-Fi at all",
@@ -113,10 +85,7 @@ TAXONOMY = {
         "Works on mesh / dual-band router",
     ],
 
-    # ── WI-FI STABILITY (POST-SETUP DROPS) ──────────────────────────────────
-    # Owner: Firmware team
-    # Note: multiple Cam360 reviews describe disconnecting even with router beside camera
-    #       Different root cause from setup failures — ongoing firmware / keepalive issue
+   
     "Wi-Fi Stability": [
         "Keeps disconnecting from Wi-Fi randomly",
         "Camera goes offline silently (no alert)",
@@ -127,9 +96,7 @@ TAXONOMY = {
         "Reconnects automatically after power outage",
     ],
 
-    # ── HARDWARE RELIABILITY ─────────────────────────────────────────────────
-    # Owner: Hardware / Manufacturing / QC
-    # Note: merged from old "Hardware Issues" + "Hardware & Build Quality"
+    
     "Hardware Reliability": [
         "Dead on arrival (DOA)",
         "Stopped working within first month",
@@ -143,10 +110,7 @@ TAXONOMY = {
         "Still working well after long-term use",
     ],
 
-    # ── OVERHEATING ──────────────────────────────────────────────────────────
-    # Owner: Hardware / Thermal engineering — SAFETY CRITICAL for dashcam
-    # Note: NEW — dashcam shuts off in 40-48°C Indian summer conditions
-    #       One review explicitly states dashcam missed accident footage due to thermal shutdown
+ 
     "Overheating": [
         "Dashcam shuts off in direct sunlight",
         "Stops working in Indian summer heat (40°C+)",
@@ -157,10 +121,7 @@ TAXONOMY = {
         "No overheating issues after long drives",
     ],
 
-    # ── RECORDING RELIABILITY ────────────────────────────────────────────────
-    # Owner: Firmware / Hardware team
-    # Note: hardware-level recording failure — distinct from app performance bugs
-    #       Dashcam-weighted but applies to Cam360 continuous recording too
+    
     "Recording Reliability": [
         "Recording pauses or stops mid-drive",
         "Frozen frames in footage",
@@ -173,10 +134,7 @@ TAXONOMY = {
         "Emergency recording captured incident successfully",
     ],
 
-    # ── FALSE / EXCESSIVE ALERTS ─────────────────────────────────────────────
-    # Owner: AI / Firmware team
-    # Note: NEW — firmware update on Cam360 triggered constant false alerts every second
-    #       Motion sensitivity is a separate issue from app crashes or detection not triggering
+    
     "False / Excessive Alerts": [
         "Alerts triggered constantly with nothing in frame",
         "Motion detection too sensitive",
@@ -188,10 +146,7 @@ TAXONOMY = {
         "Alert frequency is appropriate",
     ],
 
-    # ── CUSTOMER SUPPORT & SERVICE ───────────────────────────────────────────
-    # Owner: CX / After-sales team
-    # Note: merged "Customer Support" + "Service Issues" — same business function
-    #       Consistently highest-volume negative theme; support runaround documented in detail
+   
     "Customer Support & Service": [
         "No response from support team",
         "Support asks for same videos / proof repeatedly with no resolution",
@@ -205,10 +160,7 @@ TAXONOMY = {
         "Installation technician professional and efficient",
     ],
 
-    # ── INSTALLATION EXPERIENCE ──────────────────────────────────────────────
-    # Owner: Operations / Installation partner management
-    # Note: Dashcam ProX has paid Qubo installation — technician quality is inconsistent
-    #       Cam360 is DIY — complaints are about missing accessories / unclear guide
+   
     "Installation Experience": [
         "Hardwire kit not included (extra purchase required)",
         "Installer did not know the product",
@@ -222,10 +174,6 @@ TAXONOMY = {
         "Installation completed quickly without damage to car",
     ],
 
-    # ── WINDSHIELD GLARE ─────────────────────────────────────────────────────
-    # Owner: Hardware / Optics (Dashcam ProX specific)
-    # Note: NEW — multiple dashcam reviews mention needing a CPL filter for clear footage
-    #       This is a product design gap: CPL not included, not mentioned in product listing
     "Windshield Glare": [
         "Reflections and glare visible in footage",
         "Bright sunlight causes glare across entire video",
@@ -235,8 +183,7 @@ TAXONOMY = {
         "Clear footage in high-contrast lighting conditions",
     ],
 
-    # ── DASHCAM FEATURES ─────────────────────────────────────────────────────
-    # Owner: Product team — Automotive vertical
+   
     "Dashcam Features": [
         "No GPS or speed overlay",
         "GPS inaccurate or not updating",
@@ -250,8 +197,7 @@ TAXONOMY = {
         "Wide angle covers full road width",
     ],
 
-    # ── HOME CAMERA FEATURES ─────────────────────────────────────────────────
-    # Owner: Product team — Home Security vertical
+   
     "Home Camera Features": [
         "360 pan / tilt motor making noise while rotating",
         "Camera drifts or faces ceiling after power cut / reset",
@@ -267,9 +213,7 @@ TAXONOMY = {
         "Good night vision for indoor use",
     ],
 
-    # ── SUBSCRIPTION & PAYWALL ───────────────────────────────────────────────
-    # Owner: Business / Product team
-    # Note: NEW — multi-user access paywall appearing in reviews; small signal now, will grow
+    
     "Subscription & Paywall": [
         "More than 2 simultaneous users requires paid plan",
         "Cloud storage too expensive",
@@ -278,9 +222,7 @@ TAXONOMY = {
         "Cloud storage pricing reasonable",
     ],
 
-    # ── PRODUCT VALUE & COMPETITION ──────────────────────────────────────────
-    # Owner: Product / Marketing
-    # Signal: direct competitor mentions (Tapo, IMOU, Mi, CP Plus, Philips, 7MI)
+  
     "Product Value & Competition": [
         "Overpriced for features offered",
         "Better alternatives at same price (Tapo / IMOU / Mi / CP Plus)",
@@ -292,8 +234,7 @@ TAXONOMY = {
         "Switched from competitor and satisfied",
     ],
 
-    # ── DELIVERY & PACKAGING ─────────────────────────────────────────────────
-    # Owner: Supply chain / Fulfilment
+    
     "Delivery & Packaging": [
         "Broken seal on delivery",
         "Damaged product on arrival",

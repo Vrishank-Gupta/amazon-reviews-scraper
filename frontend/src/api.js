@@ -12,6 +12,23 @@ export function appPath(path) {
   return `${normalizedBase}${normalizedPath}`
 }
 
+function getSessionToken() {
+  return localStorage.getItem('session_token') || ''
+}
+
+export function authHeaders(extra = {}) {
+  const token = getSessionToken()
+  return token ? { 'X-Session-Token': token, ...extra } : { ...extra }
+}
+
+async function apiFetch(url, options = {}) {
+  const { headers = {}, ...rest } = options
+  return fetch(url, {
+    ...rest,
+    headers: { ...authHeaders(), ...headers },
+  })
+}
+
 // ── Shared param builder ──────────────────────────────────────────────────────
 // All API calls use `product_category` (product group) NOT the taxonomy `category`
 function buildParams(filters = {}) {
@@ -28,36 +45,36 @@ export async function fetchReviews(filters = {}) {
   const p = buildParams(filters)
   if (filters.sentiment?.length) p.set('sentiment', filters.sentiment.join(','))
   if (filters.rating?.length)    p.set('rating', filters.rating.join(','))
-  const res = await fetch(apiUrl(`/api/reviews?${p}`))
+  const res = await apiFetch(apiUrl(`/api/reviews?${p}`))
   return res.json()
 }
 
 export async function fetchFilters() {
-  const res = await fetch(apiUrl('/api/filters'))
+  const res = await apiFetch(apiUrl('/api/filters'))
   return res.json()
 }
 
 export async function fetchAnalysis(filters = {}) {
   const p = buildParams(filters)
-  const res = await fetch(apiUrl(`/api/analysis?${p}`))
+  const res = await apiFetch(apiUrl(`/api/analysis?${p}`))
   return res.json()
 }
 
 export async function fetchSummary(filters = {}) {
   const p = buildParams(filters)
-  const res = await fetch(apiUrl(`/api/summary?${p}`))
+  const res = await apiFetch(apiUrl(`/api/summary?${p}`))
   return res.json()
 }
 
 export async function fetchCxoTrends(filters = {}) {
   const p = buildParams(filters)
-  const res = await fetch(apiUrl(`/api/trends/cxo?${p}`))
+  const res = await apiFetch(apiUrl(`/api/trends/cxo?${p}`))
   return res.json()
 }
 
 export async function fetchRatingTrends(filters = {}) {
   const p = buildParams(filters)
-  const res = await fetch(apiUrl(`/api/trends/rating?${p}`))
+  const res = await apiFetch(apiUrl(`/api/trends/rating?${p}`))
   return res.json()
 }
 
@@ -70,7 +87,7 @@ export async function fetchWordCloud(filters = {}, taxonomyCategory = null) {
     p.delete('category')
   }
   if (taxonomyCategory) p.set('category', taxonomyCategory)
-  const res = await fetch(apiUrl(`/api/wordcloud?${p}`))
+  const res = await apiFetch(apiUrl(`/api/wordcloud?${p}`))
   return res.json()
 }
 
@@ -82,22 +99,22 @@ export async function fetchReviewsByKeyword(keyword, filters = {}) {
     p.set('product_category', p.get('category'))
     p.delete('category')
   }
-  const res = await fetch(apiUrl(`/api/reviews/by-keyword?${p}`))
+  const res = await apiFetch(apiUrl(`/api/reviews/by-keyword?${p}`))
   return res.json()
 }
 
 export async function fetchPipeline() {
-  const res = await fetch(apiUrl('/api/pipeline'))
+  const res = await apiFetch(apiUrl('/api/pipeline'))
   return res.json()
 }
 
 export async function fetchPipelineCapabilities() {
-  const res = await fetch(apiUrl('/api/pipeline/capabilities'))
+  const res = await apiFetch(apiUrl('/api/pipeline/capabilities'))
   return res.json()
 }
 
 export async function runPipeline(days = 30, asins = []) {
-  const res = await fetch(apiUrl('/api/pipeline/run'), {
+  const res = await apiFetch(apiUrl('/api/pipeline/run'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ days, asins }),
@@ -115,12 +132,12 @@ export async function runPipeline(days = 30, asins = []) {
 }
 
 export async function fetchPipelineJobs(limit = 10) {
-  const res = await fetch(apiUrl(`/api/pipeline/jobs?limit=${limit}`))
+  const res = await apiFetch(apiUrl(`/api/pipeline/jobs?limit=${limit}`))
   return res.json()
 }
 
 export async function fetchPipelineJob(jobId) {
-  const res = await fetch(apiUrl(`/api/pipeline/jobs/${jobId}`))
+  const res = await apiFetch(apiUrl(`/api/pipeline/jobs/${jobId}`))
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data.detail || 'Failed to fetch pipeline job')
@@ -129,34 +146,34 @@ export async function fetchPipelineJob(jobId) {
 }
 
 export async function fetchStats() {
-  const res = await fetch(apiUrl('/api/stats'))
+  const res = await apiFetch(apiUrl('/api/stats'))
   return res.json()
 }
 
 export async function fetchTrends(params = {}) {
   const p = buildParams(params)
   if (params.granularity) p.set('granularity', params.granularity)
-  const res = await fetch(apiUrl(`/api/trends?${p}`))
+  const res = await apiFetch(apiUrl(`/api/trends?${p}`))
   return res.json()
 }
 
 export async function fetchPipelineStatus() {
-  const res = await fetch(apiUrl('/api/pipeline/status'))
+  const res = await apiFetch(apiUrl('/api/pipeline/status'))
   return res.json()
 }
 
 export async function fetchAsins() {
-  const res = await fetch(apiUrl('/api/asins'))
+  const res = await apiFetch(apiUrl('/api/asins'))
   return res.json()
 }
 
 export async function fetchCategories() {
-  const res = await fetch(apiUrl('/api/categories'))
+  const res = await apiFetch(apiUrl('/api/categories'))
   return res.json()
 }
 
 export async function saveCategory(category) {
-  const res = await fetch(apiUrl('/api/categories'), {
+  const res = await apiFetch(apiUrl('/api/categories'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ category }),
@@ -167,7 +184,7 @@ export async function saveCategory(category) {
 }
 
 export async function deleteCategory(categoryName) {
-  const res = await fetch(apiUrl(`/api/categories/${encodeURIComponent(categoryName)}`), {
+  const res = await apiFetch(apiUrl(`/api/categories/${encodeURIComponent(categoryName)}`), {
     method: 'DELETE',
   })
   const data = await res.json()
@@ -176,7 +193,7 @@ export async function deleteCategory(categoryName) {
 }
 
 export async function saveAsin({ asin, product_name = '', category = '' }) {
-  const res = await fetch(apiUrl('/api/asins'), {
+  const res = await apiFetch(apiUrl('/api/asins'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ asin, product_name, category }),
@@ -187,6 +204,6 @@ export async function saveAsin({ asin, product_name = '', category = '' }) {
 }
 
 export async function generateSummaries() {
-  const res = await fetch(apiUrl('/api/summary/generate'), { method: 'POST' })
+  const res = await apiFetch(apiUrl('/api/summary/generate'), { method: 'POST' })
   return res.json()
 }

@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchReviews, fetchFilters, fetchStats, fetchPipelineStatus } from './api'
+import { fetchReviews, fetchFilters, fetchStats, fetchPipelineStatus, apiUrl } from './api'
 import { downloadCSV } from './components/TrendsPage'
 import FilterBar from './components/Filterbar'
 import ReviewsTable from './components/ReviewsTable'
 import TrendsPage from './components/TrendsPage'
 import AnalysisPage from './components/Analysispage'
 import SummaryPage from './components/Summarypage'
-import { RefreshCw, Download, ChevronDown } from 'lucide-react'
+import LoginPage from './components/LoginPage'
+import { RefreshCw, Download, ChevronDown, LogOut } from 'lucide-react'
 import { SHOW_TRENDS_TAB } from './config/dashboard'
 
 const DEFAULT_FILTERS = {
@@ -80,6 +81,48 @@ function formatHeaderDate(value) {
 }
 
 export default function App() {
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  const [authChecked, setAuthChecked] = useState(false)
+  const [authedEmail, setAuthedEmail] = useState(null)
+
+  useEffect(() => {
+    const token = localStorage.getItem('session_token')
+    if (!token) { setAuthChecked(true); return }
+    fetch(apiUrl('/api/auth/verify-session'), {
+      headers: { 'X-Session-Token': token },
+    })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => { setAuthedEmail(data.email); setAuthChecked(true) })
+      .catch(() => {
+        localStorage.removeItem('session_token')
+        localStorage.removeItem('session_email')
+        localStorage.removeItem('session_expires')
+        setAuthChecked(true)
+      })
+  }, [])
+
+  function handleLogout() {
+    const token = localStorage.getItem('session_token')
+    if (token) {
+      fetch(apiUrl('/api/auth/logout'), {
+        method: 'POST',
+        headers: { 'X-Session-Token': token },
+      }).catch(() => {})
+    }
+    localStorage.removeItem('session_token')
+    localStorage.removeItem('session_email')
+    localStorage.removeItem('session_expires')
+    setAuthedEmail(null)
+  }
+
+  if (!authChecked) return null
+  if (!authedEmail) return <LoginPage onLogin={email => setAuthedEmail(email)} />
+
+  // ── Dashboard ───────────────────────────────────────────────────────────────
+  return <Dashboard authedEmail={authedEmail} onLogout={handleLogout} />
+}
+
+function Dashboard({ authedEmail, onLogout }) {
   const [tab, setTab] = useState('analysis')
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
   const [reviews, setReviews] = useState([])
@@ -295,6 +338,21 @@ export default function App() {
           >
             <RefreshCw size={12} className={refreshing ? 'spin' : ''} /> Refresh
           </button>
+          <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>{authedEmail}</div>
+            <button
+              onClick={onLogout}
+              title="Sign out"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                background: 'none', border: 'none', padding: 0,
+                color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer',
+              }}
+            >
+              <LogOut size={11} /> Sign out
+            </button>
+          </div>
         </div>
       </header>
 

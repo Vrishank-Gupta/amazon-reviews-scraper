@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { X } from 'lucide-react'
-import { apiUrl } from '../api'
+import { apiUrl, authHeaders } from '../api'
 
 function StarLabel({ rating }) {
   const rounded = Math.round(parseFloat(rating) || 0)
@@ -132,7 +132,7 @@ export default function ReviewsDrawer({
     if (sentiment) params.set('sentiment', sentiment)
     if (taxonomyCategory) params.set('category', taxonomyCategory)
 
-    fetch(apiUrl(`/api/reviews/by-keyword?${params}`))
+    fetch(apiUrl(`/api/reviews/by-keyword?${params}`), { headers: authHeaders() })
       .then(response => response.json())
       .then(setReviews)
       .catch(() => setReviews([]))

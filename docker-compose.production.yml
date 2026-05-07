@@ -6,7 +6,7 @@ services:
     container_name: amazon-reviews-backend
     restart: unless-stopped
     env_file:
-      - .env.production
+      - .env.backend.production
     environment:
       APP_ENV: production
       APP_ROLE: backend
