@@ -468,6 +468,13 @@ export default function FilterBar({ filters, options, onChange, tab }) {
     return null
   })()
 
+  const applyDatePreset = days => {
+    if (days === null) { onChange({ date_from: null, date_to: null }); return }
+    const to = new Date(), from = new Date()
+    from.setDate(to.getDate() - days)
+    onChange({ date_from: from.toISOString().slice(0, 10), date_to: to.toISOString().slice(0, 10) })
+  }
+
   const resetAll = () => onChange({
     product_category: null, product: [],
     date_from: null, date_to: null,
@@ -494,6 +501,18 @@ export default function FilterBar({ filters, options, onChange, tab }) {
       <div style={{ width:1, height:20, background:'var(--border)', flexShrink:0 }} />
 
       <DateDropdown filters={filters} onChange={onChange} />
+      <div style={{ display:'flex', gap:2, alignItems:'center' }}>
+        {DATE_PRESETS.map(p => (
+          <button key={p.label} onClick={() => applyDatePreset(p.days)} style={{
+            padding:'3px 8px', borderRadius:99,
+            border:`1px solid ${activePreset===p.label?'var(--accent)':'transparent'}`,
+            background: activePreset===p.label?'rgba(255,78,26,0.12)':'transparent',
+            color: activePreset===p.label?'var(--accent)':'var(--text-muted)',
+            fontSize:10, fontWeight:600, cursor:'pointer', fontFamily:'DM Sans',
+          }}>{p.label}</button>
+        ))}
+      </div>
+      <div style={{ width:1, height:20, background:'var(--border)', flexShrink:0 }} />
       <ProductDropdown filters={filters} options={options} onChange={onChange} />
 
       {showReviewFilters && <>

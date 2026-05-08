@@ -63,6 +63,55 @@ function EmptyState({ text = 'No data for selected filters.' }) {
   return <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{text}</div>
 }
 
+function getPeriodLabel(filters) {
+  if (!filters.date_from && !filters.date_to) return 'All time'
+  if (!filters.date_from) return `Up to ${new Date(filters.date_to).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+  const days = Math.round((new Date() - new Date(filters.date_from)) / 86400000)
+  if (days <= 8) return 'Last 7 days'
+  if (days <= 31) return 'Last 30 days'
+  if (days <= 92) return 'Last 90 days'
+  const from = new Date(filters.date_from).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  const to = filters.date_to ? new Date(filters.date_to).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'Today'
+  return `${from} – ${to}`
+}
+
+function AlertsBanner({ kpi, momentum }) {
+  const total = kpi.total || 0
+  const negPct = total ? +((kpi.negative / total) * 100).toFixed(1) : 0
+  const alerts = []
+
+  if (negPct > 30) alerts.push({ level: 'critical', text: `Overall negative rate is ${negPct}% — above the 30% problem threshold` })
+  else if (negPct > 20) alerts.push({ level: 'warn', text: `Negative rate is ${negPct}% — approaching the 30% watch threshold` })
+
+  const newIssues = (momentum || []).filter(m => m.first === 0 && m.second > 0)
+  if (newIssues.length > 0)
+    alerts.push({ level: 'warn', text: `${newIssues.length} new issue${newIssues.length > 1 ? 's' : ''} detected: ${newIssues.slice(0, 2).map(m => m.category).join(', ')}${newIssues.length > 2 ? ` +${newIssues.length - 2} more` : ''}` })
+
+  ;(momentum || []).filter(m => m.first > 0 && (m.pct_change || 0) >= 50).slice(0, 1)
+    .forEach(m => alerts.push({ level: 'warn', text: `"${m.category}" rising ${m.pct_change}% vs prior period` }))
+
+  if (!alerts.length) return null
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {alerts.slice(0, 3).map((alert, i) => (
+        <div key={i} style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px',
+          background: alert.level === 'critical' ? 'rgba(239,68,68,0.07)' : 'rgba(234,179,8,0.07)',
+          border: `1px solid ${alert.level === 'critical' ? 'rgba(239,68,68,0.25)' : 'rgba(234,179,8,0.25)'}`,
+          borderLeft: `3px solid ${alert.level === 'critical' ? '#ef4444' : '#eab308'}`,
+          borderRadius: 8, fontSize: 12,
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: alert.level === 'critical' ? '#ef4444' : '#eab308', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            {alert.level === 'critical' ? '● CRITICAL' : '▲ WATCH'}
+          </span>
+          <span style={{ color: 'var(--text)', lineHeight: 1.4 }}>{alert.text}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function KeywordToneTabs({ value, onChange }) {
   const options = [
     ['mixed', 'Mixed'],
@@ -104,7 +153,7 @@ function buildWordRows(words, tone) {
     .sort((left, right) => right.count - left.count)
 }
 
-function OverviewCards({ kpi, productCount }) {
+function OverviewCards({ kpi, productCount, periodLabel }) {
   const total = kpi.total || 0
   const negative = kpi.negative || 0
   const positive = kpi.positive || 0
@@ -114,10 +163,10 @@ function OverviewCards({ kpi, productCount }) {
   const neutralPct = total ? ((neutral / total) * 100).toFixed(1) : '0.0'
 
   const cards = [
-    { label: 'Feedback Volume', value: total.toLocaleString(), sub: `${productCount} products - selected period`, color: '#60a5fa' },
-    { label: '1-2 Stars', value: negative.toLocaleString(), sub: `${negativePct}% of reviews`, color: '#ef4444' },
-    { label: '4-5 Stars', value: positive.toLocaleString(), sub: `${positivePct}% of reviews`, color: '#22c55e' },
-    { label: '3 Stars', value: neutral.toLocaleString(), sub: `${neutralPct}% of reviews`, color: '#eab308' },
+    { label: 'Feedback Volume', value: total.toLocaleString(), sub: `${productCount} products · ${periodLabel}`, color: '#60a5fa' },
+    { label: '1-2 Stars', value: negative.toLocaleString(), sub: `${negativePct}% of reviews · ${periodLabel}`, color: '#ef4444' },
+    { label: '4-5 Stars', value: positive.toLocaleString(), sub: `${positivePct}% of reviews · ${periodLabel}`, color: '#22c55e' },
+    { label: '3 Stars', value: neutral.toLocaleString(), sub: `${neutralPct}% of reviews · ${periodLabel}`, color: '#eab308' },
   ]
 
   return (
@@ -444,6 +493,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const trend = data?.daily_trend || []
   const dailyRating = cxoData?.daily_rating || []
   const momentum = cxoData?.category_momentum || []
+  const periodLabel = getPeriodLabel(filters)
   const activeTrend = localTrendData?.daily_trend ?? trend
   const activeDailyRating = localTrendData?.daily_rating ?? dailyRating
   const displayedCategoryBreakdown = (localIssueData?.category_breakdown ?? data?.category_breakdown ?? []).slice(0, 8)
@@ -466,8 +516,9 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <AlertsBanner kpi={kpi} momentum={momentum} />
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
-        <OverviewCards kpi={kpi} productCount={scopedProducts.length || allProducts?.length || 0} />
+        <OverviewCards kpi={kpi} productCount={scopedProducts.length || allProducts?.length || 0} periodLabel={periodLabel} />
         <Card title="Amazon Rating Signal" tip="Amazon product-page rating snapshots over time, alongside scraped daily review averages.">
           <RatingTrendChart filters={filters} tree={tree} />
         </Card>

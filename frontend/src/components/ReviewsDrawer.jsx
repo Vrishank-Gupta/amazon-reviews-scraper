@@ -79,13 +79,13 @@ function ReviewCard({ r }) {
           lineHeight: 1.6,
           overflow: 'hidden',
           display: open ? 'block' : '-webkit-box',
-          WebkitLineClamp: open ? 'unset' : 3,
+          WebkitLineClamp: open ? 'unset' : 5,
           WebkitBoxOrient: 'vertical',
         }}
       >
         {r.review}
       </div>
-      {r.review?.length > 220 && (
+      {r.review?.length > 300 && (
         <button
           onClick={() => setOpen(value => !value)}
           style={{

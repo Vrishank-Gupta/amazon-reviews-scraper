@@ -86,12 +86,28 @@ function SortButton({ label, active, dir, onClick }) {
   )
 }
 
-function ReviewText({ row, expanded, setExpanded }) {
+function HighlightText({ text, query }) {
+  if (!query || !text) return <>{text || ''}</>
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const parts = text.split(new RegExp(`(${escaped})`, 'gi'))
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase()
+          ? <mark key={i} style={{ background: 'rgba(255,78,26,0.25)', color: 'var(--accent)', borderRadius: 2, padding: '0 1px', fontStyle: 'inherit' }}>{part}</mark>
+          : part
+      )}
+    </>
+  )
+}
+
+function ReviewText({ row, expanded, setExpanded, query }) {
   const isExpanded = expanded === row.review_id
   const canExpand = (row.review || '').length > 140 || (row.review || '').includes('\n')
+  const content = <HighlightText text={row.review} query={query} />
 
   if (!canExpand) {
-    return <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.55 }}>{row.review}</div>
+    return <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.55 }}>{content}</div>
   }
 
   return (
@@ -122,7 +138,7 @@ function ReviewText({ row, expanded, setExpanded }) {
           flex: 1,
         }}
       >
-        {row.review}
+        {content}
       </span>
       {isExpanded
         ? <ChevronUp size={14} style={{ flexShrink: 0, marginTop: 2, color: 'var(--accent)' }} />
@@ -137,27 +153,32 @@ export default function ReviewsTable({ data }) {
   const [sortKey, setSortKey] = useState('scrape_date')
   const [sortDir, setSortDir] = useState('desc')
   const [query, setQuery] = useState('')
+  const [sentimentChip, setSentimentChip] = useState(null)
 
   const normalizedQuery = query.trim().toLowerCase()
 
   const filtered = useMemo(() => {
-    if (!normalizedQuery) return data
-    return data.filter(row => {
-      const haystack = [
-        row.product_name,
-        row.category,
-        row.review,
-        row.title,
-        row.sentiment,
-        ...(row.primary_categories || []),
-        ...(row.sub_tags || []),
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return haystack.includes(normalizedQuery)
-    })
-  }, [data, normalizedQuery])
+    let result = data
+    if (normalizedQuery) {
+      result = result.filter(row => {
+        const haystack = [
+          row.product_name,
+          row.category,
+          row.review,
+          row.title,
+          row.sentiment,
+          ...(row.primary_categories || []),
+          ...(row.sub_tags || []),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+        return haystack.includes(normalizedQuery)
+      })
+    }
+    if (sentimentChip) result = result.filter(row => row.sentiment === sentimentChip)
+    return result
+  }, [data, normalizedQuery, sentimentChip])
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -253,6 +274,22 @@ export default function ReviewsTable({ data }) {
         ))}
       </div>
 
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        {[null, 'Positive', 'Neutral', 'Negative'].map(s => {
+          const isActive = sentimentChip === s
+          const color = s === 'Positive' ? '#22c55e' : s === 'Negative' ? '#ef4444' : s === 'Neutral' ? '#eab308' : 'var(--accent)'
+          return (
+            <button key={s || 'all'} onClick={() => { setSentimentChip(s); setPage(0) }} style={{
+              padding: '4px 12px', borderRadius: 99,
+              border: `1px solid ${isActive ? color : 'var(--border)'}`,
+              background: isActive ? `${color}18` : 'transparent',
+              color: isActive ? color : 'var(--text-muted)',
+              fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans',
+            }}>{s || 'All'}</button>
+          )
+        })}
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', minWidth: 280, flex: 1 }}>
           <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-muted)' }} />
@@ -334,7 +371,7 @@ export default function ReviewsTable({ data }) {
                     </div>
                   </td>
                   <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', maxWidth: 420 }}>
-                    <ReviewText row={row} expanded={expanded} setExpanded={setExpanded} />
+                    <ReviewText row={row} expanded={expanded} setExpanded={setExpanded} query={normalizedQuery} />
                   </td>
                   <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
                     {row.review_url ? (

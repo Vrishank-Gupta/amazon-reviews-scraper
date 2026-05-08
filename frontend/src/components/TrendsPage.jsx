@@ -199,9 +199,9 @@ function IssueWatchlist({ momentum, onRowClick }) {
         const barColor = rising || isNew ? '#ef4444' : falling || resolved ? '#22c55e' : '#60a5fa'
 
         // Priority badge — top 3 get escalating urgency
-        const priority = i === 0 ? { label: '#1', color: '#ef4444' }
-                        : i === 1 ? { label: '#2', color: '#f97316' }
-                        : i === 2 ? { label: '#3', color: '#fbbf24' }
+        const priority = i === 0 ? { label: 'P1', sub: 'Critical', color: '#ef4444' }
+                        : i === 1 ? { label: 'P2', sub: 'High',     color: '#f97316' }
+                        : i === 2 ? { label: 'P3', sub: 'Watch',    color: '#fbbf24' }
                         : null
 
         return (
@@ -222,7 +222,9 @@ function IssueWatchlist({ momentum, onRowClick }) {
             <div style={{ display:'flex', flexDirection:'column', gap:4, minWidth:0 }}>
               <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                 {priority && (
-                  <span style={{ fontSize:9, fontWeight:700, color:priority.color, flexShrink:0 }}>{priority.label}</span>
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:2, fontSize:9, fontWeight:700, color:priority.color, flexShrink:0, background:`${priority.color}15`, border:`1px solid ${priority.color}30`, borderRadius:4, padding:'1px 5px', whiteSpace:'nowrap' }}>
+                    {priority.label} <span style={{ opacity:0.65, fontWeight:400 }}>· {priority.sub}</span>
+                  </span>
                 )}
                 <span style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                   {m.category}
@@ -491,6 +493,14 @@ export default function TrendsPage({ products: allProducts, filters }) {
     health: Math.max(0, +(100 - d.rolling_neg).toFixed(1)),
   }))
 
+  const healthDelta = (() => {
+    if (healthData.length < 4) return null
+    const half = Math.floor(healthData.length / 2)
+    const early = healthData.slice(0, half).reduce((s, d) => s + d.health, 0) / half
+    const recent = healthData.slice(-half).reduce((s, d) => s + d.health, 0) / half
+    return Math.round(recent - early)
+  })()
+
   const thisWeek  = weeklyDigest[weeklyDigest.length-1]
   const priorWeek = weeklyDigest[weeklyDigest.length-2]
 
@@ -608,12 +618,18 @@ export default function TrendsPage({ products: allProducts, filters }) {
               const latest = healthData[healthData.length-1]?.health || 0
               const color = latest>=75?'#22c55e':latest>=60?'#eab308':'#ef4444'
               const label = latest>=75?'HEALTHY':latest>=60?'WATCH':'CRITICAL'
+              const deltaColor = healthDelta == null ? '#94a3b8' : healthDelta > 0 ? '#22c55e' : healthDelta < 0 ? '#ef4444' : '#94a3b8'
               return (
                 <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:4 }}>
                   <div style={{ fontFamily:'Bebas Neue', fontSize:52, lineHeight:1, color }}>{latest}</div>
                   <div>
                     <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.15em', color, padding:'2px 8px', borderRadius:4, border:`1px solid ${color}50`, background:`${color}15`, display:'inline-block' }}>{label}</div>
                     <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>Based on {healthData.length}-day window</div>
+                    {healthDelta !== null && (
+                      <div style={{ fontSize:12, fontWeight:700, color:deltaColor, marginTop:3 }}>
+                        {healthDelta > 0 ? `↑ +${healthDelta} pts` : healthDelta < 0 ? `↓ ${healthDelta} pts` : '→ flat'} vs start of period
+                      </div>
+                    )}
                   </div>
                 </div>
               )

@@ -237,6 +237,7 @@ export default function SummaryPage({ filters, allProducts }) {
   const [sortDir, setSortDir] = useState(-1)
   const [tableSearch, setTableSearch] = useState('')
   const [tableCatFilter, setTableCatFilter] = useState(null)
+  const [priorityFirst, setPriorityFirst] = useState(false)
 
   const apiParams = {
     product_category: filters.product_category || null,
@@ -280,6 +281,9 @@ export default function SummaryPage({ filters, allProducts }) {
 
   const tableCategories = useMemo(() => [...new Set(rows.map(r => r.category || 'Other'))], [rows])
 
+  const actNowCount = useMemo(() => rows.filter(r => (100 - (r.neg_pct || 0)) < 60).length, [rows])
+  const watchCount = useMemo(() => rows.filter(r => { const h = 100 - (r.neg_pct || 0); return h >= 60 && h < 75 }).length, [rows])
+
   const groupedRows = useMemo(() => {
     const q = tableSearch.trim().toLowerCase()
     const groups = {}
@@ -290,8 +294,12 @@ export default function SummaryPage({ filters, allProducts }) {
       if (!groups[category]) groups[category] = []
       groups[category].push(row)
     })
-    return Object.entries(groups).map(([category, items]) => ({ category, items }))
-  }, [sorted, tableSearch, tableCatFilter])
+    const result = Object.entries(groups).map(([category, items]) => ({ category, items }))
+    if (priorityFirst) {
+      result.forEach(group => { group.items.sort((a, b) => (100 - (a.neg_pct || 0)) - (100 - (b.neg_pct || 0))) })
+    }
+    return result
+  }, [sorted, tableSearch, tableCatFilter, priorityFirst])
 
   const ratingLookup = useMemo(
     () => Object.fromEntries(ratingDistribution.map(row => [row.product, row])),
@@ -327,11 +335,28 @@ export default function SummaryPage({ filters, allProducts }) {
               Sorted by the selected column and split by category sections.
             </div>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <span><span style={{ color: '#ef4444', fontWeight: 700 }}>up red</span> = worse</span>
-            <span><span style={{ color: '#22c55e', fontWeight: 700 }}>down green</span> = improved</span>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <span><span style={{ color: '#ef4444', fontWeight: 700 }}>up red</span> = worse</span>
+              <span><span style={{ color: '#22c55e', fontWeight: 700 }}>down green</span> = improved</span>
+            </div>
+            <button
+              onClick={() => setPriorityFirst(p => !p)}
+              style={{ padding: '4px 10px', borderRadius: 99, border: `1px solid ${priorityFirst ? '#ef4444' : 'var(--border)'}`, background: priorityFirst ? 'rgba(239,68,68,0.1)' : 'transparent', color: priorityFirst ? '#ef4444' : 'var(--text-muted)', fontSize: 10, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.04em' }}
+            >
+              {priorityFirst ? '● Priority order ON' : '○ Sort by priority'}
+            </button>
           </div>
         </div>
+
+        {rows.length > 0 && (
+          <div style={{ padding: '6px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface2)', display: 'flex', alignItems: 'center', gap: 12, fontSize: 11 }}>
+            <span style={{ color: 'var(--text-muted)' }}>{rows.length} products</span>
+            {actNowCount > 0 && <span style={{ color: '#ef4444', fontWeight: 700 }}>● {actNowCount} act now</span>}
+            {watchCount > 0 && <span style={{ color: '#eab308', fontWeight: 600 }}>▲ {watchCount} watch</span>}
+            {actNowCount === 0 && watchCount === 0 && <span style={{ color: '#22c55e', fontWeight: 600 }}>✓ All products healthy</span>}
+          </div>
+        )}
 
         <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface2)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <input
@@ -403,6 +428,12 @@ export default function SummaryPage({ filters, allProducts }) {
 }
 
 function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ratingDistribution, filters }) {
+  const health = 100 - (row.neg_pct || 0)
+  const isActNow = health < 60
+  const isWatch = health >= 60 && health < 75
+  const rowBackground = isDrill ? 'rgba(255,78,26,0.05)' : isActNow ? 'rgba(239,68,68,0.05)' : rowBg
+  const leftBorder = isDrill ? '3px solid var(--accent)' : isActNow ? '3px solid #ef4444' : isWatch ? '3px solid #eab308' : '3px solid transparent'
+
   return (
     <>
       {showCategory && (
@@ -414,9 +445,9 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
       )}
       <tr
         onClick={onToggle}
-        style={{ cursor: 'pointer', background: isDrill ? 'rgba(255,78,26,0.05)' : rowBg, transition: 'background 0.1s', borderLeft: isDrill ? '3px solid var(--accent)' : '3px solid transparent' }}
+        style={{ cursor: 'pointer', background: rowBackground, transition: 'background 0.1s', borderLeft: leftBorder }}
         onMouseEnter={event => { event.currentTarget.style.background = 'rgba(255,78,26,0.04)' }}
-        onMouseLeave={event => { event.currentTarget.style.background = isDrill ? 'rgba(255,78,26,0.05)' : rowBg }}
+        onMouseLeave={event => { event.currentTarget.style.background = rowBackground }}
       >
         <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600, borderBottom: isDrill ? 'none' : '1px solid var(--border)', maxWidth: 230 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
