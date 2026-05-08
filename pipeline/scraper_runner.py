@@ -36,7 +36,12 @@ os.makedirs(_DEFAULT_CHROME_PROFILE, exist_ok=True)
 PAUSE_BETWEEN_ASINS = float(os.getenv("SCRAPER_PAUSE", "8"))
 
 _asin_filter_raw = os.getenv("SCRAPE_ASINS", "").strip()
-ASIN_FILTER = set(a.strip() for a in _asin_filter_raw.split(",") if a.strip())
+_cli_asins = [a for a in sys.argv[1:] if a.strip()]
+ASIN_FILTER = (
+    set(_cli_asins)
+    if _cli_asins
+    else set(a.strip() for a in _asin_filter_raw.split(",") if a.strip())
+)
 
 
 # ── DB ─────────────────────────────────────────────────────────────────────────
@@ -50,6 +55,15 @@ def get_db():
         charset="utf8mb4",
         autocommit=False,
     )
+
+
+def get_asin_cutoff_date(asin: str, conn):
+    """Return the most recent review_date already in DB for this ASIN, or None if never scraped."""
+    cur = conn.cursor()
+    cur.execute("SELECT MAX(review_date) FROM raw_reviews WHERE asin = %s", (asin,))
+    row = cur.fetchone()
+    cur.close()
+    return row[0] if row and row[0] else None
 
 
 def insert_reviews(reviews: list, conn) -> int:
@@ -210,7 +224,12 @@ def wait_until_reviews_ready(driver, asin, timeout=300):
             continue
 
         # Page loaded but no reviews and no login form
-        # Could be a redirect, CAPTCHA, or empty product — wait a bit more
+        # Give the page up to 8s to fully render, then treat it as genuinely empty
+        if waited >= 8:
+            page_ready = driver.execute_script("return document.readyState === 'complete'")
+            if page_ready:
+                print(f"  -> Page loaded but no reviews found — product likely has 0 reviews. Skipping.")
+                return
         if waited % 20 == 0 and waited > 0:
             print(f"  Waiting for page to load... ({waited}s) URL: {driver.current_url[:80]}")
 
@@ -230,9 +249,16 @@ def scrape_asin(row: dict, driver, db_conn) -> dict:
         # Wait until reviews page is ready (handles login automatically)
         wait_until_reviews_ready(driver, asin)
 
+        # Use latest DB date as cutoff so we only fetch genuinely new reviews
+        cutoff = get_asin_cutoff_date(asin, db_conn)
+        if cutoff:
+            print(f"  Latest review in DB: {cutoff} — fetching only newer reviews")
+        else:
+            print(f"  No prior reviews in DB — fetching last {os.getenv('SCRAPE_DAYS_BACK', 30)} days")
+
         # Now hand off to scraper — page is already loaded and verified
         print(f"  Scraping reviews...")
-        reviews = scrape_reviews_for_asin(driver, asin, product_name, category=category, already_on_page=True)
+        reviews = scrape_reviews_for_asin(driver, asin, product_name, category=category, already_on_page=True, cutoff_date=cutoff)
         print(f"  Got {len(reviews)} reviews — saving...")
         inserted = insert_reviews(reviews, db_conn)
         print(f"  ✓ {inserted} new rows inserted")
@@ -273,7 +299,7 @@ def main():
     db_conn = get_db()
     driver  = make_driver()
     results = []
-
+    
     try:
         for i, row in enumerate(asins, 1):
             print(f"\n── [{i}/{len(asins)}] {row['product_name']} ({row['asin']}) ──")

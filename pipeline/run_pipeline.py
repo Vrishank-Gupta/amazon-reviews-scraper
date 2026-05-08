@@ -48,8 +48,8 @@ try:
 
     print("Step 1/2: Scraping reviews...")
     subprocess.check_call(
-        [sys.executable, os.path.join(pipeline_dir, "scraper_runner.py")],
-        cwd=pipeline_dir,  # run from pipeline/ so local imports resolve
+        [sys.executable, os.path.join(pipeline_dir, "scraper_runner.py")] + sys.argv[1:],
+        cwd=pipeline_dir,
     )
 
     print("Step 2/2: Tagging reviews...")

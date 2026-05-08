@@ -235,6 +235,8 @@ export default function SummaryPage({ filters, allProducts }) {
   const [drillRow, setDrillRow] = useState(null)
   const [sortKey, setSortKey] = useState('neg_pct')
   const [sortDir, setSortDir] = useState(-1)
+  const [tableSearch, setTableSearch] = useState('')
+  const [tableCatFilter, setTableCatFilter] = useState(null)
 
   const apiParams = {
     product_category: filters.product_category || null,
@@ -276,15 +278,20 @@ export default function SummaryPage({ filters, allProducts }) {
       : (leftValue - rightValue) * sortDir
   })
 
+  const tableCategories = useMemo(() => [...new Set(rows.map(r => r.category || 'Other'))], [rows])
+
   const groupedRows = useMemo(() => {
+    const q = tableSearch.trim().toLowerCase()
     const groups = {}
     sorted.forEach(row => {
       const category = row.category || 'Other'
+      if (tableCatFilter && category !== tableCatFilter) return
+      if (q && !row.product_name?.toLowerCase().includes(q)) return
       if (!groups[category]) groups[category] = []
       groups[category].push(row)
     })
     return Object.entries(groups).map(([category, items]) => ({ category, items }))
-  }, [sorted])
+  }, [sorted, tableSearch, tableCatFilter])
 
   const ratingLookup = useMemo(
     () => Object.fromEntries(ratingDistribution.map(row => [row.product, row])),
@@ -324,6 +331,32 @@ export default function SummaryPage({ filters, allProducts }) {
             <span><span style={{ color: '#ef4444', fontWeight: 700 }}>up red</span> = worse</span>
             <span><span style={{ color: '#22c55e', fontWeight: 700 }}>down green</span> = improved</span>
           </div>
+        </div>
+
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface2)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <input
+            value={tableSearch}
+            onChange={e => setTableSearch(e.target.value)}
+            placeholder="Search product..."
+            style={{ padding: '5px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 11, outline: 'none', fontFamily: 'DM Sans', width: 150 }}
+          />
+          {tableCategories.map(cat => (
+            <button
+              key={cat}
+              onClick={() => setTableCatFilter(tableCatFilter === cat ? null : cat)}
+              style={{ padding: '4px 10px', borderRadius: 99, border: `1px solid ${tableCatFilter === cat ? 'var(--accent)' : 'var(--border)'}`, background: tableCatFilter === cat ? 'rgba(255,78,26,0.12)' : 'transparent', color: tableCatFilter === cat ? 'var(--accent)' : 'var(--text-muted)', fontSize: 10, fontWeight: 600, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.04em' }}
+            >
+              {cat}
+            </button>
+          ))}
+          {(tableSearch || tableCatFilter) && (
+            <button
+              onClick={() => { setTableSearch(''); setTableCatFilter(null) }}
+              style={{ padding: '4px 8px', borderRadius: 99, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 10, cursor: 'pointer', marginLeft: 'auto' }}
+            >
+              clear ×
+            </button>
+          )}
         </div>
 
         <div style={{ overflowX: 'auto' }}>

@@ -232,16 +232,16 @@ def scrape_product_rating(driver, asin):
         return None
 
 
-def scrape_reviews_for_asin(driver, asin, product_name, category=None, max_pages=10, already_on_page=False):
+def scrape_reviews_for_asin(driver, asin, product_name, category=None, max_pages=10, already_on_page=False, cutoff_date=None):
     """
     Scrape Amazon.in reviews for a given ASIN.
-    Stops once reviews older than SCRAPE_DAYS_BACK are encountered.
+    Stops once reviews older than cutoff_date (or SCRAPE_DAYS_BACK if not provided) are encountered.
     Supports both inline 'Show 10 more reviews' expansion and classic page URLs.
     """
     reviews = []
     seen_review_ids = set()
     today = date.today()
-    cutoff = today - timedelta(days=SCRAPE_DAYS_BACK)
+    cutoff = cutoff_date if cutoff_date is not None else today - timedelta(days=SCRAPE_DAYS_BACK)
     scrape_date_str = today.isoformat()
 
     base_url = _review_page_url(asin, 1)

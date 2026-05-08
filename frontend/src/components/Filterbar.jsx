@@ -153,6 +153,8 @@ function ProductDropdown({ filters, options, onChange }) {
   const activeCat  = filters.product_category
   const activeProds = filters.product || []
   const [query, setQuery] = useState('')
+  const [hoveredCat, setHoveredCat] = useState(null)
+  const [hoveredProd, setHoveredProd] = useState(null)
 
   const normalizedQuery = query.trim().toLowerCase()
   const normalizedAll = useMemo(() => [...new Set(all)], [all])
@@ -278,31 +280,60 @@ function ProductDropdown({ filters, options, onChange }) {
             const catSel = isCatSelected(cat)
             return (
               <div key={cat}>
-                <button onClick={() => toggleCategory(cat)} style={{
-                  width:'100%', padding:'8px 14px', textAlign:'left',
-                  background: catSel || isCatPartial(cat) ? 'rgba(255,78,26,0.06)' : 'transparent',
-                  border:'none', borderBottom:'1px solid var(--border)',
-                  color: catSel || isCatPartial(cat) ? 'var(--accent)' : 'var(--text)',
-                  fontSize:11, fontWeight:700, cursor:'pointer',
-                  display:'flex', alignItems:'center', gap:7,
-                  letterSpacing:'0.04em', textTransform:'uppercase',
-                }}>
+                <button
+                  onMouseEnter={() => setHoveredCat(cat)}
+                  onMouseLeave={() => setHoveredCat(null)}
+                  onClick={() => toggleCategory(cat)}
+                  style={{
+                    width:'100%', padding:'8px 14px', textAlign:'left',
+                    background: catSel || isCatPartial(cat) ? 'rgba(255,78,26,0.06)' : 'transparent',
+                    border:'none', borderBottom:'1px solid var(--border)',
+                    color: catSel || isCatPartial(cat) ? 'var(--accent)' : 'var(--text)',
+                    fontSize:11, fontWeight:700, cursor:'pointer',
+                    display:'flex', alignItems:'center', gap:7,
+                    letterSpacing:'0.04em', textTransform:'uppercase',
+                  }}
+                >
                   <Check sel={catSel || isCatPartial(cat)} partial={isCatPartial(cat)} />
                   📁 {cat}
-                  <span style={{ marginLeft:'auto', fontSize:10, color:'var(--text-muted)', fontWeight:400 }}>{visibleProds.length}</span>
+                  <span style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6 }}>
+                    {hoveredCat === cat && (
+                      <span
+                        onClick={e => { e.stopPropagation(); commitSelectedProducts(tree[cat] || []) }}
+                        style={{ fontSize:9, color:'var(--accent)', fontWeight:600, cursor:'pointer', padding:'2px 6px', borderRadius:4, background:'rgba(255,78,26,0.18)', textTransform:'none', letterSpacing:0 }}
+                      >
+                        only
+                      </span>
+                    )}
+                    <span style={{ fontSize:10, color:'var(--text-muted)', fontWeight:400 }}>{visibleProds.length}</span>
+                  </span>
                 </button>
                 {visibleProds.map(prod => {
                   const sel = isProdSelected(prod)
                   return (
-                    <button key={prod} onClick={() => toggleProduct(prod)} style={{
-                      width:'100%', padding:'7px 14px 7px 34px', textAlign:'left',
-                      display:'flex', alignItems:'center', gap:7,
-                      background: sel?'rgba(255,78,26,0.04)':'transparent',
-                      border:'none', borderBottom:'1px solid var(--border)',
-                      color: sel?'var(--text)':'var(--text-muted)',
-                      fontSize:12, cursor:'pointer',
-                    }}>
+                    <button
+                      key={prod}
+                      onMouseEnter={() => setHoveredProd(prod)}
+                      onMouseLeave={() => setHoveredProd(null)}
+                      onClick={() => toggleProduct(prod)}
+                      style={{
+                        width:'100%', padding:'7px 14px 7px 34px', textAlign:'left',
+                        display:'flex', alignItems:'center', gap:7,
+                        background: sel?'rgba(255,78,26,0.04)':'transparent',
+                        border:'none', borderBottom:'1px solid var(--border)',
+                        color: sel?'var(--text)':'var(--text-muted)',
+                        fontSize:12, cursor:'pointer',
+                      }}
+                    >
                       <Check sel={sel} /> {prod}
+                      {hoveredProd === prod && (
+                        <span
+                          onClick={e => { e.stopPropagation(); commitSelectedProducts([prod]) }}
+                          style={{ marginLeft:'auto', fontSize:9, color:'var(--accent)', fontWeight:600, cursor:'pointer', padding:'2px 6px', borderRadius:4, background:'rgba(255,78,26,0.18)' }}
+                        >
+                          only
+                        </span>
+                      )}
                     </button>
                   )
                 })}
@@ -313,15 +344,29 @@ function ProductDropdown({ filters, options, onChange }) {
           {filteredUncategorisedProducts.map(prod => {
             const sel = isProdSelected(prod)
             return (
-              <button key={prod} onClick={() => toggleProduct(prod)} style={{
-                width:'100%', padding:'8px 14px', textAlign:'left',
-                display:'flex', alignItems:'center', gap:7,
-                background: sel?'rgba(255,78,26,0.06)':'transparent',
-                border:'none', borderBottom:'1px solid var(--border)',
-                color: sel?'var(--text)':'var(--text-muted)',
-                fontSize:12, cursor:'pointer',
-              }}>
+              <button
+                key={prod}
+                onMouseEnter={() => setHoveredProd(prod)}
+                onMouseLeave={() => setHoveredProd(null)}
+                onClick={() => toggleProduct(prod)}
+                style={{
+                  width:'100%', padding:'8px 14px', textAlign:'left',
+                  display:'flex', alignItems:'center', gap:7,
+                  background: sel?'rgba(255,78,26,0.06)':'transparent',
+                  border:'none', borderBottom:'1px solid var(--border)',
+                  color: sel?'var(--text)':'var(--text-muted)',
+                  fontSize:12, cursor:'pointer',
+                }}
+              >
                 <Check sel={sel} /> {prod}
+                {hoveredProd === prod && (
+                  <span
+                    onClick={e => { e.stopPropagation(); commitSelectedProducts([prod]) }}
+                    style={{ marginLeft:'auto', fontSize:9, color:'var(--accent)', fontWeight:600, cursor:'pointer', padding:'2px 6px', borderRadius:4, background:'rgba(255,78,26,0.18)' }}
+                  >
+                    only
+                  </span>
+                )}
               </button>
             )
           })}
