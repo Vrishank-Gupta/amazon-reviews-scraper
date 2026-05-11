@@ -11,7 +11,7 @@ import {
   Bar,
   ReferenceLine,
 } from 'recharts'
-import { fetchAnalysis, fetchCxoTrends, fetchWordCloud } from '../api'
+import { fetchAnalysis, fetchCxoTrends, fetchWordCloud, fetchSummary } from '../api'
 import { Card } from './shared'
 import RatingTrendChart from './RatingTrendChart'
 import ReviewsDrawer from './ReviewsDrawer'
@@ -400,6 +400,111 @@ function CategoryWordCloudPanel({ category, sentiment, filters, onClose }) {
   )
 }
 
+function PortfolioHealthStrip({ healthScore, topIssue, topCat, atRisk, onSelectIssue, onSelectCategory }) {
+  const scoreColor = healthScore >= 75 ? '#22c55e' : healthScore >= 55 ? '#eab308' : '#ef4444'
+  const cards = [
+    {
+      label: 'Brand Health',
+      icon: '◎',
+      content: (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 6 }}>
+            <span style={{ fontFamily: 'Bebas Neue', fontSize: 34, lineHeight: 1, color: scoreColor }}>{healthScore.toFixed(0)}</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>/ 100</span>
+          </div>
+          <div style={{ marginTop: 6, height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${Math.min(100, healthScore)}%`, background: scoreColor, borderRadius: 2, transition: 'width 0.4s ease' }} />
+          </div>
+          <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-muted)' }}>Based on rating + negative share</div>
+        </>
+      ),
+      onClick: null,
+    },
+    {
+      label: 'Top Issue · 7d',
+      icon: '⚠',
+      content: topIssue ? (
+        <>
+          <div style={{ marginTop: 6, fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{topIssue.category}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{topIssue.mentions} mentions · {topIssue.isNew ? 'new this period' : 'growing'}</div>
+          <div style={{ marginTop: 6, display: 'inline-block', fontSize: 10, fontWeight: 700, color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 999, padding: '2px 8px' }}>Investigate →</div>
+        </>
+      ) : <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>No notable issues.</div>,
+      onClick: topIssue ? () => onSelectIssue?.(topIssue.category) : null,
+      hoverColor: 'rgba(239,68,68,0.08)',
+    },
+    {
+      label: 'Top Category',
+      icon: '★',
+      content: topCat ? (
+        <>
+          <div style={{ marginTop: 6, fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{topCat.category}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{topCat.total} reviews · {topCat.total ? ((topCat.Positive / topCat.total) * 100).toFixed(0) : 0}% positive</div>
+          <div style={{ marginTop: 6, display: 'inline-block', fontSize: 10, fontWeight: 700, color: '#22c55e', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 999, padding: '2px 8px' }}>Performing well</div>
+        </>
+      ) : <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>—</div>,
+      onClick: topCat ? () => onSelectCategory?.(topCat.category) : null,
+      hoverColor: 'rgba(34,197,94,0.06)',
+    },
+    {
+      label: 'Most At-Risk',
+      icon: '▼',
+      content: atRisk ? (
+        <>
+          <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{atRisk.product_name}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{atRisk.review_count} reviews · <span style={{ color: '#ef4444', fontWeight: 700 }}>{atRisk.neg_pct}% neg</span></div>
+          <div style={{ marginTop: 6, display: 'inline-block', fontSize: 10, fontWeight: 700, color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 999, padding: '2px 8px' }}>Action needed</div>
+        </>
+      ) : <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>—</div>,
+      onClick: null,
+      hoverColor: 'rgba(239,68,68,0.06)',
+    },
+  ]
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, padding: '14px 16px', background: 'linear-gradient(135deg, rgba(24,28,44,0.9), rgba(18,22,36,0.95))', border: '1px solid var(--border)', borderRadius: 14 }}>
+      {cards.map(card => (
+        <div
+          key={card.label}
+          onClick={card.onClick || undefined}
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', cursor: card.onClick ? 'pointer' : 'default', transition: 'border-color 0.15s, background 0.15s' }}
+          onMouseEnter={e => { if (card.onClick) { e.currentTarget.style.background = card.hoverColor; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)' } }}
+          onMouseLeave={e => { if (card.onClick) { e.currentTarget.style.background = 'var(--surface)'; e.currentTarget.style.borderColor = 'var(--border)' } }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+            <span>{card.label}</span>
+            <span style={{ opacity: 0.5 }}>{card.icon}</span>
+          </div>
+          {card.content}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function AutoInsights({ insights }) {
+  if (!insights.length) return null
+  const toneColor = { alert: '#ef4444', warn: '#eab308', good: '#22c55e', info: 'var(--text-muted)' }
+  return (
+    <div style={{ padding: '12px 16px', background: 'linear-gradient(135deg, rgba(24,28,44,0.9), rgba(18,22,36,0.95))', border: '1px solid var(--border)', borderRadius: 12 }}>
+      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span>✦</span> Auto-detected signals
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+        {insights.map((item, i) => (
+          <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: toneColor[item.tone] || 'var(--text-muted)', flexShrink: 0 }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{item.title}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>{item.body}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function AnalysisPage({ filters, allProducts, tree }) {
   const [data, setData] = useState(null)
   const [cxoData, setCxoData] = useState(null)
@@ -412,6 +517,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const [signalProd, setSignalProd] = useState(undefined)
   const [localTrendData, setLocalTrendData] = useState(null)
   const [categoryCloud, setCategoryCloud] = useState(null)
+  const [summaryRows, setSummaryRows] = useState([])
 
   const scopedProducts = useMemo(() => {
     if (filters.product?.length) return filters.product
@@ -450,10 +556,12 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
     Promise.all([
       fetchAnalysis(apiParams),
       fetchCxoTrends(apiParams).catch(() => null),
+      fetchSummary(apiParams).catch(() => []),
     ])
-      .then(([analysis, cxo]) => {
+      .then(([analysis, cxo, summary]) => {
         setData(analysis)
         setCxoData(cxo)
+        setSummaryRows(summary || [])
         setHasData(true)
       })
       .finally(() => setLoading(false))
@@ -481,14 +589,6 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
       .catch(() => setLocalTrendData(null))
   }, [effectiveSignalProd, apiParams.date_from, apiParams.date_to])
 
-  if (loading && !hasData) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--text-muted)', gap: 10 }}>
-        <span style={{ fontSize: 20 }}>...</span> Loading overview...
-      </div>
-    )
-  }
-
   const kpi = data?.kpi || {}
   const trend = data?.daily_trend || []
   const dailyRating = cxoData?.daily_rating || []
@@ -497,6 +597,75 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const activeTrend = localTrendData?.daily_trend ?? trend
   const activeDailyRating = localTrendData?.daily_rating ?? dailyRating
   const displayedCategoryBreakdown = (localIssueData?.category_breakdown ?? data?.category_breakdown ?? []).slice(0, 8)
+
+  const portfolioHealth = useMemo(() => {
+    if (!data) return null
+    const total = kpi.total || 0
+    const negShare = total ? (kpi.negative / total) * 100 : 0
+    const validRows = summaryRows.filter(r => (r.review_count || 0) >= 5)
+    const totalReviews = validRows.reduce((s, r) => s + (r.review_count || 0), 0)
+    const weightedAvg = totalReviews > 0
+      ? validRows.reduce((s, r) => s + (r.avg_rating || 0) * (r.review_count || 0), 0) / totalReviews
+      : 0
+    const ratingComp = weightedAvg > 0 ? ((weightedAvg - 1) / 4) * 60 : 0
+    const negComp = Math.max(0, 40 - negShare * 1.2)
+    const healthScore = Math.max(0, Math.min(100, ratingComp + negComp))
+    const topMomentum = [...(momentum || [])].sort((a, b) => (b.second || 0) - (a.second || 0))[0]
+    const topIssue = topMomentum
+      ? { category: topMomentum.category, mentions: topMomentum.second, isNew: topMomentum.first === 0 }
+      : null
+    const catBreakdown = (data.category_breakdown || []).filter(c => (c.total || 0) >= 10)
+    const topCat = [...catBreakdown].sort((a, b) => {
+      const aNeg = a.total ? a.Negative / a.total : 1
+      const bNeg = b.total ? b.Negative / b.total : 1
+      return aNeg - bNeg
+    })[0] || null
+    const atRisk = [...summaryRows].filter(r => (r.review_count || 0) >= 8).sort((a, b) => (b.neg_pct || 0) - (a.neg_pct || 0))[0] || null
+    return { healthScore, topIssue, topCat, atRisk }
+  }, [data, summaryRows, kpi, momentum])
+
+  const autoInsights = useMemo(() => {
+    if (!data || !cxoData) return []
+    const total = kpi.total || 0
+    const negShare = total ? (kpi.negative / total) * 100 : 0
+    const insights = []
+    const newIssues = (momentum || []).filter(m => m.first === 0 && m.second > 0)
+    if (newIssues.length > 0) {
+      insights.push({ tone: 'alert', title: `${newIssues[0].category} is a new issue`, body: `${newIssues[0].second} mentions in the recent period with no prior history.` })
+    }
+    const rising = (momentum || []).filter(m => m.first > 0 && (m.pct_change || 0) >= 50).sort((a, b) => (b.pct_change || 0) - (a.pct_change || 0))[0]
+    if (rising && !newIssues.length) {
+      insights.push({ tone: 'warn', title: `${rising.category} rising`, body: `Up ${rising.pct_change}% vs prior period (${rising.first} → ${rising.second} mentions).` })
+    }
+    if (negShare > 30) {
+      insights.push({ tone: 'alert', title: 'Negative share elevated', body: `${negShare.toFixed(0)}% of reviews are negative. Investigate top issues below.` })
+    } else if (negShare > 0 && negShare <= 20) {
+      insights.push({ tone: 'good', title: 'Sentiment healthy', body: `${negShare.toFixed(0)}% negative rate — within the acceptable range.` })
+    }
+    const trend = data.daily_trend || []
+    if (trend.length >= 8) {
+      const q = Math.floor(trend.length / 4)
+      const early = trend.slice(0, q)
+      const recent = trend.slice(-q)
+      const earlyTotal = early.reduce((s, p) => s + p.Positive + p.Negative + p.Neutral, 0)
+      const recentTotal = recent.reduce((s, p) => s + p.Positive + p.Negative + p.Neutral, 0)
+      const earlyRate = earlyTotal ? (early.reduce((s, p) => s + p.Negative, 0) / earlyTotal) * 100 : 0
+      const recentRate = recentTotal ? (recent.reduce((s, p) => s + p.Negative, 0) / recentTotal) * 100 : 0
+      if (recentRate < earlyRate - 4 && earlyRate > 0) {
+        insights.push({ tone: 'good', title: 'Sentiment improving', body: `Negative rate dropped from ${earlyRate.toFixed(0)}% to ${recentRate.toFixed(0)}% across the period.` })
+      }
+    }
+    if (!insights.length) insights.push({ tone: 'info', title: 'No anomalies detected', body: 'Sentiment, volume, and issue signals look stable for the selected window.' })
+    return insights.slice(0, 3)
+  }, [data, cxoData, kpi, momentum])
+
+  if (loading && !hasData) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--text-muted)', gap: 10 }}>
+        <span style={{ fontSize: 20 }}>...</span> Loading overview...
+      </div>
+    )
+  }
 
   const trendWithRolling = activeTrend.map((point, index, rows) => {
     const window = rows.slice(Math.max(0, index - 6), index + 1)
@@ -516,7 +685,18 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {portfolioHealth && (
+        <PortfolioHealthStrip
+          healthScore={portfolioHealth.healthScore}
+          topIssue={portfolioHealth.topIssue}
+          topCat={portfolioHealth.topCat}
+          atRisk={portfolioHealth.atRisk}
+          onSelectIssue={category => setEmergingCat(category)}
+          onSelectCategory={category => setCategoryCloud({ category, sentiment: 'Negative' })}
+        />
+      )}
       <AlertsBanner kpi={kpi} momentum={momentum} />
+      <AutoInsights insights={autoInsights} />
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
         <OverviewCards kpi={kpi} productCount={scopedProducts.length || allProducts?.length || 0} periodLabel={periodLabel} />
         <Card title="Amazon Rating Signal" tip="Amazon product-page rating snapshots over time, alongside scraped daily review averages.">

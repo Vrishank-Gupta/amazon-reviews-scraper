@@ -215,6 +215,10 @@ function ProductDrillDown({ row, filters, ratingDistribution }) {
   )
 }
 
+function riskScore(r) {
+  return (r.neg_pct || 0) * Math.log2((r.review_count || 0) + 2) + Math.max(0, -(r.delta_rating || 0)) * 5
+}
+
 function TH({ children, tip, onClick, sortDir }) {
   return (
     <th onClick={onClick} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', background: 'var(--surface2)', cursor: onClick ? 'pointer' : 'default', userSelect: 'none' }}>
@@ -237,7 +241,8 @@ export default function SummaryPage({ filters, allProducts }) {
   const [sortDir, setSortDir] = useState(-1)
   const [tableSearch, setTableSearch] = useState('')
   const [tableCatFilter, setTableCatFilter] = useState(null)
-  const [priorityFirst, setPriorityFirst] = useState(false)
+  const [priorityFirst, setPriorityFirst] = useState(true)
+  const [collapsedCats, setCollapsedCats] = useState({})
 
   const apiParams = {
     product_category: filters.product_category || null,
@@ -294,9 +299,21 @@ export default function SummaryPage({ filters, allProducts }) {
       if (!groups[category]) groups[category] = []
       groups[category].push(row)
     })
-    const result = Object.entries(groups).map(([category, items]) => ({ category, items }))
+    const result = Object.entries(groups).map(([category, items]) => {
+      const sortedItems = priorityFirst
+        ? [...items].sort((a, b) => riskScore(b) - riskScore(a))
+        : items
+      const totalReviews = items.reduce((s, r) => s + (r.review_count || 0), 0)
+      const weightedAvg = totalReviews > 0
+        ? items.reduce((s, r) => s + (r.avg_rating || 0) * (r.review_count || 0), 0) / totalReviews
+        : 0
+      const weightedNeg = totalReviews > 0
+        ? items.reduce((s, r) => s + (r.neg_pct || 0) * (r.review_count || 0), 0) / totalReviews
+        : 0
+      return { category, items: sortedItems, rollup: { totalReviews, weightedAvg, weightedNeg } }
+    })
     if (priorityFirst) {
-      result.forEach(group => { group.items.sort((a, b) => (100 - (a.neg_pct || 0)) - (100 - (b.neg_pct || 0))) })
+      result.sort((a, b) => b.rollup.weightedNeg - a.rollup.weightedNeg)
     }
     return result
   }, [sorted, tableSearch, tableCatFilter, priorityFirst])
@@ -399,8 +416,11 @@ export default function SummaryPage({ filters, allProducts }) {
               </tr>
             </thead>
             <tbody>
-              {groupedRows.map(group => (
-                group.items.map((row, index) => {
+              {groupedRows.map(group => {
+                const isCollapsed = collapsedCats[group.category] ?? true
+                const toggleCat = () => setCollapsedCats(s => ({ ...s, [group.category]: !isCollapsed }))
+                return group.items.map((row, index) => {
+                  if (index > 0 && isCollapsed) return null
                   const isFirst = index === 0
                   const isDrill = drillRow?.asin === row.asin
                   const rowBg = index % 2 === 0 ? 'var(--surface)' : 'var(--surface2)'
@@ -415,10 +435,14 @@ export default function SummaryPage({ filters, allProducts }) {
                       onToggle={() => setDrillRow(isDrill ? null : row)}
                       ratingDistribution={ratingLookup[row.product_name]}
                       filters={apiParams}
+                      isCollapsed={isCollapsed}
+                      onToggleCategory={toggleCat}
+                      rollup={isFirst ? group.rollup : null}
+                      itemCount={isFirst ? group.items.length : null}
                     />
                   )
                 })
-              ))}
+              })}
             </tbody>
           </table>
         </div>
@@ -427,7 +451,7 @@ export default function SummaryPage({ filters, allProducts }) {
   )
 }
 
-function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ratingDistribution, filters }) {
+function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ratingDistribution, filters, isCollapsed, onToggleCategory, rollup, itemCount }) {
   const health = 100 - (row.neg_pct || 0)
   const isActNow = health < 60
   const isWatch = health >= 60 && health < 75
@@ -438,43 +462,66 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
     <>
       {showCategory && (
         <tr>
-          <td colSpan={8} style={{ padding: '10px 14px', background: 'rgba(255,78,26,0.07)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--accent)' }}>
-            {category}
+          <td
+            colSpan={8}
+            onClick={onToggleCategory}
+            style={{ padding: '10px 14px', background: 'rgba(255,78,26,0.07)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 9, color: 'var(--text-muted)', display: 'inline-block', transition: 'transform 0.15s', transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}>▶</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--accent)' }}>{category}</span>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>· {itemCount} product{itemCount !== 1 ? 's' : ''}</span>
+              {rollup && (
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16, fontSize: 11 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>{rollup.totalReviews.toLocaleString()} reviews</span>
+                  <span style={{ color: rollup.weightedAvg >= 4 ? '#22c55e' : rollup.weightedAvg >= 3 ? '#eab308' : '#ef4444', fontWeight: 700 }}>
+                    {rollup.weightedAvg.toFixed(2)}★
+                  </span>
+                  <span style={{ color: rollup.weightedNeg > 30 ? '#ef4444' : rollup.weightedNeg > 20 ? '#eab308' : '#22c55e', fontWeight: 700 }}>
+                    {rollup.weightedNeg.toFixed(0)}% neg
+                  </span>
+                </div>
+              )}
+            </div>
           </td>
         </tr>
       )}
-      <tr
-        onClick={onToggle}
-        style={{ cursor: 'pointer', background: rowBackground, transition: 'background 0.1s', borderLeft: leftBorder }}
-        onMouseEnter={event => { event.currentTarget.style.background = 'rgba(255,78,26,0.04)' }}
-        onMouseLeave={event => { event.currentTarget.style.background = rowBackground }}
-      >
-        <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600, borderBottom: isDrill ? 'none' : '1px solid var(--border)', maxWidth: 230 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.product_name}</span>
-            <HealthPill negPct={row.neg_pct} />
-          </div>
-        </td>
-        <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
-          <StarLabel rating={row.avg_rating} />
-        </td>
-        <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_rating} /></td>
-        <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>{row.review_count?.toLocaleString()}</td>
-        <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_reviews} /></td>
-        <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
-          <span style={{ color: row.neg_pct > 50 ? '#ef4444' : row.neg_pct > 30 ? '#eab308' : '#22c55e', fontWeight: 700 }}>{row.neg_pct}%</span>
-        </td>
-        <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_neg_pct} invertColor /></td>
-        <td style={{ padding: '12px 14px', color: 'var(--accent)', fontSize: 12, borderBottom: isDrill ? 'none' : '1px solid var(--border)', fontWeight: 700 }}>
-          {isDrill ? 'collapse ^' : 'drill down v'}
-        </td>
-      </tr>
-      {isDrill && (
-        <tr>
-          <td colSpan={8} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
-            <ProductDrillDown row={row} filters={filters} ratingDistribution={ratingDistribution} />
-          </td>
-        </tr>
+      {!isCollapsed && (
+        <>
+          <tr
+            onClick={onToggle}
+            style={{ cursor: 'pointer', background: rowBackground, transition: 'background 0.1s', borderLeft: leftBorder }}
+            onMouseEnter={event => { event.currentTarget.style.background = 'rgba(255,78,26,0.04)' }}
+            onMouseLeave={event => { event.currentTarget.style.background = rowBackground }}
+          >
+            <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600, borderBottom: isDrill ? 'none' : '1px solid var(--border)', maxWidth: 230 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.product_name}</span>
+                <HealthPill negPct={row.neg_pct} />
+              </div>
+            </td>
+            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
+              <StarLabel rating={row.avg_rating} />
+            </td>
+            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_rating} /></td>
+            <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>{row.review_count?.toLocaleString()}</td>
+            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_reviews} /></td>
+            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
+              <span style={{ color: row.neg_pct > 50 ? '#ef4444' : row.neg_pct > 30 ? '#eab308' : '#22c55e', fontWeight: 700 }}>{row.neg_pct}%</span>
+            </td>
+            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_neg_pct} invertColor /></td>
+            <td style={{ padding: '12px 14px', color: 'var(--accent)', fontSize: 12, borderBottom: isDrill ? 'none' : '1px solid var(--border)', fontWeight: 700 }}>
+              {isDrill ? 'collapse ^' : 'drill down v'}
+            </td>
+          </tr>
+          {isDrill && (
+            <tr>
+              <td colSpan={8} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
+                <ProductDrillDown row={row} filters={filters} ratingDistribution={ratingDistribution} />
+              </td>
+            </tr>
+          )}
+        </>
       )}
     </>
   )
