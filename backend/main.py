@@ -1734,13 +1734,17 @@ def get_reviews_by_keyword(
 
             cur.execute(f"""
                 SELECT
-                    r.review_id, r.asin, r.product_name, r.category, r.rating,
-                    r.title, r.review, r.review_date, r.review_url, r.scrape_date,
+                    r.review_id, MIN(r.asin) AS asin, MIN(r.product_name) AS product_name,
+                    MIN(r.category) AS category, MIN(r.rating) AS rating,
+                    MIN(r.title) AS title, MIN(r.review) AS review,
+                    MIN(r.review_date) AS review_date, MIN(r.review_url) AS review_url,
+                    MIN(r.scrape_date) AS scrape_date,
                     t.sentiment, t.primary_categories, t.sub_tags
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE (t.sub_tags LIKE %s OR t.primary_categories LIKE %s)
                 {pf_sql} {date_filter} {category_filter} {sentiment_filter}
+                GROUP BY r.review_id, t.sentiment, t.primary_categories, t.sub_tags
                 ORDER BY {_rd} DESC
                 LIMIT 500
             """, base_params)
