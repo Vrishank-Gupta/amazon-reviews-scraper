@@ -43,10 +43,12 @@ function SentBadge({ s }) {
 function ReviewCard({ r }) {
   const [open, setOpen] = useState(false)
   const date = r.review_date?.replace('Reviewed in India on ', '') || ''
+  const tags = Array.isArray(r.sub_tags) ? r.sub_tags : []
 
   return (
     <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+      {/* Row 1: sentiment, stars, product, date, link */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
         <SentBadge s={r.sentiment} />
         <StarLabel rating={r.rating} />
         {r.product_name && (
@@ -59,24 +61,26 @@ function ReviewCard({ r }) {
         )}
         <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>{date}</span>
         {r.review_url && (
-          <a
-            href={r.review_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="View on Amazon"
-            style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', flexShrink: 0 }}
-          >
+          <a href={r.review_url} target="_blank" rel="noopener noreferrer" title="View on Amazon"
+            style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
             <ExternalLink size={12} />
           </a>
         )}
       </div>
+      {/* Row 2: sub_tags */}
+      {tags.length > 0 && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+          {tags.map(tag => (
+            <span key={tag} style={{ fontSize: 9, padding: '1px 6px', borderRadius: 3, background: 'rgba(255,78,26,0.08)', color: 'var(--accent)', border: '1px solid rgba(255,78,26,0.2)', letterSpacing: '0.02em' }}>
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
       {r.title && <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: 'var(--text)' }}>{r.title}</div>}
       <div
         style={{
-          fontSize: 12,
-          color: 'var(--text)',
-          lineHeight: 1.6,
-          overflow: 'hidden',
+          fontSize: 12, color: 'var(--text)', lineHeight: 1.6, overflow: 'hidden',
           display: open ? 'block' : '-webkit-box',
           WebkitLineClamp: open ? 'unset' : 5,
           WebkitBoxOrient: 'vertical',
@@ -85,10 +89,8 @@ function ReviewCard({ r }) {
         {r.review}
       </div>
       {r.review?.length > 300 && (
-        <button
-          onClick={() => setOpen(v => !v)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 11, padding: '4px 0 0', fontFamily: 'DM Sans' }}
-        >
+        <button onClick={() => setOpen(v => !v)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 11, padding: '4px 0 0', fontFamily: 'DM Sans' }}>
           {open ? 'Show less ^' : 'Read more v'}
         </button>
       )}
@@ -172,20 +174,30 @@ export default function ReviewsDrawer({
         {/* Header */}
         <div
           style={{
-            padding: '12px 16px',
+            padding: '10px 16px',
             background: 'var(--surface2)',
             borderBottom: '1px solid var(--border)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
             flexShrink: 0,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
-            <span style={{ fontFamily: 'Bebas Neue', fontSize: 15, letterSpacing: '0.06em', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+          {/* Row 1: title + close */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span
+              style={{ fontFamily: 'Bebas Neue', fontSize: 15, letterSpacing: '0.06em', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}
+              title={label || category}
+            >
               Reviews —{' '}
               <span style={{ color: 'var(--accent)' }}>{label || category}</span>
             </span>
+            <button
+              onClick={onClose}
+              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 11, padding: '4px 10px', cursor: 'pointer', fontFamily: 'DM Sans', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}
+            >
+              <X size={11} /> Close
+            </button>
+          </div>
+          {/* Row 2: tags + counts */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
             {productName && (
               <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--surface)', padding: '1px 7px', borderRadius: 4, border: '1px solid var(--border)' }}>
                 {productName}
@@ -196,8 +208,6 @@ export default function ReviewsDrawer({
                 {sentiment}
               </span>
             )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {!loading && reviews.length > 0 && (
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <span style={{ background: 'rgba(255,78,26,0.15)', color: 'var(--accent)', border: '1px solid rgba(255,78,26,0.3)', borderRadius: 10, padding: '1px 8px', fontSize: 11, fontWeight: 600 }}>
@@ -208,12 +218,6 @@ export default function ReviewsDrawer({
                 {neuCount > 0 && <span style={{ fontSize: 10, color: '#eab308', fontWeight: 600 }}>{neuCount} neu</span>}
               </div>
             )}
-            <button
-              onClick={onClose}
-              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 11, padding: '4px 10px', cursor: 'pointer', fontFamily: 'DM Sans', display: 'flex', alignItems: 'center', gap: 4 }}
-            >
-              <X size={11} /> Close
-            </button>
           </div>
         </div>
 
