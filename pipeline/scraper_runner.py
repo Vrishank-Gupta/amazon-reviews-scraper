@@ -9,6 +9,7 @@ import os
 import random
 import sys
 import time
+from datetime import timedelta
 
 import pymysql
 from selenium import webdriver
@@ -58,18 +59,29 @@ def get_db():
 
 
 def get_asin_cutoff_date(asin: str, conn):
-    """Return the most recent review_date already in DB for this ASIN, or None if never scraped."""
+    """
+    Return cutoff date for this ASIN: last scrape_date minus a 3-day buffer.
+    The buffer catches reviews Amazon delayed publishing by 1-2 days after submission.
+    Returns None if this ASIN has never been scraped.
+    """
     cur = conn.cursor()
-    cur.execute("SELECT MAX(review_date) FROM raw_reviews WHERE asin = %s", (asin,))
+    cur.execute("SELECT MAX(scrape_date) FROM raw_reviews WHERE asin = %s", (asin,))
     row = cur.fetchone()
     cur.close()
-    return row[0] if row and row[0] else None
+    if not (row and row[0]):
+        return None
+    return row[0] - timedelta(days=3)
 
 
 def insert_reviews(reviews: list, conn) -> int:
+    missing_id = [r for r in reviews if not r.get("review_id")]
+    if missing_id:
+        print(f"  ⚠️  {len(missing_id)}/{len(reviews)} reviews have no review_id — skipping them (page structure may differ)")
     cur = conn.cursor()
     inserted = 0
     for r in reviews:
+        if not r.get("review_id"):
+            continue
         cur.execute(
             """
             INSERT IGNORE INTO raw_reviews
@@ -185,6 +197,27 @@ def reviews_visible(driver) -> bool:
         return False
 
 
+def is_bot_detection_page(driver) -> bool:
+    """Returns True if Amazon is showing a bot-detection / interstitial page."""
+    try:
+        result = driver.execute_script("""
+            var body = document.body ? document.body.innerText : '';
+            return !!(
+                document.querySelector('input[name="amzn-captcha-token"]') ||
+                document.querySelector('#captchacharacters') ||
+                document.querySelector('.a-box-inner form[action*="validateCaptcha"]') ||
+                body.indexOf('Continue shopping') !== -1 ||
+                body.indexOf('Robot Check') !== -1 ||
+                body.indexOf('Enter the characters you see below') !== -1 ||
+                body.indexOf('Sorry, we just need to make sure') !== -1 ||
+                body.indexOf('Type the characters you see in this image') !== -1
+            );
+        """)
+        return bool(result)
+    except Exception:
+        return False
+
+
 def wait_until_reviews_ready(driver, asin, timeout=300):
     """
     Navigate to the reviews page for an ASIN and wait until:
@@ -223,9 +256,15 @@ def wait_until_reviews_ready(driver, asin, timeout=300):
                     print(f"  Still waiting for login... ({waited}s elapsed)")
             continue
 
-        # Page loaded but no reviews and no login form
-        # Give the page up to 8s to fully render, then treat it as genuinely empty
-        if waited >= 8:
+        if is_bot_detection_page(driver):
+            if waited % 10 == 0 or waited == 2:
+                print(f"  ⚠️  Bot-detection / CAPTCHA page detected.")
+                print(f"      Please solve it in the browser window — script will continue automatically.")
+            continue
+
+        # Page loaded but no reviews and no login form — may still be rendering.
+        # Only bail out as "0 reviews" after 30s so slow-loading pages get a fair chance.
+        if waited >= 30:
             page_ready = driver.execute_script("return document.readyState === 'complete'")
             if page_ready:
                 print(f"  -> Page loaded but no reviews found — product likely has 0 reviews. Skipping.")
@@ -252,7 +291,7 @@ def scrape_asin(row: dict, driver, db_conn) -> dict:
         # Use latest DB date as cutoff so we only fetch genuinely new reviews
         cutoff = get_asin_cutoff_date(asin, db_conn)
         if cutoff:
-            print(f"  Latest review in DB: {cutoff} — fetching only newer reviews")
+            print(f"  Cutoff: {cutoff} (last scrape − 3d buffer) — fetching newer reviews")
         else:
             print(f"  No prior reviews in DB — fetching last {os.getenv('SCRAPE_DAYS_BACK', 30)} days")
 

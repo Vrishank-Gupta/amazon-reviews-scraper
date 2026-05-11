@@ -51,13 +51,26 @@ cur.execute(
     WHERE t.review_id IS NULL
     """
 )
-rows = cur.fetchall()
+# De-duplicate by review_id — multiple ASINs can share the same review pool;
+# we only need to tag each unique review_id once.
+seen_ids = set()
+rows = []
+for row in cur.fetchall():
+    if row[0] not in seen_ids:
+        seen_ids.add(row[0])
+        rows.append(row)
 print(f"Reviews to process: {len(rows)}")
 
 
 def chunks(items, size):
     for index in range(0, len(items), size):
         yield items[index:index + size]
+
+
+def sanitize(text: str) -> str:
+    # Replace all control characters (0x00-0x1F) with spaces — literal newlines
+    # inside JSON strings are invalid and cause json.loads to fail
+    return "".join(" " if ch < " " else ch for ch in text)
 
 
 def build_prompt(review_payload: list) -> str:
@@ -96,7 +109,7 @@ Reviews:
 
 
 for batch in chunks(rows, BATCH_SIZE):
-    review_payload = [{"id": row[0], "product": row[2], "text": row[3]} for row in batch]
+    review_payload = [{"id": row[0], "product": row[2], "text": sanitize(row[3] or "")} for row in batch]
 
     try:
         response = client.chat.completions.create(
@@ -107,7 +120,13 @@ for batch in chunks(rows, BATCH_SIZE):
             ],
             temperature=0,
         )
-        content = response.choices[0].message.content.strip()
+        content = sanitize(response.choices[0].message.content.strip())
+        # Strip markdown code fences if the model wraps output in ```json ... ```
+        if content.startswith("```"):
+            content = content.split("```", 2)[1]
+            if content.startswith("json"):
+                content = content[4:]
+            content = content.rstrip("`").strip()
         parsed = json.loads(content)
     except Exception as exc:
         print(f"Batch failed: {exc}")
@@ -123,7 +142,7 @@ for batch in chunks(rows, BATCH_SIZE):
         result = results[review_id]
         cur.execute(
             """
-            INSERT INTO review_tags
+            INSERT IGNORE INTO review_tags
                 (review_id, asin, sentiment, primary_categories, sub_tags)
             VALUES (%s, %s, %s, %s, %s)
             """,

@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS `raw_reviews` (
   `review_date` VARCHAR(255) DEFAULT NULL,
   `review_url` TEXT,
   `scrape_date` DATE NOT NULL,
-  PRIMARY KEY (`review_id`),
+  PRIMARY KEY (`review_id`, `asin`),
   KEY `idx_raw_reviews_asin` (`asin`),
   KEY `idx_raw_reviews_product_name` (`product_name`),
   KEY `idx_raw_reviews_category` (`category`),
