@@ -16,7 +16,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
-from scraper import scrape_reviews_for_asin, scrape_product_rating
+from scraper import scrape_product_rating, scrape_product_variations, scrape_reviews_for_asin
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,7 +65,13 @@ def get_asin_cutoff_date(asin: str, conn):
     Returns None if this ASIN has never been scraped.
     """
     cur = conn.cursor()
-    cur.execute("SELECT MAX(scrape_date) FROM raw_reviews WHERE asin = %s", (asin,))
+    if column_exists(conn, "raw_reviews", "scrape_asin"):
+        cur.execute(
+            "SELECT MAX(scrape_date) FROM raw_reviews WHERE scrape_asin = %s OR asin = %s",
+            (asin, asin),
+        )
+    else:
+        cur.execute("SELECT MAX(scrape_date) FROM raw_reviews WHERE asin = %s", (asin,))
     row = cur.fetchone()
     cur.close()
     if not (row and row[0]):
@@ -73,27 +79,150 @@ def get_asin_cutoff_date(asin: str, conn):
     return row[0] - timedelta(days=3)
 
 
+def column_exists(conn, table_name: str, column_name: str) -> bool:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = %s
+          AND column_name = %s
+        """,
+        (table_name, column_name),
+    )
+    exists = bool(cur.fetchone()[0])
+    cur.close()
+    return exists
+
+
+def ensure_review_variant_columns(conn):
+    columns = {
+        "scrape_asin": "ALTER TABLE raw_reviews ADD COLUMN scrape_asin VARCHAR(20) NULL AFTER asin",
+        "variant_asin": "ALTER TABLE raw_reviews ADD COLUMN variant_asin VARCHAR(20) NULL AFTER scrape_asin",
+        "variant_label": "ALTER TABLE raw_reviews ADD COLUMN variant_label VARCHAR(255) NULL AFTER variant_asin",
+        "variant_dimension": "ALTER TABLE raw_reviews ADD COLUMN variant_dimension VARCHAR(64) NULL AFTER variant_label",
+    }
+    indexes = {
+        "idx_raw_reviews_scrape_asin": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_scrape_asin (scrape_asin)",
+        "idx_raw_reviews_variant_asin": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_variant_asin (variant_asin)",
+        "idx_raw_reviews_variant_label": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_variant_label (variant_label)",
+    }
+
+    cur = conn.cursor()
+    changed = False
+    try:
+        for column_name, ddl in columns.items():
+            if not column_exists(conn, "raw_reviews", column_name):
+                cur.execute(ddl)
+                changed = True
+
+        cur.execute(
+            """
+            SELECT index_name
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = 'raw_reviews'
+            """
+        )
+        existing_indexes = {row[0] for row in cur.fetchall()}
+        for index_name, ddl in indexes.items():
+            if index_name not in existing_indexes:
+                cur.execute(ddl)
+                changed = True
+
+        if changed:
+            conn.commit()
+            print("  -> Added review variant columns/indexes")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+
+
 def insert_reviews(reviews: list, conn) -> int:
     missing_id = [r for r in reviews if not r.get("review_id")]
     if missing_id:
         print(f"  ⚠️  {len(missing_id)}/{len(reviews)} reviews have no review_id — skipping them (page structure may differ)")
+    ensure_review_variant_columns(conn)
     cur = conn.cursor()
     inserted = 0
     for r in reviews:
         if not r.get("review_id"):
             continue
+        values = {
+            "review_id": r["review_id"],
+            "asin": r.get("variant_asin") or r.get("asin"),
+            "scrape_asin": r.get("scrape_asin") or r.get("asin"),
+            "variant_asin": r.get("variant_asin") or r.get("asin"),
+            "variant_label": r.get("variant_label") or r.get("product_name"),
+            "variant_dimension": r.get("variant_dimension") or "Set name",
+            "product_name": r["product_name"],
+            "category": r.get("category", ""),
+            "rating": r["rating"],
+            "title": r["title"],
+            "review": r["review"],
+            "review_date": r["review_date"],
+            "review_url": r["review_url"],
+            "scrape_date": r["scrape_date"],
+        }
+        cur.execute(
+            """
+            UPDATE raw_reviews
+            SET asin=%s,
+                scrape_asin=%s,
+                variant_asin=%s,
+                variant_label=%s,
+                variant_dimension=%s,
+                product_name=%s,
+                category=%s,
+                rating=%s,
+                title=%s,
+                review=%s,
+                review_date=%s,
+                review_url=%s,
+                scrape_date=%s
+            WHERE review_id=%s
+            """,
+            (
+                values["asin"],
+                values["scrape_asin"],
+                values["variant_asin"],
+                values["variant_label"],
+                values["variant_dimension"],
+                values["product_name"],
+                values["category"],
+                values["rating"],
+                values["title"],
+                values["review"],
+                values["review_date"],
+                values["review_url"],
+                values["scrape_date"],
+                values["review_id"],
+            ),
+        )
+        if cur.rowcount:
+            continue
         cur.execute(
             """
             INSERT IGNORE INTO raw_reviews
-                (review_id, asin, product_name, category, rating, title,
+                (review_id, asin, scrape_asin, variant_asin, variant_label, variant_dimension,
+                 product_name, category, rating, title,
                  review, review_date, review_url, scrape_date)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
-                r["review_id"], r["asin"], r["product_name"],
-                r.get("category", ""),
-                r["rating"], r["title"], r["review"],
-                r["review_date"], r["review_url"], r["scrape_date"],
+                values["review_id"],
+                values["asin"],
+                values["scrape_asin"],
+                values["variant_asin"],
+                values["variant_label"],
+                values["variant_dimension"],
+                values["product_name"],
+                values["category"],
+                values["rating"], values["title"], values["review"],
+                values["review_date"], values["review_url"], values["scrape_date"],
             ),
         )
         inserted += cur.rowcount
@@ -281,10 +410,14 @@ def wait_until_reviews_ready(driver, asin, timeout=300):
 # ── Scrape one ASIN (reuses existing driver) ──────────────────────────────────
 def scrape_asin(row: dict, driver, db_conn) -> dict:
     asin         = row["asin"]
-    product_name = row["product_name"]
+    csv_product_name = row.get("product_name", "")
     category     = row.get("category", "")
 
     try:
+        print(f"  Reading product variation map...")
+        variant_metadata = scrape_product_variations(driver, asin)
+        product_name = variant_metadata.get("selected_label") or csv_product_name or asin
+
         # Wait until reviews page is ready (handles login automatically)
         wait_until_reviews_ready(driver, asin)
 
@@ -297,7 +430,15 @@ def scrape_asin(row: dict, driver, db_conn) -> dict:
 
         # Now hand off to scraper — page is already loaded and verified
         print(f"  Scraping reviews...")
-        reviews = scrape_reviews_for_asin(driver, asin, product_name, category=category, already_on_page=True, cutoff_date=cutoff)
+        reviews = scrape_reviews_for_asin(
+            driver,
+            asin,
+            product_name,
+            category=category,
+            already_on_page=True,
+            cutoff_date=cutoff,
+            variant_metadata=variant_metadata,
+        )
         print(f"  Got {len(reviews)} reviews — saving...")
         inserted = insert_reviews(reviews, db_conn)
         print(f"  ✓ {inserted} new rows inserted")
@@ -313,7 +454,7 @@ def scrape_asin(row: dict, driver, db_conn) -> dict:
 
     except Exception as e:
         print(f"  ✗ Error: {e}")
-        return {"asin": asin, "product_name": product_name,
+        return {"asin": asin, "product_name": csv_product_name or asin,
                 "scraped": 0, "inserted": 0, "error": str(e)}
 
 

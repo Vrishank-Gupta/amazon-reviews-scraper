@@ -1,5 +1,6 @@
 import os
 import random
+import re
 import time
 from datetime import date, datetime, timedelta
 
@@ -10,6 +11,11 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 # Days back to scrape - can be overridden at runtime via env var
 SCRAPE_DAYS_BACK = int(os.environ.get("SCRAPE_DAYS_BACK", 30))
+
+
+def _norm_variant_label(value):
+    """Normalize Amazon variation labels for matching review cards to DP metadata."""
+    return re.sub(r"\s+", " ", (value or "").strip()).casefold()
 
 
 def parse_amazon_date(date_str):
@@ -44,6 +50,157 @@ def _review_page_url(asin, page_number):
     )
 
 
+def scrape_product_variations(driver, asin):
+    """
+    Scrape the product detail page for Amazon's variation metadata.
+
+    Amazon review cards show labels like "Set name: 3MP Pack of 2" while the
+    product page exposes the ASIN for each label in dimensionValuesDisplayData.
+    We keep this as a lightweight enrichment step before opening reviews.
+    """
+    metadata = {
+        "seed_asin": asin,
+        "selected_asin": asin,
+        "selected_label": "",
+        "dimension_name": "Set name",
+        "label_to_asin": {},
+        "asin_to_label": {},
+        "product_title": "",
+    }
+
+    try:
+        driver.get(f"https://www.amazon.in/dp/{asin}")
+        time.sleep(random.uniform(4, 6))
+
+        result = driver.execute_script(r"""
+            const out = {
+                title: document.querySelector('#productTitle')?.innerText.trim() || '',
+                selectedAsin: null,
+                selectedLabel: '',
+                dimensionName: 'Set name',
+                dimensionValuesDisplayData: null,
+                labels: null
+            };
+
+            const scripts = Array.from(document.scripts)
+                .map(s => s.textContent || '')
+                .filter(Boolean);
+
+            const extractObjectAfter = (text, key) => {
+                const keyIndex = text.indexOf('"' + key + '"');
+                if (keyIndex < 0) return null;
+                const start = text.indexOf('{', keyIndex);
+                if (start < 0) return null;
+                let depth = 0;
+                for (let i = start; i < text.length; i++) {
+                    const ch = text[i];
+                    if (ch === '{') depth++;
+                    if (ch === '}') depth--;
+                    if (depth === 0) return text.slice(start, i + 1);
+                }
+                return null;
+            };
+
+            for (const text of scripts) {
+                if (!out.dimensionValuesDisplayData && text.includes('dimensionValuesDisplayData')) {
+                    const raw = extractObjectAfter(text, 'dimensionValuesDisplayData');
+                    if (raw) {
+                        try { out.dimensionValuesDisplayData = JSON.parse(raw); } catch (e) {}
+                    }
+                }
+                if (!out.labels && text.includes('variationDisplayLabels')) {
+                    const raw = extractObjectAfter(text, 'variationDisplayLabels');
+                    if (raw) {
+                        try { out.labels = JSON.parse(raw); } catch (e) {}
+                    }
+                }
+                if (!out.selectedAsin) {
+                    const m = text.match(/"productAsin"\s*:\s*"([A-Z0-9]{10})"/);
+                    if (m) out.selectedAsin = m[1];
+                }
+                if (out.dimensionValuesDisplayData && out.labels) break;
+            }
+
+            if (out.labels) {
+                const firstKey = Object.keys(out.labels)[0];
+                if (firstKey) out.dimensionName = out.labels[firstKey] || out.dimensionName;
+            }
+
+            const data = out.dimensionValuesDisplayData || {};
+            const selected = out.selectedAsin || arguments[0];
+            out.selectedAsin = selected;
+            if (data[selected] && data[selected].length) out.selectedLabel = data[selected][0];
+            return out;
+        """, asin)
+
+        if result:
+            metadata["product_title"] = result.get("title") or ""
+            metadata["selected_asin"] = result.get("selectedAsin") or asin
+            metadata["selected_label"] = result.get("selectedLabel") or ""
+            metadata["dimension_name"] = result.get("dimensionName") or "Set name"
+
+            variation_data = result.get("dimensionValuesDisplayData") or {}
+            for variant_asin, values in variation_data.items():
+                if not variant_asin or not values:
+                    continue
+                label = str(values[0]).strip()
+                if not label:
+                    continue
+                metadata["asin_to_label"][variant_asin] = label
+                metadata["label_to_asin"][_norm_variant_label(label)] = variant_asin
+
+        if not metadata["selected_label"]:
+            metadata["selected_label"] = metadata["asin_to_label"].get(asin, "") or metadata["product_title"] or asin
+        metadata["label_to_asin"].setdefault(_norm_variant_label(metadata["selected_label"]), metadata["selected_asin"])
+        metadata["asin_to_label"].setdefault(metadata["selected_asin"], metadata["selected_label"])
+
+        print(
+            "  -> Variant map: "
+            f"{len(metadata['asin_to_label']) or 1} option(s); "
+            f"selected '{metadata['selected_label']}'"
+        )
+        return metadata
+    except Exception as e:
+        print(f"  -> scrape_product_variations failed for {asin}: {e}")
+        metadata["selected_label"] = asin
+        metadata["label_to_asin"][_norm_variant_label(asin)] = asin
+        metadata["asin_to_label"][asin] = asin
+        return metadata
+
+
+def _resolve_review_variant(review, seed_asin, product_name, variant_metadata):
+    raw_format = (review.get("variant_text") or "").strip()
+    dimension_name = variant_metadata.get("dimension_name") or "Set name"
+    variant_label = ""
+
+    if raw_format:
+        text = raw_format.replace("Verified Purchase", "").strip()
+        if ":" in text:
+            maybe_dimension, maybe_label = text.split(":", 1)
+            dimension_name = maybe_dimension.strip() or dimension_name
+            variant_label = maybe_label.strip()
+        else:
+            variant_label = text
+
+    if not variant_label:
+        variant_label = variant_metadata.get("selected_label") or product_name or seed_asin
+
+    label_to_asin = variant_metadata.get("label_to_asin") or {}
+    variant_asin = label_to_asin.get(_norm_variant_label(variant_label))
+    if not variant_asin and _norm_variant_label(variant_label) == _norm_variant_label(variant_metadata.get("selected_label")):
+        variant_asin = variant_metadata.get("selected_asin")
+    if not variant_asin:
+        variant_asin = seed_asin
+
+    return {
+        "scrape_asin": seed_asin,
+        "variant_asin": variant_asin,
+        "variant_label": variant_label,
+        "variant_dimension": dimension_name,
+        "product_name": variant_label,
+    }
+
+
 def _extract_reviews(driver):
     """Read all currently visible reviews from the page."""
     return driver.execute_script("""
@@ -53,12 +210,14 @@ def _extract_reviews(driver):
             const titleEl  = r.querySelector('[data-hook="review-title"]');
             const bodyEl   = r.querySelector('[data-hook="review-body"] span');
             const dateEl   = r.querySelector('[data-hook="review-date"]');
+            const formatEl = r.querySelector('[data-hook="format-strip"]');
             return {
                 review_id:   id,
                 rating:      ratingEl ? ratingEl.innerText.trim() : "",
                 title:       titleEl  ? titleEl.innerText.trim()  : "",
                 review:      bodyEl   ? bodyEl.innerText.trim()   : "",
                 review_date: dateEl   ? dateEl.innerText.trim()   : "",
+                variant_text: formatEl ? formatEl.innerText.trim() : "",
                 review_url:  id ? "https://www.amazon.in/review/" + id : ""
             };
         });
@@ -130,15 +289,15 @@ def _click_show_more_reviews(driver, previous_count, timeout=15):
             except Exception:
                 driver.execute_script("arguments[0].click();", button)
 
-            WebDriverWait(driver, timeout).until(
-                lambda d: (
-                    len(d.find_elements(By.CSS_SELECTOR, "[data-hook='review']")) > previous_count
-                    or (
-                        (_find_show_more_control(d) is not None)
-                        and ((_find_show_more_control(d).get_attribute("data-reviews-state-param") or "") != previous_state)
-                    )
-                )
-            )
+            def reviews_expanded_or_button_changed(d):
+                if len(d.find_elements(By.CSS_SELECTOR, "[data-hook='review']")) > previous_count:
+                    return True
+                current_button = _find_show_more_control(d)
+                if not current_button:
+                    return False
+                return (current_button.get_attribute("data-reviews-state-param") or "") != previous_state
+
+            WebDriverWait(driver, timeout).until(reviews_expanded_or_button_changed)
             time.sleep(random.uniform(1.0, 2.0))
             return True
         except StaleElementReferenceException:
@@ -232,7 +391,16 @@ def scrape_product_rating(driver, asin):
         return None
 
 
-def scrape_reviews_for_asin(driver, asin, product_name, category=None, max_pages=10, already_on_page=False, cutoff_date=None):
+def scrape_reviews_for_asin(
+    driver,
+    asin,
+    product_name,
+    category=None,
+    max_pages=10,
+    already_on_page=False,
+    cutoff_date=None,
+    variant_metadata=None,
+):
     """
     Scrape Amazon.in reviews for a given ASIN.
     Stops once reviews older than cutoff_date (or SCRAPE_DAYS_BACK if not provided) are encountered.
@@ -243,6 +411,13 @@ def scrape_reviews_for_asin(driver, asin, product_name, category=None, max_pages
     today = date.today()
     cutoff = cutoff_date if cutoff_date is not None else today - timedelta(days=SCRAPE_DAYS_BACK)
     scrape_date_str = today.isoformat()
+    variant_metadata = variant_metadata or {
+        "selected_asin": asin,
+        "selected_label": product_name or asin,
+        "dimension_name": "Set name",
+        "label_to_asin": {_norm_variant_label(product_name or asin): asin},
+        "asin_to_label": {asin: product_name or asin},
+    }
 
     base_url = _review_page_url(asin, 1)
     if not already_on_page:
@@ -284,8 +459,13 @@ def scrape_reviews_for_asin(driver, asin, product_name, category=None, max_pages
             review_id = review.get("review_id")
             if review_id:
                 seen_review_ids.add(review_id)
-            review["asin"] = asin
-            review["product_name"] = product_name
+            variant = _resolve_review_variant(review, asin, product_name, variant_metadata)
+            review["asin"] = variant["variant_asin"]
+            review["scrape_asin"] = variant["scrape_asin"]
+            review["variant_asin"] = variant["variant_asin"]
+            review["variant_label"] = variant["variant_label"]
+            review["variant_dimension"] = variant["variant_dimension"]
+            review["product_name"] = variant["product_name"]
             review["category"] = category or ""
             review["scrape_date"] = scrape_date_str
             reviews.append(review)

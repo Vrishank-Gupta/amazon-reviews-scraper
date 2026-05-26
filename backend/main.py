@@ -561,8 +561,14 @@ def get_filters():
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT product_name FROM raw_reviews WHERE product_name IS NOT NULL ORDER BY product_name")
-            db_products = [r["product_name"] for r in cur.fetchall()]
+            cur.execute("""
+                SELECT DISTINCT product_name, category
+                FROM raw_reviews
+                WHERE product_name IS NOT NULL
+                ORDER BY product_name
+            """)
+            product_rows = cur.fetchall()
+            db_products = [r["product_name"] for r in product_rows]
 
             cur.execute("SELECT DISTINCT rating FROM raw_reviews WHERE rating IS NOT NULL ORDER BY rating")
             ratings = [r["rating"] for r in cur.fetchall()]
@@ -581,8 +587,16 @@ def get_filters():
             if active:
                 tree[cat] = active
 
+        for row in product_rows:
+            product_name = row.get("product_name")
+            cat = (row.get("category") or "").strip()
+            if product_name and cat and product_name not in tree.get(cat, []):
+                tree.setdefault(cat, []).append(product_name)
+
         # Products with no category go into an "Other" bucket
         categorised = {p for prods in CAT_MAP.values() for p in prods}
+        for prods in tree.values():
+            categorised.update(prods)
         uncategorised = [p for p in products if p not in categorised]
         if uncategorised:
             tree["Other"] = uncategorised
@@ -606,7 +620,7 @@ def get_asins():
     try:
         with open(asins_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            return [{"asin": r["asin"], "product_name": r["product_name"], "category": r.get("category", "")} for r in reader]
+            return [{"asin": r["asin"], "product_name": r.get("product_name", ""), "category": r.get("category", "")} for r in reader]
     except FileNotFoundError:
         return []
 
@@ -1938,7 +1952,7 @@ def get_summary(
                 params = list(base_params) + [str(p_from), str(p_to)]
                 cur.execute(f"""
                     SELECT
-                        r.asin,
+                        COALESCE(r.variant_asin, r.asin) as asin,
                         MAX(r.product_name) as product_name,
                         MAX(r.category) as category,
                         ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 1) as avg_rating,
@@ -1948,7 +1962,7 @@ def get_summary(
                     JOIN review_tags t ON r.review_id = t.review_id
                     WHERE 1=1 {pf_sql}
                       AND {review_date_sql} BETWEEN %s AND %s
-                    GROUP BY r.asin
+                    GROUP BY COALESCE(r.variant_asin, r.asin)
                 """, params)
                 return {row["asin"]: row for row in cur.fetchall()}
 
@@ -2008,12 +2022,12 @@ def generate_summaries(product: Optional[str] = None, category: Optional[str] = 
             pf_sql, params = product_filter_sql(products)
 
             cur.execute(f"""
-                SELECT r.asin, MAX(r.product_name) as product_name,
+                SELECT COALESCE(r.variant_asin, r.asin) as asin, MAX(r.product_name) as product_name,
                     GROUP_CONCAT(r.review ORDER BY r.scrape_date DESC SEPARATOR ' ||| ') as reviews
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE 1=1 {pf_sql}
-                GROUP BY r.asin
+                GROUP BY COALESCE(r.variant_asin, r.asin)
             """, params)
             asin_rows = cur.fetchall()
 
@@ -2118,7 +2132,12 @@ def get_rating_trends(
 
             # Snapshot query — no date filter, always return all historical snapshots
             asin_list = list(asin_to_prod.keys())
-            if asin_list:
+            snap_params = list(asin_list)
+            if products:
+                product_ph = ",".join(["%s"] * len(products))
+                asin_filter = f" AND (s.asin IN ({','.join(['%s'] * len(asin_list))}) OR s.product_name IN ({product_ph}))" if asin_list else f" AND s.product_name IN ({product_ph})"
+                snap_params.extend(products)
+            elif asin_list:
                 asin_ph = ",".join(["%s"] * len(asin_list))
                 asin_filter = f" AND s.asin IN ({asin_ph})"
             else:
@@ -2128,20 +2147,21 @@ def get_rating_trends(
                 SELECT
                     s.scraped_date  AS day,
                     s.asin,
+                    s.product_name,
                     s.overall_rating,
                     s.total_ratings
                 FROM product_ratings_snapshot s
                 WHERE 1=1
                   {asin_filter}
                 ORDER BY s.scraped_date
-            """, asin_list)
+            """, snap_params)
             snap_rows_raw = cur.fetchall()
 
             # Map asin → product_name using ASIN_MAP (reliable, no string-matching)
             snap_rows = [
                 {
                     "day":            row["day"],
-                    "product_name":   ASIN_MAP.get(row["asin"], {}).get("product_name", row["asin"]),
+                    "product_name":   row.get("product_name") or ASIN_MAP.get(row["asin"], {}).get("product_name", row["asin"]),
                     "overall_rating": row["overall_rating"],
                     "total_ratings":  row["total_ratings"],
                 }

@@ -699,7 +699,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
       <AutoInsights insights={autoInsights} />
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
         <OverviewCards kpi={kpi} productCount={scopedProducts.length || allProducts?.length || 0} periodLabel={periodLabel} />
-        <Card title="Amazon Rating Signal" tip="Amazon product-page rating snapshots over time, alongside scraped daily review averages.">
+        <Card title="Amazon Listing Rating Signal" tip="Amazon product-page rating snapshots are listing-level signals. Product/set-name averages come from scraped reviews.">
           <RatingTrendChart filters={filters} tree={tree} />
         </Card>
       </div>

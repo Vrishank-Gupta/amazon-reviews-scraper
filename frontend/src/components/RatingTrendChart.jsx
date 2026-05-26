@@ -166,7 +166,7 @@ function SnapshotTable({ rows }) {
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            {['Category', 'Product', 'Amazon Overall Rating', 'Amazon Review Count'].map(label => (
+            {['Category', 'Product', 'Amazon Listing Rating', 'Amazon Listing Rating Count'].map(label => (
               <th
                 key={label}
                 style={{
@@ -273,7 +273,7 @@ export default function RatingTrendChart({ filters, tree }) {
   if (!days.length) {
     return (
       <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, fontStyle: 'italic' }}>
-        No rating snapshot data yet - will appear after the next scrape run.
+        No Amazon listing rating snapshot data yet - will appear after the next scrape run.
       </div>
     )
   }
@@ -361,8 +361,8 @@ export default function RatingTrendChart({ filters, tree }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           {SHOW_AMAZON_RATING_HISTORY
-            ? 'Track Amazon rating snapshots, daily review averages, and the daily star mix from scraped reviews.'
-            : 'Showing the latest Amazon product-page snapshot in a flat table until the full history view is enabled.'}
+            ? 'Track Amazon listing-level rating snapshots, product review averages, and the daily star mix from scraped reviews.'
+            : 'Showing the latest Amazon listing-level snapshot in a flat table until the full history view is enabled.'}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <select value={effectiveFilterProd || ''} onChange={event => setFilterProd(event.target.value || null)} style={selectStyle}>
@@ -375,7 +375,7 @@ export default function RatingTrendChart({ filters, tree }) {
               onChange={setViewMode}
               options={[
                 { v: 'snapshot', l: 'Snapshot' },
-                { v: 'overall', l: 'Amazon Rating' },
+                { v: 'overall', l: 'Listing Rating' },
                 { v: 'daily_reviews', l: 'Daily Reviews' },
               ]}
             />
@@ -385,7 +385,7 @@ export default function RatingTrendChart({ filters, tree }) {
 
       {limitedProducts && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          Showing top {displayedProducts.length} products by Amazon review scale. Use the dropdown to focus on a specific product.
+          Showing top {displayedProducts.length} products by Amazon listing rating count. Use the dropdown to focus on a specific product.
         </div>
       )}
 
@@ -486,7 +486,7 @@ export default function RatingTrendChart({ filters, tree }) {
       {SHOW_AMAZON_RATING_HISTORY && viewMode === 'overall' && displayedForChart.length > 0 && (
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
-            Daily Avg Rating from Scraped Reviews
+            Product Avg Rating from Scraped Reviews
           </div>
           <ResponsiveContainer width="100%" height={140}>
             <LineChart data={dailyAvgRows} margin={{ top: 4, right: 16, left: -10, bottom: 0 }}>

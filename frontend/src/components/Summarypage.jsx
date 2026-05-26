@@ -406,7 +406,7 @@ export default function SummaryPage({ filters, allProducts }) {
             <thead>
               <tr>
                 <TH onClick={() => handleSort('product_name')} sortDir={sortKey === 'product_name' ? sortDir : null} tip="Product name with health status pill">Product</TH>
-                <TH onClick={() => handleSort('avg_rating')} sortDir={sortKey === 'avg_rating' ? sortDir : null} tip="Average star rating (1-5) in current period">Avg Rating</TH>
+                <TH onClick={() => handleSort('avg_rating')} sortDir={sortKey === 'avg_rating' ? sortDir : null} tip="Average star rating from scraped reviews for this product/set name in the current period. This is separate from Amazon's listing-level rating snapshot.">Review Avg</TH>
                 <TH tip="Rating change vs prior period">Delta Rating</TH>
                 <TH onClick={() => handleSort('review_count')} sortDir={sortKey === 'review_count' ? sortDir : null} tip="Total reviews in current period">Reviews</TH>
                 <TH tip="Review count change vs prior period">Delta Reviews</TH>

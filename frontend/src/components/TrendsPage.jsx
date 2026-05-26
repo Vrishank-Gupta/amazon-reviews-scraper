@@ -875,8 +875,8 @@ export default function TrendsPage({ products: allProducts, filters }) {
       {/* ── SECTION 9: RATING TRENDS ── */}
       {false && <Card
         title="Rating Trends"
-        tip="Three views of rating health over time. Top: Amazon's overall displayed product-page rating per product, sourced from rating snapshots and forward-filled between scrape dates. This is different from the Review Rating shown in the scorecard above, which uses only scraped reviews inside the selected period. Middle: daily average of scraped reviews. Bottom: total number of ratings on Amazon."
-        sub="Top chart = Amazon product-page rating · scorecard above = review-period rating"
+        tip="Three views of rating health over time. Top: Amazon's displayed product-page rating, sourced from listing snapshots and forward-filled between scrape dates. This can be shared across variation families. The scorecards use only scraped reviews inside the selected period. Middle: daily average of scraped reviews. Bottom: total number of ratings on Amazon."
+        sub="Top chart = Amazon listing rating · scorecards = review-period rating"
       >
         <RatingTrendChart filters={filters} allProducts={allProducts} tree={tree} />
       </Card>}
