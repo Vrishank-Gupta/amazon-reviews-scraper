@@ -551,7 +551,7 @@ export default function PipelineWidget() {
                   cursor: 'pointer',
                 }}
               >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asinLabel}</span>
+                <span title={asinLabel} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asinLabel}</span>
                 <ChevronDown size={12} style={{ flexShrink: 0, transform: asinOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
               </button>
 
@@ -671,7 +671,7 @@ export default function PipelineWidget() {
                           >
                             <Check sel={selected} />
                             <span style={{ overflow: 'hidden' }}>
-                              <span style={{ display: 'block', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <span title={product_name} style={{ display: 'block', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {product_name}
                               </span>
                               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{asin}</span>
@@ -745,7 +745,7 @@ export default function PipelineWidget() {
                 return (
                   <div key={category.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '6px 0', borderTop: '1px solid rgba(148,163,184,0.12)' }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div title={category.name} style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {category.name}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>

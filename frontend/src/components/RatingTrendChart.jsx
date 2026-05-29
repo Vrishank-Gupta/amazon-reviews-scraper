@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bar,
   CartesianGrid,
@@ -128,6 +128,74 @@ function Toggle({ value, onChange, options }) {
   )
 }
 
+function CategoryProductSelect({ value, onChange, products = [], tree = {}, style }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const ref = useRef(null)
+  const normalizedQuery = query.trim().toLowerCase()
+  const productSet = new Set(products)
+  const groupedRaw = Object.entries(tree || {})
+    .map(([category, items]) => [category, (items || []).filter(product => productSet.has(product))])
+    .filter(([, items]) => items.length > 0)
+  const grouped = groupedRaw
+    .map(([category, items]) => [
+      category,
+      normalizedQuery
+        ? items.filter(product => product.toLowerCase().includes(normalizedQuery) || category.toLowerCase().includes(normalizedQuery))
+        : items,
+    ])
+    .filter(([category, items]) => items.length > 0 || category.toLowerCase().includes(normalizedQuery))
+  const groupedProducts = new Set(groupedRaw.flatMap(([, items]) => items))
+  const otherProducts = products
+    .filter(product => !groupedProducts.has(product))
+    .filter(product => !normalizedQuery || product.toLowerCase().includes(normalizedQuery))
+
+  useEffect(() => {
+    const handler = event => {
+      if (ref.current && !ref.current.contains(event.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const choose = product => {
+    onChange(product || null)
+    setOpen(false)
+    setQuery('')
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button title={value || 'All Products In Scope'} onClick={() => setOpen(o => !o)} style={{ ...style, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {value || 'All Products In Scope'}
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', width: 360, maxHeight: 360, overflowY: 'auto', zIndex: 300, background: '#14141e', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 14px 30px rgba(0,0,0,0.55)', padding: 6 }}>
+          <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search category or product" style={{ width: '100%', marginBottom: 6, padding: '7px 9px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 11, outline: 'none', fontFamily: 'DM Sans' }} />
+          <button onClick={() => choose(null)} style={{ width: '100%', padding: '7px 9px', textAlign: 'left', border: 'none', borderRadius: 6, background: !value ? 'rgba(255,78,26,0.1)' : 'transparent', color: !value ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+            All Products In Scope
+          </button>
+          {grouped.map(([category, items]) => (
+            <div key={category}>
+              <div style={{ padding: '7px 9px 4px', color: 'var(--accent)', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{category}</div>
+              {items.map(product => (
+                <button key={product} title={product} onClick={() => choose(product)} style={{ width: '100%', padding: '6px 9px 6px 18px', textAlign: 'left', border: 'none', borderRadius: 6, background: value === product ? 'rgba(255,78,26,0.1)' : 'transparent', color: value === product ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {product}
+                </button>
+              ))}
+            </div>
+          ))}
+          {otherProducts.length > 0 && otherProducts.map(product => (
+            <button key={product} title={product} onClick={() => choose(product)} style={{ width: '100%', padding: '6px 9px', textAlign: 'left', border: 'none', borderRadius: 6, background: value === product ? 'rgba(255,78,26,0.1)' : 'transparent', color: value === product ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11 }}>
+              {product}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function rankProductsForFocus(products, days, explicitProducts = [], limit = PRODUCT_DISPLAY_LIMIT) {
   if (explicitProducts?.length) return explicitProducts
   const latestDay = [...(days || [])].reverse().find(day =>
@@ -148,8 +216,13 @@ function rankProductsForFocus(products, days, explicitProducts = [], limit = PRO
 function getDefaultWidgetProduct({ parentProducts, parentCategory, scopedProducts, widgetValue }) {
   if (widgetValue !== undefined) return widgetValue
   if (parentProducts.length === 1) return parentProducts[0]
-  if (parentProducts.length > 1 || parentCategory) return null
+  if (parentProducts.length > 1 || asArray(parentCategory).length) return null
   return null
+}
+
+function asArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean)
+  return value ? [value] : []
 }
 
 function SnapshotTable({ rows }) {
@@ -212,7 +285,7 @@ export default function RatingTrendChart({ filters, tree }) {
   const [filterProd, setFilterProd] = useState(undefined)
   const [viewMode, setViewMode] = useState('snapshot')
 
-  const productCategory = filters?.product_category || null
+  const productCategory = asArray(filters?.product_category)
   const activeProducts = filters?.product?.length ? filters.product : []
   const dateFrom = filters?.date_from || ''
   const dateTo = filters?.date_to || ''
@@ -220,7 +293,7 @@ export default function RatingTrendChart({ filters, tree }) {
   useEffect(() => {
     setLoading(true)
     const params = new URLSearchParams()
-    if (productCategory) params.set('category', productCategory)
+    if (productCategory.length) params.set('category', productCategory.join('|||'))
     else if (activeProducts.length) params.set('product', activeProducts.join('|||'))
     if (dateFrom) params.set('date_from', dateFrom)
     if (dateTo) params.set('date_to', dateTo)
@@ -232,7 +305,7 @@ export default function RatingTrendChart({ filters, tree }) {
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [productCategory, JSON.stringify(activeProducts), dateFrom, dateTo])
+  }, [JSON.stringify(productCategory), JSON.stringify(activeProducts), dateFrom, dateTo])
 
   const products = data?.products || []
   const days = data?.days || []
@@ -243,7 +316,7 @@ export default function RatingTrendChart({ filters, tree }) {
 
   useEffect(() => {
     setFilterProd(undefined)
-  }, [JSON.stringify(products), productCategory, JSON.stringify(activeProducts)])
+  }, [JSON.stringify(products), JSON.stringify(productCategory), JSON.stringify(activeProducts)])
 
   const effectiveFilterProd = getDefaultWidgetProduct({
     parentProducts: activeProducts,
@@ -327,7 +400,7 @@ export default function RatingTrendChart({ filters, tree }) {
   }
 
   const gridProps = { strokeDasharray: '3 3', stroke: 'var(--border)', vertical: false }
-  const limitedProducts = !activeProducts.length && !productCategory && !filterProd && products.length > displayedProducts.length
+  const limitedProducts = !activeProducts.length && !productCategory.length && !filterProd && products.length > displayedProducts.length
 
   const selectStyle = {
     padding: '4px 8px',
@@ -365,10 +438,7 @@ export default function RatingTrendChart({ filters, tree }) {
             : 'Showing the latest Amazon listing-level snapshot in a flat table until the full history view is enabled.'}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <select value={effectiveFilterProd || ''} onChange={event => setFilterProd(event.target.value || null)} style={selectStyle}>
-            <option value="">All Products</option>
-            {products.map(product => <option key={product} value={product}>{product}</option>)}
-          </select>
+          <CategoryProductSelect value={effectiveFilterProd} onChange={setFilterProd} products={products} tree={tree} style={selectStyle} />
           {SHOW_AMAZON_RATING_HISTORY && (
             <Toggle
               value={viewMode}

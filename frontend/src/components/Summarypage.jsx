@@ -54,6 +54,27 @@ function RatingDistribution({ row }) {
   )
 }
 
+function ListingRating({ row }) {
+  const hasListingRating = row.listing_rating !== null && row.listing_rating !== undefined
+  if (!hasListingRating) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <StarLabel rating={row.avg_rating} />
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>review avg only</span>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <StarLabel rating={row.listing_rating} />
+      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+        {row.listing_total_ratings ? `${row.listing_total_ratings.toLocaleString()} Amazon ratings` : 'Amazon snapshot'}
+      </span>
+    </div>
+  )
+}
+
 function KeywordToneTabs({ value, onChange }) {
   const options = [
     ['mixed', 'Mixed'],
@@ -304,9 +325,12 @@ export default function SummaryPage({ filters, allProducts }) {
         ? [...items].sort((a, b) => riskScore(b) - riskScore(a))
         : items
       const totalReviews = items.reduce((s, r) => s + (r.review_count || 0), 0)
-      const weightedAvg = totalReviews > 0
-        ? items.reduce((s, r) => s + (r.avg_rating || 0) * (r.review_count || 0), 0) / totalReviews
-        : 0
+      const ratingWeight = items.reduce((s, r) => s + (r.listing_total_ratings || 0), 0)
+      const weightedAvg = ratingWeight > 0
+        ? items.reduce((s, r) => s + (r.listing_rating || 0) * (r.listing_total_ratings || 0), 0) / ratingWeight
+        : totalReviews > 0
+          ? items.reduce((s, r) => s + (r.avg_rating || 0) * (r.review_count || 0), 0) / totalReviews
+          : 0
       const weightedNeg = totalReviews > 0
         ? items.reduce((s, r) => s + (r.neg_pct || 0) * (r.review_count || 0), 0) / totalReviews
         : 0
@@ -349,7 +373,7 @@ export default function SummaryPage({ filters, allProducts }) {
               <InfoTip text="This is the original comparison table, kept in place and grouped by category. Click a product row to open its drill-down." />
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-              Sorted by the selected column and split by category sections.
+              Category sections keep the large catalogue scannable. Amazon Rating is the latest product-page snapshot; Review Avg is only from scraped reviews in this period.
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
@@ -406,12 +430,12 @@ export default function SummaryPage({ filters, allProducts }) {
             <thead>
               <tr>
                 <TH onClick={() => handleSort('product_name')} sortDir={sortKey === 'product_name' ? sortDir : null} tip="Product name with health status pill">Product</TH>
-                <TH onClick={() => handleSort('avg_rating')} sortDir={sortKey === 'avg_rating' ? sortDir : null} tip="Average star rating from scraped reviews for this product/set name in the current period. This is separate from Amazon's listing-level rating snapshot.">Review Avg</TH>
-                <TH tip="Rating change vs prior period">Delta Rating</TH>
+                <TH onClick={() => handleSort('listing_rating')} sortDir={sortKey === 'listing_rating' ? sortDir : null} tip="Latest Amazon product-page rating snapshot from product_ratings_snapshot. This is the number expected to match Amazon, subject to the last scrape date.">Amazon Rating</TH>
+                <TH tip="Amazon listing rating change versus the prior comparison period when a prior snapshot exists.">Delta Rating</TH>
+                <TH onClick={() => handleSort('avg_rating')} sortDir={sortKey === 'avg_rating' ? sortDir : null} tip="Average star rating from scraped review rows in the selected period only. It can differ sharply from Amazon's all-time product-page rating.">Review Avg</TH>
                 <TH onClick={() => handleSort('review_count')} sortDir={sortKey === 'review_count' ? sortDir : null} tip="Total reviews in current period">Reviews</TH>
                 <TH tip="Review count change vs prior period">Delta Reviews</TH>
                 <TH onClick={() => handleSort('neg_pct')} sortDir={sortKey === 'neg_pct' ? sortDir : null} tip="% of reviews tagged Negative">Neg %</TH>
-                <TH tip="Negative-rate change vs prior period">Delta Neg %</TH>
                 <TH />
               </tr>
             </thead>
@@ -496,20 +520,22 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
           >
             <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600, borderBottom: isDrill ? 'none' : '1px solid var(--border)', maxWidth: 230 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.product_name}</span>
+                <span title={row.product_name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.product_name}</span>
                 <HealthPill negPct={row.neg_pct} />
               </div>
             </td>
             <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
+              <ListingRating row={row} />
+            </td>
+            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_listing_rating} /></td>
+            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
               <StarLabel rating={row.avg_rating} />
             </td>
-            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_rating} /></td>
             <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>{row.review_count?.toLocaleString()}</td>
             <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_reviews} /></td>
             <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
               <span style={{ color: row.neg_pct > 50 ? '#ef4444' : row.neg_pct > 30 ? '#eab308' : '#22c55e', fontWeight: 700 }}>{row.neg_pct}%</span>
             </td>
-            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_neg_pct} invertColor /></td>
             <td style={{ padding: '12px 14px', color: 'var(--accent)', fontSize: 12, borderBottom: isDrill ? 'none' : '1px solid var(--border)', fontWeight: 700 }}>
               {isDrill ? 'collapse ^' : 'drill down v'}
             </td>

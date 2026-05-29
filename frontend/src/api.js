@@ -33,8 +33,11 @@ async function apiFetch(url, options = {}) {
 // All API calls use `product_category` (product group) NOT the taxonomy `category`
 function buildParams(filters = {}) {
   const p = new URLSearchParams()
+  const productCategories = Array.isArray(filters.product_category)
+    ? filters.product_category
+    : (filters.product_category ? [filters.product_category] : [])
   // Product-group filter — server resolves to ASINs
-  if (filters.product_category) p.set('category', filters.product_category)
+  if (productCategories.length) p.set('category', productCategories.join('|||'))
   if (filters.product?.length)   p.set('product', filters.product.join('|||'))
   if (filters.date_from)         p.set('date_from', filters.date_from)
   if (filters.date_to)           p.set('date_to', filters.date_to)

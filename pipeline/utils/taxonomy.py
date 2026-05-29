@@ -66,6 +66,9 @@ TAXONOMY = {
         "Auto-recording feature not activating",
         "Notifications not working or delayed",
         "Wrong timestamp on recordings",
+        "Motion detection well-calibrated",
+        "Accurate person / motion alerts",
+        "Alert frequency is appropriate",
         "App UI intuitive and easy to navigate",
         "Good notification system",
         "Easy footage access and download",
@@ -141,9 +144,6 @@ TAXONOMY = {
         "False person detection",
         "Alert flood after firmware update",
         "Notification spam making phone unusable",
-        "Motion detection well-calibrated",
-        "Accurate person / motion alerts",
-        "Alert frequency is appropriate",
     ],
 
    

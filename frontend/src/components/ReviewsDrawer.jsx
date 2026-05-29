@@ -3,6 +3,11 @@ import { createPortal } from 'react-dom'
 import { X, ExternalLink } from 'lucide-react'
 import { apiUrl, authHeaders } from '../api'
 
+function asArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean)
+  return value ? [value] : []
+}
+
 if (typeof document !== 'undefined' && !document.getElementById('reviews-drawer-styles')) {
   const s = document.createElement('style')
   s.id = 'reviews-drawer-styles'
@@ -115,8 +120,10 @@ export default function ReviewsDrawer({
 
     setLoading(true)
     const params = new URLSearchParams({ keyword: category })
+    const productCategories = asArray(filters?.product_category)
     if (productName) params.set('product', productName)
     else if (filters?.product?.length) params.set('product', filters.product.join('|||'))
+    else if (productCategories.length) params.set('product_category', productCategories.join('|||'))
     if (filters?.date_from) params.set('date_from', filters.date_from)
     if (filters?.date_to) params.set('date_to', filters.date_to)
     if (sentiment) params.set('sentiment', sentiment)
@@ -127,7 +134,7 @@ export default function ReviewsDrawer({
       .then(setReviews)
       .catch(() => setReviews([]))
       .finally(() => setLoading(false))
-  }, [category, productName, sentiment, taxonomyCategory, filters?.product?.join(','), filters?.date_from, filters?.date_to])
+  }, [category, productName, sentiment, taxonomyCategory, filters?.product?.join(','), JSON.stringify(filters?.product_category || []), filters?.date_from, filters?.date_to])
 
   // Close on Escape
   useEffect(() => {

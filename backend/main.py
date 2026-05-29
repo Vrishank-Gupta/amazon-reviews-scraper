@@ -15,6 +15,7 @@ import secrets
 import random
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import formataddr
 from datetime import datetime, timedelta
 from typing import Optional
 from collections import defaultdict
@@ -47,6 +48,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_SENDER = os.getenv("SMTP_SENDER", "admin@quboworld.com")
+SMTP_SENDER_NAME = os.getenv("SMTP_SENDER_NAME", "")
 ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "@heroelectronix.com")
 OTP_EXPIRY_MINUTES = 10
 SESSION_EXPIRY_DAYS = 7
@@ -97,7 +99,7 @@ def ensure_auth_tables(conn):
 def send_otp_email(to_email: str, otp: str):
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"Your VOC Dashboard Login Code: {otp}"
-    msg["From"] = SMTP_SENDER
+    msg["From"] = formataddr((SMTP_SENDER_NAME, SMTP_SENDER)) if SMTP_SENDER_NAME else SMTP_SENDER
     msg["To"] = to_email
 
     plain = (
@@ -236,8 +238,14 @@ def resolve_products(product: Optional[str], category: Optional[str]) -> Optiona
     if product:
         return [p.strip() for p in product.split("|||") if p.strip()]
     if category:
-        prods = CAT_MAP.get(category, [])
-        return prods if prods else None
+        category_lookup = {name.lower(): name for name in CAT_MAP}
+        selected = []
+        for cat in [c.strip() for c in category.split("|||") if c.strip()]:
+            canonical = category_lookup.get(cat.lower(), cat)
+            selected.extend(CAT_MAP.get(canonical, []))
+        seen = set()
+        prods = [p for p in selected if not (p in seen or seen.add(p))]
+        return prods if prods else ["__NO_MATCH__"]
     return None
 
 
@@ -573,10 +581,11 @@ def get_filters():
             cur.execute("SELECT DISTINCT rating FROM raw_reviews WHERE rating IS NOT NULL ORDER BY rating")
             ratings = [r["rating"] for r in cur.fetchall()]
 
-        # Use ASIN_MAP order for products (preserves asins.csv order)
-        # Fall back to DB order if product not in map
+        # Use ASIN_MAP order first, then append DB-only products so every
+        # selectable tree item can also be selected individually.
         map_products = ALL_PRODS if ALL_PRODS else db_products
-        products = [p for p in map_products if p in db_products] or db_products
+        ordered_map_products = [p for p in map_products if p in db_products]
+        products = ordered_map_products + [p for p in db_products if p not in ordered_map_products]
 
         # Build category tree from CAT_MAP — only include categories that have
         # at least one product present in the DB
@@ -1581,6 +1590,12 @@ def get_cxo_trends(
         total_all = sum(pt["total"] for pt in daily_trend)
         total_neg = sum(pt["Negative"] for pt in daily_trend)
         total_pos = sum(pt["Positive"] for pt in daily_trend)
+        star_1_total = sum(pt["star_1"] for pt in daily_rating)
+        star_2_total = sum(pt["star_2"] for pt in daily_rating)
+        star_3_total = sum(pt["star_3"] for pt in daily_rating)
+        star_4_total = sum(pt["star_4"] for pt in daily_rating)
+        star_5_total = sum(pt["star_5"] for pt in daily_rating)
+        rating_total = star_1_total + star_2_total + star_3_total + star_4_total + star_5_total
         avg_neg_rate = round(total_neg / total_all * 100, 1) if total_all else 0
 
         # Last 7d vs prior 7d
@@ -1608,6 +1623,17 @@ def get_cxo_trends(
                 "last7_neg_rate": last7_neg,
                 "prior7_neg_rate": prior7_neg,
                 "wow_delta": round(last7_neg - prior7_neg, 1) if prior7_neg is not None else None,
+            },
+            "rating_kpi": {
+                "total": rating_total,
+                "bad": star_1_total + star_2_total,
+                "neutral": star_3_total,
+                "good": star_4_total + star_5_total,
+                "star_1": star_1_total,
+                "star_2": star_2_total,
+                "star_3": star_3_total,
+                "star_4": star_4_total,
+                "star_5": star_5_total,
             },
         }
     finally:
@@ -1815,6 +1841,30 @@ def get_analysis(
             """, kpi_params)
             sentiment_kpi = {row["sentiment"]: row["count"] for row in cur.fetchall()}
 
+            rating_params = list(base_params)
+            if date_from: rating_params.append(date_from)
+            if date_to: rating_params.append(date_to)
+
+            cur.execute(f"""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 1 THEN 1 ELSE 0 END) as star_1,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 2 THEN 1 ELSE 0 END) as star_2,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 3 THEN 1 ELSE 0 END) as star_3,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 4 THEN 1 ELSE 0 END) as star_4,
+                    SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 5 THEN 1 ELSE 0 END) as star_5
+                FROM raw_reviews r
+                WHERE 1=1 {pf_sql}
+                  AND {date_parse} IS NOT NULL
+                  {date_filter.replace('parsed_date', date_parse)}
+            """, rating_params)
+            rating_row = cur.fetchone() or {}
+            star_1 = int(rating_row.get("star_1") or 0)
+            star_2 = int(rating_row.get("star_2") or 0)
+            star_3 = int(rating_row.get("star_3") or 0)
+            star_4 = int(rating_row.get("star_4") or 0)
+            star_5 = int(rating_row.get("star_5") or 0)
+
             # ── Daily sentiment trend by review_date ──
             trend_params = list(base_params)
             if date_from: trend_params.append(date_from)
@@ -1895,6 +1945,17 @@ def get_analysis(
                 "positive": sentiment_kpi.get("Positive", 0),
                 "neutral": sentiment_kpi.get("Neutral", 0),
             },
+            "rating_kpi": {
+                "total": int(rating_row.get("total") or 0),
+                "bad": star_1 + star_2,
+                "neutral": star_3,
+                "good": star_4 + star_5,
+                "star_1": star_1,
+                "star_2": star_2,
+                "star_3": star_3,
+                "star_4": star_4,
+                "star_5": star_5,
+            },
             "daily_trend": daily_trend,
             "neg_pie": neg_pie,
             "pos_pie": pos_pie,
@@ -1921,7 +1982,11 @@ def get_summary(
             products = resolve_products(product, category)
             pf_sql, base_params = product_filter_sql(products)
 
-            # Determine period length for delta
+            # Determine the current comparison window.
+            # If no date filter is selected, summary should match the dashboard's
+            # all-time scope. Deltas are only meaningful for a bounded period.
+            prior_from = None
+            prior_to = None
             if date_from and date_to:
                 d_from = _date.fromisoformat(date_from)
                 d_to = _date.fromisoformat(date_to)
@@ -1929,27 +1994,19 @@ def get_summary(
                 prior_to = d_from - timedelta(days=1)
                 prior_from = prior_to - timedelta(days=period_days)
             else:
-                period_days = 30
-                review_date_sql = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
-                cur.execute(f"""
-                    SELECT MAX({review_date_sql}) AS latest_review_date
-                    FROM raw_reviews r
-                    WHERE 1=1 {pf_sql}
-                      AND {review_date_sql} IS NOT NULL
-                """, list(base_params))
-                latest_row = cur.fetchone() or {}
-                d_to = latest_row.get("latest_review_date")
-                if not d_to:
-                    return []
-                if hasattr(d_to, "date"):
-                    d_to = d_to.date()
-                d_from = d_to - timedelta(days=30)
-                prior_to = d_from - timedelta(days=1)
-                prior_from = prior_to - timedelta(days=30)
+                d_from = _date.fromisoformat(date_from) if date_from else None
+                d_to = _date.fromisoformat(date_to) if date_to else None
 
             def fetch_period(p_from, p_to):
                 review_date_sql = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
-                params = list(base_params) + [str(p_from), str(p_to)]
+                period_filter = f" AND {review_date_sql} IS NOT NULL"
+                params = list(base_params)
+                if p_from:
+                    period_filter += f" AND {review_date_sql} >= %s"
+                    params.append(str(p_from))
+                if p_to:
+                    period_filter += f" AND {review_date_sql} <= %s"
+                    params.append(str(p_to))
                 cur.execute(f"""
                     SELECT
                         COALESCE(r.variant_asin, r.asin) as asin,
@@ -1961,13 +2018,47 @@ def get_summary(
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
                     WHERE 1=1 {pf_sql}
-                      AND {review_date_sql} BETWEEN %s AND %s
+                      {period_filter}
                     GROUP BY COALESCE(r.variant_asin, r.asin)
                 """, params)
                 return {row["asin"]: row for row in cur.fetchall()}
 
             current = fetch_period(d_from, d_to)
-            prior = fetch_period(prior_from, prior_to)
+            prior = fetch_period(prior_from, prior_to) if prior_from and prior_to else {}
+
+            def fetch_listing_snapshots(cutoff=None):
+                cutoff_sql = ""
+                cutoff_params = []
+                if cutoff:
+                    cutoff_sql = "WHERE scraped_date <= %s"
+                    cutoff_params.append(str(cutoff))
+                cur.execute(f"""
+                    SELECT s.asin, s.product_name, s.overall_rating, s.total_ratings, s.scraped_date
+                    FROM product_ratings_snapshot s
+                    JOIN (
+                        SELECT asin, MAX(scraped_date) AS scraped_date
+                        FROM product_ratings_snapshot
+                        {cutoff_sql}
+                        GROUP BY asin
+                    ) latest
+                      ON latest.asin = s.asin AND latest.scraped_date = s.scraped_date
+                """, cutoff_params)
+                by_asin = {}
+                by_product = {}
+                for snap in cur.fetchall():
+                    item = {
+                        "rating": float(snap["overall_rating"]) if snap.get("overall_rating") is not None else None,
+                        "total_ratings": int(snap["total_ratings"]) if snap.get("total_ratings") is not None else None,
+                        "scraped_date": str(snap["scraped_date"]) if snap.get("scraped_date") else None,
+                    }
+                    by_asin[snap["asin"]] = item
+                    if snap.get("product_name"):
+                        by_product[snap["product_name"]] = item
+                return by_asin, by_product
+
+            snapshot_cutoff = d_to if date_to else None
+            current_snaps_by_asin, current_snaps_by_product = fetch_listing_snapshots(snapshot_cutoff)
+            prior_snaps_by_asin, prior_snaps_by_product = fetch_listing_snapshots(prior_to) if prior_to else ({}, {})
 
             # Fetch AI summaries — gracefully skip if table missing or no permission
             try:
@@ -1985,6 +2076,10 @@ def get_summary(
                 curr_count = row["review_count"] or 0
                 curr_neg = row["neg_count"] or 0
                 curr_rating = float(row["avg_rating"] or 0)
+                current_snap = current_snaps_by_asin.get(asin) or current_snaps_by_product.get(row["product_name"]) or {}
+                prior_snap = prior_snaps_by_asin.get(asin) or prior_snaps_by_product.get(row["product_name"]) or {}
+                listing_rating = current_snap.get("rating")
+                prior_listing_rating = prior_snap.get("rating")
                 curr_neg_pct = float(round((curr_neg / curr_count * 100), 1)) if curr_count else 0.0
                 prev_neg_pct = float(round((prev_neg / prev_count * 100), 1)) if prev_count else 0.0
                 ai = ai_rows.get(asin, {})
@@ -1993,10 +2088,19 @@ def get_summary(
                     "product_name": row["product_name"],
                     "category": row.get("category"),
                     "avg_rating": curr_rating,
+                    "review_avg_rating": curr_rating,
+                    "listing_rating": listing_rating,
+                    "listing_total_ratings": current_snap.get("total_ratings"),
+                    "listing_rating_date": current_snap.get("scraped_date"),
                     "review_count": curr_count,
                     "neg_pct": curr_neg_pct,
                     "delta_reviews": curr_count - prev_count,
                     "delta_rating": round(curr_rating - float(prev_rating), 1),
+                    "delta_listing_rating": (
+                        round(listing_rating - prior_listing_rating, 1)
+                        if listing_rating is not None and prior_listing_rating is not None
+                        else None
+                    ),
                     "delta_neg_pct": round(curr_neg_pct - prev_neg_pct, 1),
                     "ai_issues": json.loads(ai.get("issues") or "[]"),
                     "ai_positives": json.loads(ai.get("positives") or "[]"),

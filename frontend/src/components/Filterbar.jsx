@@ -1,40 +1,59 @@
-/**
- * FilterBar — category tree + date + sentiment + rating filters
- * onChange(updates) receives a partial filter object to merge into App state.
- */
-import { useState, useRef, useEffect, useMemo } from 'react'
-import { SlidersHorizontal, X, ChevronDown, Calendar, Package } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Calendar, ChevronDown, Package, SlidersHorizontal, X } from 'lucide-react'
 
-const SC = { Positive:'#22c55e', Neutral:'#eab308', Negative:'#ef4444' }
+const SC = { Positive: '#22c55e', Neutral: '#eab308', Negative: '#ef4444' }
 const DATE_PRESETS = [
-  { label:'7d',  days:7  },
-  { label:'30d', days:30 },
-  { label:'90d', days:90 },
-  { label:'All', days:null },
+  { label: '7d', days: 7 },
+  { label: '30d', days: 30 },
+  { label: '90d', days: 90 },
+  { label: 'All', days: null },
 ]
+
+function asArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean)
+  return value ? [value] : []
+}
 
 function fmtDate(d) {
   if (!d) return ''
-  try { return new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit'}) } catch { return d }
+  try {
+    return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })
+  } catch {
+    return d
+  }
 }
 
-function Dropdown({ trigger, children, align='left', minWidth=220 }) {
+function Dropdown({ trigger, children, align = 'left', minWidth = 220 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
+
   useEffect(() => {
-    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const handler = e => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
   return (
-    <div ref={ref} style={{ position:'relative' }}>
-      <div onClick={() => setOpen(o=>!o)}>{trigger(open)}</div>
+    <div ref={ref} style={{ position: 'relative' }}>
+      <div onClick={() => setOpen(o => !o)}>{trigger(open)}</div>
       {open && (
-        <div style={{
-          position:'absolute', top:'calc(100% + 6px)', [align]:0, zIndex:200,
-          background:'#14141e', border:'1px solid var(--border)', borderRadius:10,
-          boxShadow:'0 12px 32px rgba(0,0,0,0.6)', minWidth, overflow:'hidden',
-        }} onClick={e=>e.stopPropagation()}>
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            [align]: 0,
+            zIndex: 200,
+            background: '#14141e',
+            border: '1px solid var(--border)',
+            borderRadius: 10,
+            boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
+            minWidth,
+            overflow: 'hidden',
+          }}
+          onClick={e => e.stopPropagation()}
+        >
           {children(() => setOpen(false))}
         </div>
       )}
@@ -44,32 +63,50 @@ function Dropdown({ trigger, children, align='left', minWidth=220 }) {
 
 function PillBtn({ label, active, icon }) {
   return (
-    <button style={{
-      display:'flex', alignItems:'center', gap:5,
-      padding:'5px 12px', borderRadius:20, cursor:'pointer',
-      border:`1px solid ${active?'var(--accent)':'var(--border)'}`,
-      background: active?'rgba(255,78,26,0.1)':'var(--surface)',
-      color: active?'var(--accent)':'var(--text-muted)',
-      fontSize:12, fontWeight:500, fontFamily:'DM Sans',
-      transition:'all 0.15s', whiteSpace:'nowrap',
-    }}>
-      {icon}{label}<ChevronDown size={11} style={{ opacity:0.6 }} />
+    <button
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+        padding: '5px 12px',
+        borderRadius: 20,
+        cursor: 'pointer',
+        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+        background: active ? 'rgba(255,78,26,0.1)' : 'var(--surface)',
+        color: active ? 'var(--accent)' : 'var(--text-muted)',
+        fontSize: 12,
+        fontWeight: 500,
+        fontFamily: 'DM Sans',
+        transition: 'all 0.15s',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {icon}
+      {label}
+      <ChevronDown size={11} style={{ opacity: 0.6 }} />
     </button>
   )
 }
 
 function ActiveChip({ label, color, onRemove }) {
   return (
-    <span style={{
-      display:'inline-flex', alignItems:'center', gap:4,
-      padding:'3px 8px 3px 10px', borderRadius:20,
-      background: color?`${color}15`:'rgba(255,78,26,0.1)',
-      border:`1px solid ${color||'var(--accent)'}40`,
-      color: color||'var(--accent)', fontSize:11, fontWeight:600,
-      whiteSpace:'nowrap',
-    }}>
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '3px 8px 3px 10px',
+        borderRadius: 20,
+        background: color ? `${color}15` : 'rgba(255,78,26,0.1)',
+        border: `1px solid ${color || 'var(--accent)'}40`,
+        color: color || 'var(--accent)',
+        fontSize: 11,
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+      }}
+    >
       {label}
-      <button onClick={onRemove} style={{ background:'none', border:'none', cursor:'pointer', color:'inherit', padding:0, lineHeight:1, display:'flex', opacity:0.7 }}>
+      <button onClick={onRemove} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0, lineHeight: 1, display: 'flex', opacity: 0.7 }}>
         <X size={11} />
       </button>
     </span>
@@ -81,51 +118,63 @@ function DateDropdown({ filters, onChange }) {
     if (!filters.date_from && !filters.date_to) return 'All'
     if (!filters.date_from) return null
     const days = Math.round((new Date() - new Date(filters.date_from)) / 86400000)
-    if (days <= 8) return '7d'; if (days <= 31) return '30d'; if (days <= 92) return '90d'
+    if (days <= 8) return '7d'
+    if (days <= 31) return '30d'
+    if (days <= 92) return '90d'
     return null
   })()
+
   const applyPreset = (days, close) => {
-    if (days === null) { onChange({ date_from:null, date_to:null }) }
+    if (days === null) onChange({ date_from: null, date_to: null })
     else {
-      const to = new Date(), from = new Date()
+      const to = new Date()
+      const from = new Date()
       from.setDate(to.getDate() - days)
-      onChange({ date_from:from.toISOString().slice(0,10), date_to:to.toISOString().slice(0,10) })
+      onChange({ date_from: from.toISOString().slice(0, 10), date_to: to.toISOString().slice(0, 10) })
     }
     close()
   }
+
   const hasDate = !!(filters.date_from || filters.date_to) && activePreset !== 'All'
   const label = activePreset && activePreset !== 'All'
     ? `Last ${activePreset}`
     : filters.date_from && filters.date_to
-    ? `${fmtDate(filters.date_from)} → ${fmtDate(filters.date_to)}`
-    : 'Date Range'
+      ? `${fmtDate(filters.date_from)} to ${fmtDate(filters.date_to)}`
+      : 'Date Range'
+
   return (
     <Dropdown trigger={() => <PillBtn label={label} active={hasDate} icon={<Calendar size={12} />} />}>
-      {(close) => (
-        <div style={{ padding:14, display:'flex', flexDirection:'column', gap:10 }}>
-          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>Quick Select</div>
-          <div style={{ display:'flex', gap:6 }}>
+      {close => (
+        <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Quick Select</div>
+          <div style={{ display: 'flex', gap: 6 }}>
             {DATE_PRESETS.map(p => (
-              <button key={p.label} onClick={() => applyPreset(p.days, close)} style={{
-                flex:1, padding:'5px 0', borderRadius:6, fontSize:11, fontWeight:600, cursor:'pointer', fontFamily:'DM Sans',
-                border:`1px solid ${activePreset===p.label?'var(--accent)':'var(--border)'}`,
-                background: activePreset===p.label?'rgba(255,78,26,0.12)':'var(--surface2)',
-                color: activePreset===p.label?'var(--accent)':'var(--text-muted)',
-              }}>{p.label}</button>
+              <button
+                key={p.label}
+                onClick={() => applyPreset(p.days, close)}
+                style={{
+                  flex: 1,
+                  padding: '5px 0',
+                  borderRadius: 6,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans',
+                  border: `1px solid ${activePreset === p.label ? 'var(--accent)' : 'var(--border)'}`,
+                  background: activePreset === p.label ? 'rgba(255,78,26,0.12)' : 'var(--surface2)',
+                  color: activePreset === p.label ? 'var(--accent)' : 'var(--text-muted)',
+                }}
+              >
+                {p.label}
+              </button>
             ))}
           </div>
-          <div style={{ borderTop:'1px solid var(--border)', paddingTop:10, display:'flex', flexDirection:'column', gap:6 }}>
-            <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>Custom Range</div>
-            <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-              <input type="date" value={filters.date_from||''} onChange={e=>onChange({date_from:e.target.value||null})}
-                style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, color:'var(--text)', padding:'6px 10px', fontSize:12, outline:'none', fontFamily:'DM Sans', width:'100%' }} />
-              <input type="date" value={filters.date_to||''} onChange={e=>onChange({date_to:e.target.value||null})}
-                style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, color:'var(--text)', padding:'6px 10px', fontSize:12, outline:'none', fontFamily:'DM Sans', width:'100%' }} />
-            </div>
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Custom Range</div>
+            <input type="date" value={filters.date_from || ''} onChange={e => onChange({ date_from: e.target.value || null })} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', padding: '6px 10px', fontSize: 12, outline: 'none', fontFamily: 'DM Sans', width: '100%' }} />
+            <input type="date" value={filters.date_to || ''} onChange={e => onChange({ date_to: e.target.value || null })} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', padding: '6px 10px', fontSize: 12, outline: 'none', fontFamily: 'DM Sans', width: '100%' }} />
             {filters.date_from && filters.date_to && filters.date_to < filters.date_from && (
-              <div style={{ fontSize:11, color:'#ef4444', display:'flex', alignItems:'center', gap:4 }}>
-                ⚠ End date is before start date
-              </div>
+              <div style={{ fontSize: 11, color: '#ef4444' }}>End date is before start date</div>
             )}
           </div>
         </div>
@@ -136,72 +185,88 @@ function DateDropdown({ filters, onChange }) {
 
 function Check({ sel, partial = false }) {
   return (
-    <span style={{
-      width:14, height:14, borderRadius:3, flexShrink:0,
-      border:`1.5px solid ${sel?'var(--accent)':'var(--border)'}`,
-      background: sel?'var(--accent)':'transparent',
-      display:'inline-flex', alignItems:'center', justifyContent:'center',
-      fontSize:9, color:'#fff',
-    }}>{sel ? (partial ? '-' : '✓') : ''}</span>
+    <span
+      style={{
+        width: 14,
+        height: 14,
+        borderRadius: 3,
+        flexShrink: 0,
+        border: `1.5px solid ${sel ? 'var(--accent)' : 'var(--border)'}`,
+        background: sel ? 'var(--accent)' : 'transparent',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 9,
+        color: '#fff',
+      }}
+    >
+      {sel ? (partial ? '-' : '✓') : ''}
+    </span>
   )
 }
 
 function ProductDropdown({ filters, options, onChange }) {
-  const tree  = options.tree  || {}
-  const all   = options.products || []
+  const tree = options.tree || {}
+  const all = options.products || []
   const categories = Object.keys(tree)
-  const activeCat  = filters.product_category
+  const activeCats = asArray(filters.product_category)
   const activeProds = filters.product || []
   const [query, setQuery] = useState('')
   const [hoveredCat, setHoveredCat] = useState(null)
   const [hoveredProd, setHoveredProd] = useState(null)
+  const [expandedCats, setExpandedCats] = useState({})
 
   const normalizedQuery = query.trim().toLowerCase()
-  const normalizedAll = useMemo(() => [...new Set(all)], [all])
+  const normalizedAll = useMemo(
+    () => [...new Set([...all, ...Object.values(tree).flat()])],
+    [all, tree],
+  )
+  const selectedProducts = useMemo(() => {
+    if (activeProds.length > 0) return activeProds
+    if (activeCats.length > 0) return [...new Set(activeCats.flatMap(cat => tree[cat] || []))]
+    return normalizedAll
+  }, [activeCats, activeProds, normalizedAll, tree])
+
   const filteredCategories = useMemo(() => {
     if (!normalizedQuery) return categories
-    return categories.filter(cat => {
-      if (cat.toLowerCase().includes(normalizedQuery)) return true
-      return (tree[cat] || []).some(prod => prod.toLowerCase().includes(normalizedQuery))
-    })
+    return categories.filter(cat =>
+      cat.toLowerCase().includes(normalizedQuery) ||
+      (tree[cat] || []).some(prod => prod.toLowerCase().includes(normalizedQuery)),
+    )
   }, [categories, normalizedQuery, tree])
 
   const uncategorisedProducts = useMemo(
     () => all.filter(p => !categories.some(c => (tree[c] || []).includes(p))),
-    [all, categories, tree]
+    [all, categories, tree],
   )
   const filteredUncategorisedProducts = useMemo(() => {
     if (!normalizedQuery) return uncategorisedProducts
     return uncategorisedProducts.filter(prod => prod.toLowerCase().includes(normalizedQuery))
   }, [normalizedQuery, uncategorisedProducts])
 
-  const selectedProducts = useMemo(() => {
-    if (activeCat) return tree[activeCat] || []
-    if (activeProds.length > 0) return activeProds
-    return normalizedAll
-  }, [activeCat, activeProds, normalizedAll, tree])
-
   const commitSelectedProducts = nextProducts => {
     const uniqueProducts = normalizedAll.filter(prod => nextProducts.includes(prod))
-
     if (uniqueProducts.length === 0 || uniqueProducts.length === normalizedAll.length) {
-      onChange({ product_category: null, product: [] })
+      onChange({ product_category: [], product: [] })
       return
     }
 
-    const matchingCategory = categories.find(cat => {
+    const remaining = new Set(uniqueProducts)
+    const matchedCategories = []
+    categories.forEach(cat => {
       const catProducts = tree[cat] || []
-      return catProducts.length > 0
-        && catProducts.length === uniqueProducts.length
-        && catProducts.every(prod => uniqueProducts.includes(prod))
+      if (catProducts.length > 0 && catProducts.every(prod => remaining.has(prod))) {
+        matchedCategories.push(cat)
+        catProducts.forEach(prod => remaining.delete(prod))
+      }
     })
 
-    if (matchingCategory) {
-      onChange({ product_category: matchingCategory, product: [] })
+    if (matchedCategories.length > 0 && remaining.size === 0) {
+      onChange({ product_category: matchedCategories, product: [] })
       return
     }
 
-    onChange({ product_category: null, product: uniqueProducts })
+    onChange({ product_category: [], product: uniqueProducts })
   }
 
   const isProdSelected = prod => selectedProducts.includes(prod)
@@ -219,6 +284,14 @@ function ProductDropdown({ filters, options, onChange }) {
     const catProducts = tree[cat] || []
     if (!catProducts.length) return
 
+    if (activeProds.length === 0) {
+      const currentCats = new Set(activeCats)
+      if (currentCats.has(cat)) currentCats.delete(cat)
+      else currentCats.add(cat)
+      onChange({ product_category: [...currentCats], product: [] })
+      return
+    }
+
     const current = new Set(selectedProducts)
     const fullySelected = catProducts.every(prod => current.has(prod))
     if (fullySelected) catProducts.forEach(prod => current.delete(prod))
@@ -226,11 +299,7 @@ function ProductDropdown({ filters, options, onChange }) {
     commitSelectedProducts([...current])
   }
 
-  const selectAll = (close) => {
-    onChange({ product_category: null, product: [] })
-    close()
-  }
-  const toggleProduct = (prod) => {
+  const toggleProduct = prod => {
     const current = new Set(selectedProducts)
     if (current.has(prod)) current.delete(prod)
     else current.add(prod)
@@ -238,99 +307,74 @@ function ProductDropdown({ filters, options, onChange }) {
   }
 
   const chipLabel = (() => {
-    if (!activeCat && activeProds.length === 0) return 'All Products'
-    if (activeCat) return activeCat
+    if (!activeCats.length && activeProds.length === 0) return 'All Categories'
+    if (activeCats.length === 1 && activeProds.length === 0) return activeCats[0]
+    if (activeCats.length > 1 && activeProds.length === 0) return `${activeCats.slice(0, 2).join(' · ')}${activeCats.length > 2 ? ` +${activeCats.length - 2} more` : ''}`
     if (activeProds.length <= 2) return activeProds.join(' · ')
-    return `${activeProds.slice(0,2).join(' · ')} +${activeProds.length-2} more`
+    return `${activeProds.slice(0, 2).join(' · ')} +${activeProds.length - 2} more`
   })()
 
-  const isFiltered = !!(activeCat || activeProds.length > 0)
+  const isFiltered = !!(activeCats.length || activeProds.length > 0)
 
   return (
-    <Dropdown trigger={() => <PillBtn label={chipLabel} active={isFiltered} icon={<Package size={12} />} />} minWidth={324}>
-      {(close) => (
-        <div style={{ maxHeight:340, overflowY:'auto' }}>
-          <div style={{ padding:10, borderBottom:'1px solid var(--border)', background:'#14141e', position:'sticky', top:0, zIndex:1 }}>
+    <Dropdown trigger={() => <PillBtn label={chipLabel} active={isFiltered} icon={<Package size={12} />} />} minWidth={404}>
+      {close => (
+        <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+          <div style={{ padding: 10, borderBottom: '1px solid var(--border)', background: '#14141e', position: 'sticky', top: 0, zIndex: 1 }}>
             <input
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Search category or product"
-              style={{
-                width:'100%', padding:'7px 10px', background:'var(--surface2)', border:'1px solid var(--border)',
-                borderRadius:8, color:'var(--text)', fontSize:12, outline:'none', fontFamily:'DM Sans',
-              }}
+              style={{ width: '100%', padding: '7px 10px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 12, outline: 'none', fontFamily: 'DM Sans' }}
             />
           </div>
-          <button onClick={() => selectAll(close)} style={{
-            width:'100%', padding:'9px 14px', textAlign:'left',
-            background:!isFiltered?'rgba(255,78,26,0.08)':'transparent',
-            border:'none', borderBottom:'1px solid var(--border)',
-            color:!isFiltered?'var(--accent)':'var(--text-muted)',
-            fontSize:11, fontWeight:600, cursor:'pointer',
-            display:'flex', alignItems:'center', gap:7,
-          }}>
-            <Check sel={!isFiltered} /> All Products
+          <button
+            onClick={() => {
+              onChange({ product_category: [], product: [] })
+              close()
+            }}
+            style={{ width: '100%', padding: '9px 14px', textAlign: 'left', background: !isFiltered ? 'rgba(255,78,26,0.08)' : 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: !isFiltered ? 'var(--accent)' : 'var(--text-muted)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7 }}
+          >
+            <Check sel={!isFiltered} /> All Categories
           </button>
 
           {filteredCategories.map(cat => {
             const prods = tree[cat] || []
             const visibleProds = normalizedQuery
               ? prods.filter(prod => prod.toLowerCase().includes(normalizedQuery) || cat.toLowerCase().includes(normalizedQuery))
-              : prods
+              : (expandedCats[cat] || activeCats.includes(cat) || isCatPartial(cat) ? prods : [])
             const catSel = isCatSelected(cat)
+            const catPartial = isCatPartial(cat)
+            const isExpanded = visibleProds.length > 0
             return (
               <div key={cat}>
                 <button
                   onMouseEnter={() => setHoveredCat(cat)}
                   onMouseLeave={() => setHoveredCat(null)}
                   onClick={() => toggleCategory(cat)}
-                  style={{
-                    width:'100%', padding:'8px 14px', textAlign:'left',
-                    background: catSel || isCatPartial(cat) ? 'rgba(255,78,26,0.06)' : 'transparent',
-                    border:'none', borderBottom:'1px solid var(--border)',
-                    color: catSel || isCatPartial(cat) ? 'var(--accent)' : 'var(--text)',
-                    fontSize:11, fontWeight:700, cursor:'pointer',
-                    display:'flex', alignItems:'center', gap:7,
-                    letterSpacing:'0.04em', textTransform:'uppercase',
-                  }}
+                  style={{ width: '100%', padding: '8px 14px', textAlign: 'left', background: catSel || catPartial ? 'rgba(255,78,26,0.06)' : 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: catSel || catPartial ? 'var(--accent)' : 'var(--text)', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7, letterSpacing: '0.04em', textTransform: 'uppercase' }}
                 >
-                  <Check sel={catSel || isCatPartial(cat)} partial={isCatPartial(cat)} />
-                  📁 {cat}
-                  <span style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6 }}>
+                  <Check sel={catSel || catPartial} partial={catPartial} />
+                  {cat}
+                  <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
                     {hoveredCat === cat && (
-                      <span
-                        onClick={e => { e.stopPropagation(); commitSelectedProducts(tree[cat] || []) }}
-                        style={{ fontSize:9, color:'var(--accent)', fontWeight:600, cursor:'pointer', padding:'2px 6px', borderRadius:4, background:'rgba(255,78,26,0.18)', textTransform:'none', letterSpacing:0 }}
-                      >
+                      <span onClick={e => { e.stopPropagation(); onChange({ product_category: [cat], product: [] }) }} style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: '2px 6px', borderRadius: 4, background: 'rgba(255,78,26,0.18)', textTransform: 'none', letterSpacing: 0 }}>
                         only
                       </span>
                     )}
-                    <span style={{ fontSize:10, color:'var(--text-muted)', fontWeight:400 }}>{visibleProds.length}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>{prods.length}</span>
+                    <span onClick={e => { e.stopPropagation(); setExpandedCats(s => ({ ...s, [cat]: !s[cat] })) }} style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, cursor: 'pointer', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border)', textTransform: 'none', letterSpacing: 0 }}>
+                      {isExpanded ? 'hide' : 'products'}
+                    </span>
                   </span>
                 </button>
                 {visibleProds.map(prod => {
                   const sel = isProdSelected(prod)
                   return (
-                    <button
-                      key={prod}
-                      onMouseEnter={() => setHoveredProd(prod)}
-                      onMouseLeave={() => setHoveredProd(null)}
-                      onClick={() => toggleProduct(prod)}
-                      style={{
-                        width:'100%', padding:'7px 14px 7px 34px', textAlign:'left',
-                        display:'flex', alignItems:'center', gap:7,
-                        background: sel?'rgba(255,78,26,0.04)':'transparent',
-                        border:'none', borderBottom:'1px solid var(--border)',
-                        color: sel?'var(--text)':'var(--text-muted)',
-                        fontSize:12, cursor:'pointer',
-                      }}
-                    >
+                    <button key={prod} onMouseEnter={() => setHoveredProd(prod)} onMouseLeave={() => setHoveredProd(null)} onClick={() => toggleProduct(prod)} style={{ width: '100%', padding: '7px 14px 7px 34px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 7, background: sel ? 'rgba(255,78,26,0.04)' : 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: sel ? 'var(--text)' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
                       <Check sel={sel} /> {prod}
                       {hoveredProd === prod && (
-                        <span
-                          onClick={e => { e.stopPropagation(); commitSelectedProducts([prod]) }}
-                          style={{ marginLeft:'auto', fontSize:9, color:'var(--accent)', fontWeight:600, cursor:'pointer', padding:'2px 6px', borderRadius:4, background:'rgba(255,78,26,0.18)' }}
-                        >
+                        <span onClick={e => { e.stopPropagation(); onChange({ product_category: [], product: [prod] }) }} style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: '2px 6px', borderRadius: 4, background: 'rgba(255,78,26,0.18)' }}>
                           only
                         </span>
                       )}
@@ -344,26 +388,10 @@ function ProductDropdown({ filters, options, onChange }) {
           {filteredUncategorisedProducts.map(prod => {
             const sel = isProdSelected(prod)
             return (
-              <button
-                key={prod}
-                onMouseEnter={() => setHoveredProd(prod)}
-                onMouseLeave={() => setHoveredProd(null)}
-                onClick={() => toggleProduct(prod)}
-                style={{
-                  width:'100%', padding:'8px 14px', textAlign:'left',
-                  display:'flex', alignItems:'center', gap:7,
-                  background: sel?'rgba(255,78,26,0.06)':'transparent',
-                  border:'none', borderBottom:'1px solid var(--border)',
-                  color: sel?'var(--text)':'var(--text-muted)',
-                  fontSize:12, cursor:'pointer',
-                }}
-              >
+              <button key={prod} onMouseEnter={() => setHoveredProd(prod)} onMouseLeave={() => setHoveredProd(null)} onClick={() => toggleProduct(prod)} style={{ width: '100%', padding: '8px 14px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 7, background: sel ? 'rgba(255,78,26,0.06)' : 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: sel ? 'var(--text)' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
                 <Check sel={sel} /> {prod}
                 {hoveredProd === prod && (
-                  <span
-                    onClick={e => { e.stopPropagation(); commitSelectedProducts([prod]) }}
-                    style={{ marginLeft:'auto', fontSize:9, color:'var(--accent)', fontWeight:600, cursor:'pointer', padding:'2px 6px', borderRadius:4, background:'rgba(255,78,26,0.18)' }}
-                  >
+                  <span onClick={e => { e.stopPropagation(); onChange({ product_category: [], product: [prod] }) }} style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: '2px 6px', borderRadius: 4, background: 'rgba(255,78,26,0.18)' }}>
                     only
                   </span>
                 )}
@@ -371,9 +399,7 @@ function ProductDropdown({ filters, options, onChange }) {
             )
           })}
           {filteredCategories.length === 0 && filteredUncategorisedProducts.length === 0 && (
-            <div style={{ padding:'12px 14px', color:'var(--text-muted)', fontSize:12 }}>
-              No matching products
-            </div>
+            <div style={{ padding: '12px 14px', color: 'var(--text-muted)', fontSize: 12 }}>No matching products</div>
           )}
         </div>
       )}
@@ -384,29 +410,24 @@ function ProductDropdown({ filters, options, onChange }) {
 function SentimentDropdown({ filters, onChange }) {
   const selected = filters.sentiment || []
   const label = selected.length === 0 ? 'All Sentiments' : selected.join(' · ')
-  const toggle = s => onChange({ sentiment: selected.includes(s) ? selected.filter(x=>x!==s) : [...selected, s] })
+  const toggle = s => onChange({ sentiment: selected.includes(s) ? selected.filter(x => x !== s) : [...selected, s] })
   return (
     <Dropdown trigger={() => <PillBtn label={label} active={selected.length > 0} />}>
-      {(close) => (
-        <div style={{ padding:8, display:'flex', flexDirection:'column', gap:2 }}>
+      {close => (
+        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
           {selected.length > 0 && (
-            <button onClick={() => { onChange({ sentiment: [] }); close() }} style={{
-              display:'flex', alignItems:'center', padding:'7px 10px', borderRadius:6,
-              background:'rgba(255,78,26,0.08)', border:'none', cursor:'pointer',
-              color:'var(--accent)', fontSize:12, fontWeight:600, textAlign:'left', width:'100%',
-            }}>All Sentiments</button>
+            <button onClick={() => { onChange({ sentiment: [] }); close() }} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', borderRadius: 6, background: 'rgba(255,78,26,0.08)', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 12, fontWeight: 600, textAlign: 'left', width: '100%' }}>
+              All Sentiments
+            </button>
           )}
-          {['Positive','Neutral','Negative'].map(s => {
+          {['Positive', 'Neutral', 'Negative'].map(s => {
             const sel = selected.includes(s)
             const color = SC[s]
             return (
-              <button key={s} onClick={() => toggle(s)} style={{
-                display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:6,
-                background:sel?`${color}12`:'transparent', border:'none', cursor:'pointer',
-                color:sel?color:'var(--text-muted)', fontSize:12, fontWeight:sel?600:400, textAlign:'left',
-              }}>
-                <span style={{ width:8, height:8, borderRadius:'50%', background:color, flexShrink:0 }} />{s}
-                {sel && <span style={{ marginLeft:'auto', fontSize:11 }}>✓</span>}
+              <button key={s} onClick={() => toggle(s)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 6, background: sel ? `${color}12` : 'transparent', border: 'none', cursor: 'pointer', color: sel ? color : 'var(--text-muted)', fontSize: 12, fontWeight: sel ? 600 : 400, textAlign: 'left' }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                {s}
+                {sel && <span style={{ marginLeft: 'auto', fontSize: 11 }}>✓</span>}
               </button>
             )
           })}
@@ -419,31 +440,25 @@ function SentimentDropdown({ filters, onChange }) {
 function RatingDropdown({ filters, options, onChange }) {
   const selected = filters.rating || []
   const all = options.ratings || []
-  const label = selected.length === 0 ? 'All Ratings' : selected.map(r=>`${r}★`).join(', ')
-  const toggle = r => onChange({ rating: selected.includes(r) ? selected.filter(x=>x!==r) : [...selected, r] })
+  const label = selected.length === 0 ? 'All Ratings' : selected.map(r => `${r} star`).join(', ')
+  const toggle = r => onChange({ rating: selected.includes(r) ? selected.filter(x => x !== r) : [...selected, r] })
   return (
     <Dropdown trigger={() => <PillBtn label={label} active={selected.length > 0} />}>
-      {(close) => (
-        <div style={{ padding:8, display:'flex', flexDirection:'column', gap:2 }}>
+      {close => (
+        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
           {selected.length > 0 && (
-            <button onClick={() => { onChange({ rating: [] }); close() }} style={{
-              display:'flex', alignItems:'center', padding:'7px 10px', borderRadius:6,
-              background:'rgba(255,78,26,0.08)', border:'none', cursor:'pointer',
-              color:'var(--accent)', fontSize:12, fontWeight:600, textAlign:'left', width:'100%',
-            }}>All Ratings</button>
+            <button onClick={() => { onChange({ rating: [] }); close() }} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', borderRadius: 6, background: 'rgba(255,78,26,0.08)', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 12, fontWeight: 600, textAlign: 'left', width: '100%' }}>
+              All Ratings
+            </button>
           )}
           {all.map(r => {
             const sel = selected.includes(r)
             const stars = Math.round(parseFloat(r))
-            const color = stars>=4?'#22c55e':stars===3?'#eab308':'#ef4444'
+            const color = stars >= 4 ? '#22c55e' : stars === 3 ? '#eab308' : '#ef4444'
             return (
-              <button key={r} onClick={() => toggle(r)} style={{
-                display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:6,
-                background:sel?`${color}12`:'transparent', border:'none', cursor:'pointer',
-                color:sel?color:'var(--text-muted)', fontSize:12, fontWeight:sel?600:400,
-              }}>
-                <span style={{ color, fontSize:13 }}>{'★'.repeat(stars)}{'☆'.repeat(Math.max(0,5-stars))}</span>
-                {r} stars {sel && <span style={{ marginLeft:'auto', fontSize:11 }}>✓</span>}
+              <button key={r} onClick={() => toggle(r)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 6, background: sel ? `${color}12` : 'transparent', border: 'none', cursor: 'pointer', color: sel ? color : 'var(--text-muted)', fontSize: 12, fontWeight: sel ? 600 : 400 }}>
+                <span style={{ color, fontSize: 13 }}>{'★'.repeat(stars)}{'☆'.repeat(Math.max(0, 5 - stars))}</span>
+                {r} stars {sel && <span style={{ marginLeft: 'auto', fontSize: 11 }}>✓</span>}
               </button>
             )
           })}
@@ -455,105 +470,98 @@ function RatingDropdown({ filters, options, onChange }) {
 
 export default function FilterBar({ filters, options, onChange, tab }) {
   const showReviewFilters = tab === 'reviews'
-  const isFiltered = !!(filters.product_category || filters.product?.length > 0)
-  const hasDate    = !!(filters.date_from || filters.date_to)
-  const hasSent    = (filters.sentiment||[]).length > 0
-  const hasRating  = (filters.rating||[]).length > 0
-  const hasAny     = isFiltered || hasDate || hasSent || hasRating
+  const selectedCategories = asArray(filters.product_category)
+  const selectedProducts = filters.product || []
+  const isFiltered = !!(selectedCategories.length || selectedProducts.length)
+  const hasDate = !!(filters.date_from || filters.date_to)
+  const hasSent = (filters.sentiment || []).length > 0
+  const hasRating = (filters.rating || []).length > 0
+  const hasAny = isFiltered || hasDate || hasSent || hasRating
 
   const activePreset = (() => {
     if (!filters.date_from && !filters.date_to) return 'All'
     const days = Math.round((new Date() - new Date(filters.date_from)) / 86400000)
-    if (days <= 8) return '7d'; if (days <= 31) return '30d'; if (days <= 92) return '90d'
+    if (days <= 8) return '7d'
+    if (days <= 31) return '30d'
+    if (days <= 92) return '90d'
     return null
   })()
 
   const applyDatePreset = days => {
-    if (days === null) { onChange({ date_from: null, date_to: null }); return }
-    const to = new Date(), from = new Date()
+    if (days === null) {
+      onChange({ date_from: null, date_to: null })
+      return
+    }
+    const to = new Date()
+    const from = new Date()
     from.setDate(to.getDate() - days)
     onChange({ date_from: from.toISOString().slice(0, 10), date_to: to.toISOString().slice(0, 10) })
   }
 
   const resetAll = () => onChange({
-    product_category: null, product: [],
-    date_from: null, date_to: null,
-    sentiment: [], rating: [],
+    product_category: [],
+    product: [],
+    date_from: null,
+    date_to: null,
+    sentiment: [],
+    rating: [],
   })
 
-  const prodChipLabel = (() => {
-    if (filters.product_category) return filters.product_category
-    const prods = filters.product || []
-    if (prods.length <= 2) return prods.join(' · ')
-    return `${prods.slice(0,2).join(' · ')} +${prods.length-2} more`
+  const productChipLabel = (() => {
+    if (selectedCategories.length === 1) return selectedCategories[0]
+    if (selectedCategories.length > 1) return `${selectedCategories.slice(0, 2).join(' · ')}${selectedCategories.length > 2 ? ` +${selectedCategories.length - 2} more` : ''}`
+    if (selectedProducts.length <= 2) return selectedProducts.join(' · ')
+    return `${selectedProducts.slice(0, 2).join(' · ')} +${selectedProducts.length - 2} more`
   })()
 
   return (
-    <div style={{
-      display:'flex', alignItems:'center', gap:8, flexWrap:'wrap',
-      padding:'10px 14px',
-      background:'rgba(255,255,255,0.03)', border:'1px solid var(--border)', borderRadius:12,
-    }}>
-      <div style={{ display:'flex', alignItems:'center', gap:5, marginRight:4 }}>
-        <SlidersHorizontal size={13} style={{ color:'var(--text-muted)' }} />
-        <span style={{ fontSize:11, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)' }}>Filters</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginRight: 4 }}>
+        <SlidersHorizontal size={13} style={{ color: 'var(--text-muted)' }} />
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Filters</span>
       </div>
-      <div style={{ width:1, height:20, background:'var(--border)', flexShrink:0 }} />
+      <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
 
       <DateDropdown filters={filters} onChange={onChange} />
-      <div style={{ display:'flex', gap:2, alignItems:'center' }}>
+      <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
         {DATE_PRESETS.map(p => (
-          <button key={p.label} onClick={() => applyDatePreset(p.days)} style={{
-            padding:'3px 8px', borderRadius:99,
-            border:`1px solid ${activePreset===p.label?'var(--accent)':'transparent'}`,
-            background: activePreset===p.label?'rgba(255,78,26,0.12)':'transparent',
-            color: activePreset===p.label?'var(--accent)':'var(--text-muted)',
-            fontSize:10, fontWeight:600, cursor:'pointer', fontFamily:'DM Sans',
-          }}>{p.label}</button>
+          <button key={p.label} onClick={() => applyDatePreset(p.days)} style={{ padding: '3px 8px', borderRadius: 99, border: `1px solid ${activePreset === p.label ? 'var(--accent)' : 'transparent'}`, background: activePreset === p.label ? 'rgba(255,78,26,0.12)' : 'transparent', color: activePreset === p.label ? 'var(--accent)' : 'var(--text-muted)', fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans' }}>
+            {p.label}
+          </button>
         ))}
       </div>
-      <div style={{ width:1, height:20, background:'var(--border)', flexShrink:0 }} />
+      <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
       <ProductDropdown filters={filters} options={options} onChange={onChange} />
 
-      {showReviewFilters && <>
-        <div style={{ width:1, height:20, background:'var(--border)', flexShrink:0 }} />
-        <span style={{ fontSize:10, color:'var(--text-muted)', fontStyle:'italic' }}>Reviews only:</span>
-        <SentimentDropdown filters={filters} onChange={onChange} />
-        <RatingDropdown filters={filters} options={options} onChange={onChange} />
-      </>}
+      {showReviewFilters && (
+        <>
+          <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Reviews only:</span>
+          <SentimentDropdown filters={filters} onChange={onChange} />
+          <RatingDropdown filters={filters} options={options} onChange={onChange} />
+        </>
+      )}
 
       {hasAny && (
         <>
-          <div style={{ width:1, height:20, background:'var(--border)', flexShrink:0 }} />
-          <div style={{ display:'flex', gap:5, flexWrap:'wrap', alignItems:'center' }}>
-            {isFiltered && (
-              <ActiveChip label={prodChipLabel} onRemove={() => onChange({ product_category:null, product:[] })} />
-            )}
+          <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+            {isFiltered && <ActiveChip label={productChipLabel} onRemove={() => onChange({ product_category: [], product: [] })} />}
             {hasDate && (
-              <ActiveChip
-                label={activePreset && activePreset!=='All' ? `Last ${activePreset}` : `${fmtDate(filters.date_from)} → ${fmtDate(filters.date_to)}`}
-                onRemove={() => onChange({ date_from:null, date_to:null })}
-              />
+              <ActiveChip label={activePreset && activePreset !== 'All' ? `Last ${activePreset}` : `${fmtDate(filters.date_from)} to ${fmtDate(filters.date_to)}`} onRemove={() => onChange({ date_from: null, date_to: null })} />
             )}
-            {(filters.sentiment||[]).map(s => (
-              <ActiveChip key={s} label={s} color={SC[s]}
-                onRemove={() => onChange({ sentiment:(filters.sentiment||[]).filter(x=>x!==s) })} />
+            {(filters.sentiment || []).map(s => (
+              <ActiveChip key={s} label={s} color={SC[s]} onRemove={() => onChange({ sentiment: (filters.sentiment || []).filter(x => x !== s) })} />
             ))}
-            {(filters.rating||[]).map(r => (
-              <ActiveChip key={r} label={`${r}★`}
-                onRemove={() => onChange({ rating:(filters.rating||[]).filter(x=>x!==r) })} />
+            {(filters.rating || []).map(r => (
+              <ActiveChip key={r} label={`${r} star`} onRemove={() => onChange({ rating: (filters.rating || []).filter(x => x !== r) })} />
             ))}
           </div>
         </>
       )}
 
       {hasAny && (
-        <button onClick={resetAll} style={{
-          marginLeft:'auto', display:'flex', alignItems:'center', gap:4,
-          padding:'4px 10px', borderRadius:6, border:'1px solid var(--border)',
-          background:'transparent', color:'var(--text-muted)', fontSize:11,
-          cursor:'pointer', fontFamily:'DM Sans',
-        }}>
+        <button onClick={resetAll} style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', fontFamily: 'DM Sans' }}>
           <X size={11} /> Reset
         </button>
       )}

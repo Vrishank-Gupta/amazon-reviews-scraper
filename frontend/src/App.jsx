@@ -11,7 +11,7 @@ import { RefreshCw, Download, ChevronDown, LogOut } from 'lucide-react'
 import { SHOW_TRENDS_TAB } from './config/dashboard'
 
 const DEFAULT_FILTERS = {
-  product_category: null,
+  product_category: [],
   product: [],
   sentiment: [],
   rating: [],
@@ -135,7 +135,7 @@ function Dashboard({ authedEmail, onLogout }) {
   useEffect(() => {
     fetchFilters().then(o => {
       setOptions(o)
-      setFilters(f => ({ ...f, product: [], product_category: null }))
+      setFilters(f => ({ ...f, product: [], product_category: [] }))
     })
     fetchStats()
     fetchPipelineStatus().then(setScrapeStatus).catch(() => {})

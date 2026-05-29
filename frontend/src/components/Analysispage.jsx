@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+﻿import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   AreaChart,
   Area,
@@ -25,11 +25,23 @@ function fmtDay(day) {
   }
 }
 
-function getDefaultWidgetProduct({ parentProducts, parentCategory, scopedProducts, widgetValue }) {
-  if (widgetValue !== undefined) return widgetValue
-  if (parentProducts.length === 1) return parentProducts[0]
-  if (parentProducts.length > 1 || parentCategory) return null
-  return scopedProducts[0] || null
+function asArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean)
+  return value ? [value] : []
+}
+
+function emptyScope(scope) {
+  return !scope || (!asArray(scope.categories).length && !asArray(scope.products).length)
+}
+
+function scopeToApi(scope, tree = {}) {
+  const categories = asArray(scope?.categories)
+  const products = asArray(scope?.products)
+  const expandedProducts = [
+    ...products,
+    ...categories.flatMap(category => tree?.[category] || []),
+  ]
+  return { product: [...new Set(expandedProducts)] }
 }
 
 function Toggle({ value, onChange, options }) {
@@ -59,6 +71,127 @@ function Toggle({ value, onChange, options }) {
   )
 }
 
+function CategoryProductSelect({ value, onChange, products = [], tree = {}, allLabel = 'All Products' }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const ref = useRef(null)
+  const productSet = new Set(products)
+  const normalizedQuery = query.trim().toLowerCase()
+  const groupedRaw = Object.entries(tree || {})
+    .map(([category, items]) => [category, (items || []).filter(product => productSet.has(product))])
+    .filter(([, items]) => items.length > 0)
+  const grouped = groupedRaw
+    .map(([category, items]) => [
+      category,
+      normalizedQuery
+        ? items.filter(product => product.toLowerCase().includes(normalizedQuery) || category.toLowerCase().includes(normalizedQuery))
+        : items,
+    ])
+    .filter(([category, items]) => items.length > 0 || category.toLowerCase().includes(normalizedQuery))
+  const groupedProducts = new Set(grouped.flatMap(([, items]) => items))
+  const groupedRawProducts = new Set(groupedRaw.flatMap(([, items]) => items))
+  const otherProducts = products
+    .filter(product => !groupedRawProducts.has(product))
+    .filter(product => !normalizedQuery || product.toLowerCase().includes(normalizedQuery))
+  const selectedCategories = asArray(value?.categories)
+  const selectedProducts = asArray(value?.products)
+
+  useEffect(() => {
+    const handler = event => {
+      if (ref.current && !ref.current.contains(event.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const selectedProductSet = new Set([
+    ...selectedProducts,
+    ...selectedCategories.flatMap(category => tree?.[category] || []),
+  ])
+
+  const commit = next => {
+    const categories = asArray(next.categories)
+    const nextProducts = asArray(next.products)
+    onChange(categories.length || nextProducts.length ? { categories, products: nextProducts } : null)
+  }
+
+  const toggleCategory = category => {
+    const categories = selectedCategories.includes(category)
+      ? selectedCategories.filter(item => item !== category)
+      : [...selectedCategories, category]
+    commit({ categories, products: selectedProducts })
+  }
+
+  const toggleProduct = product => {
+    const productsNext = selectedProducts.includes(product)
+      ? selectedProducts.filter(item => item !== product)
+      : [...selectedProducts, product]
+    commit({ categories: selectedCategories, products: productsNext })
+  }
+
+  const label = (() => {
+    if (emptyScope(value)) return allLabel
+    const parts = [...selectedCategories, ...selectedProducts]
+    if (parts.length <= 2) return parts.join(' / ')
+    return `${parts.slice(0, 2).join(' / ')} +${parts.length - 2} more`
+  })()
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        title={label}
+        onClick={() => setOpen(o => !o)}
+        style={{ padding: '4px 9px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface2)', color: emptyScope(value) ? 'var(--text-muted)' : 'var(--accent)', fontSize: 11, fontFamily: 'DM Sans', cursor: 'pointer', outline: 'none', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+      >
+        {label}
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', width: 360, maxHeight: 360, overflowY: 'auto', zIndex: 300, background: '#14141e', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 14px 30px rgba(0,0,0,0.55)', padding: 6 }}>
+          <input
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="Search category or product"
+            style={{ width: '100%', marginBottom: 6, padding: '7px 9px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 11, outline: 'none', fontFamily: 'DM Sans' }}
+          />
+          <button onClick={() => commit({ categories: [], products: [] })} style={{ width: '100%', padding: '7px 9px', textAlign: 'left', border: 'none', borderRadius: 6, background: emptyScope(value) ? 'rgba(255,78,26,0.1)' : 'transparent', color: emptyScope(value) ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+            All Products In Scope
+          </button>
+          {grouped.map(([category, items]) => {
+            const catSelected = selectedCategories.includes(category)
+            return (
+              <div key={category}>
+                <button onClick={() => toggleCategory(category)} style={{ width: '100%', padding: '7px 9px', textAlign: 'left', border: 'none', borderRadius: 6, background: catSelected ? 'rgba(255,78,26,0.1)' : 'transparent', color: catSelected ? 'var(--accent)' : 'var(--text)', cursor: 'pointer', fontSize: 11, fontWeight: 700, display: 'flex', gap: 7, alignItems: 'center', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <span>{catSelected ? '✓' : '□'}</span>
+                  <span style={{ flex: 1 }}>{category}</span>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{items.length}</span>
+                </button>
+                {items.map(product => {
+                  const selected = selectedProductSet.has(product)
+                  return (
+                    <button key={product} onClick={() => toggleProduct(product)} style={{ width: '100%', padding: '6px 9px 6px 28px', textAlign: 'left', border: 'none', borderRadius: 6, background: selectedProducts.includes(product) ? 'rgba(255,78,26,0.07)' : 'transparent', color: selected ? 'var(--text)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, display: 'flex', gap: 7, alignItems: 'center' }}>
+                      <span>{selected ? '✓' : '□'}</span>
+                      <span title={product} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{product}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })}
+          {otherProducts.length > 0 && otherProducts.map(product => {
+            const selected = selectedProductSet.has(product)
+            return (
+              <button key={product} onClick={() => toggleProduct(product)} style={{ width: '100%', padding: '6px 9px', textAlign: 'left', border: 'none', borderRadius: 6, background: selectedProducts.includes(product) ? 'rgba(255,78,26,0.07)' : 'transparent', color: selected ? 'var(--text)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, display: 'flex', gap: 7, alignItems: 'center' }}>
+                <span>{selected ? '✓' : '□'}</span>
+                <span title={product}>{product}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EmptyState({ text = 'No data for selected filters.' }) {
   return <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{text}</div>
 }
@@ -72,7 +205,7 @@ function getPeriodLabel(filters) {
   if (days <= 92) return 'Last 90 days'
   const from = new Date(filters.date_from).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
   const to = filters.date_to ? new Date(filters.date_to).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'Today'
-  return `${from} – ${to}`
+  return `${from} - ${to}`
 }
 
 function AlertsBanner({ kpi, momentum }) {
@@ -80,8 +213,8 @@ function AlertsBanner({ kpi, momentum }) {
   const negPct = total ? +((kpi.negative / total) * 100).toFixed(1) : 0
   const alerts = []
 
-  if (negPct > 30) alerts.push({ level: 'critical', text: `Overall negative rate is ${negPct}% — above the 30% problem threshold` })
-  else if (negPct > 20) alerts.push({ level: 'warn', text: `Negative rate is ${negPct}% — approaching the 30% watch threshold` })
+  if (negPct > 30) alerts.push({ level: 'critical', text: `Overall negative rate is ${negPct}% - above the 30% problem threshold` })
+  else if (negPct > 20) alerts.push({ level: 'warn', text: `Negative rate is ${negPct}% - approaching the 30% watch threshold` })
 
   const newIssues = (momentum || []).filter(m => m.first === 0 && m.second > 0)
   if (newIssues.length > 0)
@@ -103,7 +236,7 @@ function AlertsBanner({ kpi, momentum }) {
           borderRadius: 8, fontSize: 12,
         }}>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: alert.level === 'critical' ? '#ef4444' : '#eab308', flexShrink: 0, whiteSpace: 'nowrap' }}>
-            {alert.level === 'critical' ? '● CRITICAL' : '▲ WATCH'}
+            {alert.level === 'critical' ? 'CRITICAL' : 'WATCH'}
           </span>
           <span style={{ color: 'var(--text)', lineHeight: 1.4 }}>{alert.text}</span>
         </div>
@@ -153,20 +286,21 @@ function buildWordRows(words, tone) {
     .sort((left, right) => right.count - left.count)
 }
 
-function OverviewCards({ kpi, productCount, periodLabel }) {
-  const total = kpi.total || 0
-  const negative = kpi.negative || 0
-  const positive = kpi.positive || 0
-  const neutral = kpi.neutral || 0
+function OverviewCards({ kpi, ratingKpi, productCount, periodLabel }) {
+  const hasRatingKpi = !!ratingKpi
+  const total = ratingKpi?.total || kpi.total || 0
+  const negative = hasRatingKpi ? (ratingKpi.bad || 0) : (kpi.negative || 0)
+  const positive = hasRatingKpi ? (ratingKpi.good || 0) : (kpi.positive || 0)
+  const neutral = hasRatingKpi ? (ratingKpi.neutral || 0) : (kpi.neutral || 0)
   const negativePct = total ? ((negative / total) * 100).toFixed(1) : '0.0'
   const positivePct = total ? ((positive / total) * 100).toFixed(1) : '0.0'
   const neutralPct = total ? ((neutral / total) * 100).toFixed(1) : '0.0'
 
   const cards = [
-    { label: 'Feedback Volume', value: total.toLocaleString(), sub: `${productCount} products · ${periodLabel}`, color: '#60a5fa' },
-    { label: '1-2 Stars', value: negative.toLocaleString(), sub: `${negativePct}% of reviews · ${periodLabel}`, color: '#ef4444' },
-    { label: '4-5 Stars', value: positive.toLocaleString(), sub: `${positivePct}% of reviews · ${periodLabel}`, color: '#22c55e' },
-    { label: '3 Stars', value: neutral.toLocaleString(), sub: `${neutralPct}% of reviews · ${periodLabel}`, color: '#eab308' },
+    { label: 'Feedback Volume', value: total.toLocaleString(), sub: `${productCount} products / ${periodLabel}`, color: '#60a5fa' },
+    { label: '1-2 Stars', value: negative.toLocaleString(), sub: `${negativePct}% of reviews / ${periodLabel}`, color: '#ef4444' },
+    { label: '4-5 Stars', value: positive.toLocaleString(), sub: `${positivePct}% of reviews / ${periodLabel}`, color: '#22c55e' },
+    { label: '3 Stars', value: neutral.toLocaleString(), sub: `${neutralPct}% of reviews / ${periodLabel}`, color: '#eab308' },
   ]
 
   return (
@@ -400,34 +534,44 @@ function CategoryWordCloudPanel({ category, sentiment, filters, onClose }) {
   )
 }
 
-function PortfolioHealthStrip({ healthScore, topIssue, topCat, atRisk, onSelectIssue, onSelectCategory }) {
-  const scoreColor = healthScore >= 75 ? '#22c55e' : healthScore >= 55 ? '#eab308' : '#ef4444'
+function PortfolioHealthStrip({ ratingSplit, topIssue, topCat, atRisk, onSelectIssue, onSelectCategory }) {
+  const totalStars = ratingSplit?.total || 0
+  const splitRows = [
+    { label: '1-2 Stars', value: ratingSplit?.bad || 0, color: '#ef4444' },
+    { label: '3 Stars', value: ratingSplit?.neutral || 0, color: '#eab308' },
+    { label: '4-5 Stars', value: ratingSplit?.good || 0, color: '#22c55e' },
+  ]
   const cards = [
     {
-      label: 'Brand Health',
-      icon: '◎',
+      label: 'Rating Split',
+      icon: 'Stars',
       content: (
-        <>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 6 }}>
-            <span style={{ fontFamily: 'Bebas Neue', fontSize: 34, lineHeight: 1, color: scoreColor }}>{healthScore.toFixed(0)}</span>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>/ 100</span>
-          </div>
-          <div style={{ marginTop: 6, height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${Math.min(100, healthScore)}%`, background: scoreColor, borderRadius: 2, transition: 'width 0.4s ease' }} />
-          </div>
-          <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-muted)' }}>Based on rating + negative share</div>
-        </>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+          {splitRows.map(row => {
+            const pct = totalStars ? Math.round((row.value / totalStars) * 100) : 0
+            return (
+              <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 50px', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>{row.label}</span>
+                <div style={{ height: 5, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: row.color }} />
+                </div>
+                <span style={{ fontSize: 11, color: row.color, fontWeight: 800, textAlign: 'right' }}>{row.value.toLocaleString()}</span>
+              </div>
+            )
+          })}
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{totalStars.toLocaleString()} rated reviews in view</div>
+        </div>
       ),
       onClick: null,
     },
     {
-      label: 'Top Issue · 7d',
-      icon: '⚠',
+      label: 'Top Issue - 7d',
+      icon: 'Alert',
       content: topIssue ? (
         <>
-          <div style={{ marginTop: 6, fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{topIssue.category}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{topIssue.mentions} mentions · {topIssue.isNew ? 'new this period' : 'growing'}</div>
-          <div style={{ marginTop: 6, display: 'inline-block', fontSize: 10, fontWeight: 700, color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 999, padding: '2px 8px' }}>Investigate →</div>
+          <div title={topIssue.category} style={{ marginTop: 6, fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{topIssue.category}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{topIssue.mentions} mentions - {topIssue.isNew ? 'new this period' : 'growing'}</div>
+          <div style={{ marginTop: 6, display: 'inline-block', fontSize: 10, fontWeight: 700, color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 999, padding: '2px 8px' }}>Investigate</div>
         </>
       ) : <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>No notable issues.</div>,
       onClick: topIssue ? () => onSelectIssue?.(topIssue.category) : null,
@@ -435,27 +579,27 @@ function PortfolioHealthStrip({ healthScore, topIssue, topCat, atRisk, onSelectI
     },
     {
       label: 'Top Category',
-      icon: '★',
+      icon: 'Good',
       content: topCat ? (
         <>
-          <div style={{ marginTop: 6, fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{topCat.category}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{topCat.total} reviews · {topCat.total ? ((topCat.Positive / topCat.total) * 100).toFixed(0) : 0}% positive</div>
+          <div title={topCat.category} style={{ marginTop: 6, fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{topCat.category}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{topCat.total} reviews - {topCat.total ? ((topCat.Positive / topCat.total) * 100).toFixed(0) : 0}% positive</div>
           <div style={{ marginTop: 6, display: 'inline-block', fontSize: 10, fontWeight: 700, color: '#22c55e', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 999, padding: '2px 8px' }}>Performing well</div>
         </>
-      ) : <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>—</div>,
+      ) : <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>-</div>,
       onClick: topCat ? () => onSelectCategory?.(topCat.category) : null,
       hoverColor: 'rgba(34,197,94,0.06)',
     },
     {
       label: 'Most At-Risk',
-      icon: '▼',
+      icon: 'Risk',
       content: atRisk ? (
         <>
-          <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{atRisk.product_name}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{atRisk.review_count} reviews · <span style={{ color: '#ef4444', fontWeight: 700 }}>{atRisk.neg_pct}% neg</span></div>
+          <div title={atRisk.product_name} style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{atRisk.product_name}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{atRisk.review_count} reviews - <span style={{ color: '#ef4444', fontWeight: 700 }}>{atRisk.neg_pct}% neg</span></div>
           <div style={{ marginTop: 6, display: 'inline-block', fontSize: 10, fontWeight: 700, color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 999, padding: '2px 8px' }}>Action needed</div>
         </>
-      ) : <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>—</div>,
+      ) : <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>-</div>,
       onClick: null,
       hoverColor: 'rgba(239,68,68,0.06)',
     },
@@ -481,14 +625,13 @@ function PortfolioHealthStrip({ healthScore, topIssue, topCat, atRisk, onSelectI
     </div>
   )
 }
-
 function AutoInsights({ insights }) {
   if (!insights.length) return null
   const toneColor = { alert: '#ef4444', warn: '#eab308', good: '#22c55e', info: 'var(--text-muted)' }
   return (
     <div style={{ padding: '12px 16px', background: 'linear-gradient(135deg, rgba(24,28,44,0.9), rgba(18,22,36,0.95))', border: '1px solid var(--border)', borderRadius: 12 }}>
       <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span>✦</span> Auto-detected signals
+        <span>*</span> Auto-detected signals
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
         {insights.map((item, i) => (
@@ -512,39 +655,28 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const [hasData, setHasData] = useState(false)
   const [trendMode, setTrendMode] = useState('sentiment')
   const [emergingCat, setEmergingCat] = useState(null)
-  const [issueFilter, setIssueFilter] = useState(undefined)
+  const [issueFilter, setIssueFilter] = useState(null)
   const [localIssueData, setLocalIssueData] = useState(null)
-  const [signalProd, setSignalProd] = useState(undefined)
+  const [signalProd, setSignalProd] = useState(null)
   const [localTrendData, setLocalTrendData] = useState(null)
   const [categoryCloud, setCategoryCloud] = useState(null)
   const [summaryRows, setSummaryRows] = useState([])
 
   const scopedProducts = useMemo(() => {
     if (filters.product?.length) return filters.product
-    if (filters.product_category) return tree?.[filters.product_category] || []
+    const selectedCategories = asArray(filters.product_category)
+    if (selectedCategories.length) return [...new Set(selectedCategories.flatMap(category => tree?.[category] || []))]
     return allProducts || []
   }, [filters.product, filters.product_category, tree, allProducts])
 
-  const effectiveIssueFilter = getDefaultWidgetProduct({
-    parentProducts: filters.product || [],
-    parentCategory: filters.product_category,
-    scopedProducts,
-    widgetValue: issueFilter,
-  })
-  const effectiveSignalProd = getDefaultWidgetProduct({
-    parentProducts: filters.product || [],
-    parentCategory: filters.product_category,
-    scopedProducts,
-    widgetValue: signalProd,
-  })
-
   useEffect(() => {
-    if (issueFilter && !scopedProducts.includes(issueFilter)) setIssueFilter(undefined)
-    if (signalProd && !scopedProducts.includes(signalProd)) setSignalProd(undefined)
-  }, [JSON.stringify(scopedProducts), issueFilter, signalProd])
+    const scopedSet = new Set(scopedProducts)
+    if (issueFilter?.products?.some(product => !scopedSet.has(product))) setIssueFilter(null)
+    if (signalProd?.products?.some(product => !scopedSet.has(product))) setSignalProd(null)
+  }, [JSON.stringify(scopedProducts), JSON.stringify(issueFilter), JSON.stringify(signalProd)])
 
   const apiParams = {
-    product_category: filters.product_category || null,
+    product_category: asArray(filters.product_category),
     product: filters.product?.length ? filters.product : [],
     date_from: filters.date_from,
     date_to: filters.date_to,
@@ -570,28 +702,31 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    if (!effectiveIssueFilter) {
+    if (emptyScope(issueFilter)) {
       setLocalIssueData(null)
       return
     }
-    fetchAnalysis({ product: [effectiveIssueFilter], date_from: apiParams.date_from, date_to: apiParams.date_to })
+    const scoped = scopeToApi(issueFilter, tree)
+    fetchAnalysis({ ...scoped, date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(setLocalIssueData)
       .catch(() => setLocalIssueData(null))
-  }, [effectiveIssueFilter, apiParams.date_from, apiParams.date_to])
+  }, [JSON.stringify(issueFilter), tree, apiParams.date_from, apiParams.date_to])
 
   useEffect(() => {
-    if (!effectiveSignalProd) {
+    if (emptyScope(signalProd)) {
       setLocalTrendData(null)
       return
     }
-    fetchCxoTrends({ product: [effectiveSignalProd], date_from: apiParams.date_from, date_to: apiParams.date_to })
+    const scoped = scopeToApi(signalProd, tree)
+    fetchCxoTrends({ ...scoped, date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(payload => setLocalTrendData(payload || null))
       .catch(() => setLocalTrendData(null))
-  }, [effectiveSignalProd, apiParams.date_from, apiParams.date_to])
+  }, [JSON.stringify(signalProd), tree, apiParams.date_from, apiParams.date_to])
 
   const kpi = data?.kpi || {}
   const trend = data?.daily_trend || []
   const dailyRating = cxoData?.daily_rating || []
+  const ratingKpi = data?.rating_kpi || null
   const momentum = cxoData?.category_momentum || []
   const periodLabel = getPeriodLabel(filters)
   const activeTrend = localTrendData?.daily_trend ?? trend
@@ -600,16 +735,17 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
   const portfolioHealth = useMemo(() => {
     if (!data) return null
-    const total = kpi.total || 0
-    const negShare = total ? (kpi.negative / total) * 100 : 0
-    const validRows = summaryRows.filter(r => (r.review_count || 0) >= 5)
-    const totalReviews = validRows.reduce((s, r) => s + (r.review_count || 0), 0)
-    const weightedAvg = totalReviews > 0
-      ? validRows.reduce((s, r) => s + (r.avg_rating || 0) * (r.review_count || 0), 0) / totalReviews
-      : 0
-    const ratingComp = weightedAvg > 0 ? ((weightedAvg - 1) / 4) * 60 : 0
-    const negComp = Math.max(0, 40 - negShare * 1.2)
-    const healthScore = Math.max(0, Math.min(100, ratingComp + negComp))
+    const ratingSplit = ratingKpi ? {
+      bad: ratingKpi.bad || 0,
+      neutral: ratingKpi.neutral || 0,
+      good: ratingKpi.good || 0,
+    } : (dailyRating || []).reduce((acc, row) => {
+      acc.bad += (row.star_1 || 0) + (row.star_2 || 0)
+      acc.neutral += row.star_3 || 0
+      acc.good += (row.star_4 || 0) + (row.star_5 || 0)
+      return acc
+    }, { bad: 0, neutral: 0, good: 0 })
+    ratingSplit.total = ratingSplit.bad + ratingSplit.neutral + ratingSplit.good
     const topMomentum = [...(momentum || [])].sort((a, b) => (b.second || 0) - (a.second || 0))[0]
     const topIssue = topMomentum
       ? { category: topMomentum.category, mentions: topMomentum.second, isNew: topMomentum.first === 0 }
@@ -621,8 +757,8 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
       return aNeg - bNeg
     })[0] || null
     const atRisk = [...summaryRows].filter(r => (r.review_count || 0) >= 8).sort((a, b) => (b.neg_pct || 0) - (a.neg_pct || 0))[0] || null
-    return { healthScore, topIssue, topCat, atRisk }
-  }, [data, summaryRows, kpi, momentum])
+    return { ratingSplit, topIssue, topCat, atRisk }
+  }, [data, summaryRows, dailyRating, ratingKpi, momentum])
 
   const autoInsights = useMemo(() => {
     if (!data || !cxoData) return []
@@ -635,12 +771,12 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
     }
     const rising = (momentum || []).filter(m => m.first > 0 && (m.pct_change || 0) >= 50).sort((a, b) => (b.pct_change || 0) - (a.pct_change || 0))[0]
     if (rising && !newIssues.length) {
-      insights.push({ tone: 'warn', title: `${rising.category} rising`, body: `Up ${rising.pct_change}% vs prior period (${rising.first} → ${rising.second} mentions).` })
+      insights.push({ tone: 'warn', title: `${rising.category} rising`, body: `Up ${rising.pct_change}% vs prior period (${rising.first} -> ${rising.second} mentions).` })
     }
     if (negShare > 30) {
       insights.push({ tone: 'alert', title: 'Negative share elevated', body: `${negShare.toFixed(0)}% of reviews are negative. Investigate top issues below.` })
     } else if (negShare > 0 && negShare <= 20) {
-      insights.push({ tone: 'good', title: 'Sentiment healthy', body: `${negShare.toFixed(0)}% negative rate — within the acceptable range.` })
+      insights.push({ tone: 'good', title: 'Sentiment healthy', body: `${negShare.toFixed(0)}% negative rate - within the acceptable range.` })
     }
     const trend = data.daily_trend || []
     if (trend.length >= 8) {
@@ -687,7 +823,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {portfolioHealth && (
         <PortfolioHealthStrip
-          healthScore={portfolioHealth.healthScore}
+          ratingSplit={portfolioHealth.ratingSplit}
           topIssue={portfolioHealth.topIssue}
           topCat={portfolioHealth.topCat}
           atRisk={portfolioHealth.atRisk}
@@ -698,7 +834,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
       <AlertsBanner kpi={kpi} momentum={momentum} />
       <AutoInsights insights={autoInsights} />
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
-        <OverviewCards kpi={kpi} productCount={scopedProducts.length || allProducts?.length || 0} periodLabel={periodLabel} />
+        <OverviewCards kpi={kpi} ratingKpi={ratingKpi} productCount={scopedProducts.length || allProducts?.length || 0} periodLabel={periodLabel} />
         <Card title="Amazon Listing Rating Signal" tip="Amazon product-page rating snapshots are listing-level signals. Product/set-name averages come from scraped reviews.">
           <RatingTrendChart filters={filters} tree={tree} />
         </Card>
@@ -709,10 +845,13 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
         sub="Horizontal length shows total reviews. Each bar is split into negative, neutral, and positive review volume."
         tip="Click any colored section to open the category keyword cloud for that category and sentiment."
         controls={
-          <select value={effectiveIssueFilter || ''} onChange={event => { setIssueFilter(event.target.value || null); setCategoryCloud(null) }} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface2)', color: effectiveIssueFilter ? 'var(--accent)' : 'var(--text-muted)', fontSize: 11, fontFamily: 'DM Sans', cursor: 'pointer', outline: 'none' }}>
-            <option value="">All Products</option>
-            {scopedProducts.map(product => <option key={product} value={product}>{product}</option>)}
-          </select>
+          <CategoryProductSelect
+            value={issueFilter}
+            products={scopedProducts}
+            tree={tree}
+            allLabel="All Products In Scope"
+            onChange={value => { setIssueFilter(value); setCategoryCloud(null) }}
+          />
         }
       >
         <CategoryReviewMix rows={displayedCategoryBreakdown} onSelect={(category, sentiment) => setCategoryCloud(current => current?.category === category && current?.sentiment === sentiment ? null : { category, sentiment })} />
@@ -724,10 +863,13 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
         tip="Neg Rate shows the 7-day rolling problem rate. Sentiment shows daily positive, negative, and neutral breakdown. Reviews shows the daily stacked split from 1-star to 5-star."
         controls={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <select value={effectiveSignalProd || ''} onChange={event => setSignalProd(event.target.value || null)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface2)', color: effectiveSignalProd ? 'var(--accent)' : 'var(--text-muted)', fontSize: 11, fontFamily: 'DM Sans', cursor: 'pointer', outline: 'none' }}>
-              <option value="">All Products</option>
-              {scopedProducts.map(product => <option key={product} value={product}>{product}</option>)}
-            </select>
+            <CategoryProductSelect
+              value={signalProd}
+              products={scopedProducts}
+              tree={tree}
+              allLabel="All Products In Scope"
+              onChange={setSignalProd}
+            />
             <Toggle value={trendMode} onChange={setTrendMode} options={[{ v: 'rate', l: 'Neg Rate %' }, { v: 'sentiment', l: 'Sentiment' }, { v: 'reviews', l: 'Reviews' }]} />
           </div>
         }
@@ -836,7 +978,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
 
       <Card title="Emerging Issues" tip="Issues that were absent or small in the first half of the selected period and are now growing.">
         <EmergingIssues momentum={momentum} onSelect={category => setEmergingCat(emergingCat === category ? null : category)} />
-        <ReviewsDrawer category={emergingCat} label={emergingCat} filters={filters} onClose={() => setEmergingCat(null)} />
+        <ReviewsDrawer category={emergingCat} label={emergingCat} sentiment="Negative" filters={filters} onClose={() => setEmergingCat(null)} />
       </Card>
     </div>
   )
