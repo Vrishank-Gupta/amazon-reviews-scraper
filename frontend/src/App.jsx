@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchReviews, fetchFilters, fetchStats, fetchPipelineStatus, apiUrl } from './api'
+import { fetchReviews, fetchFilters, fetchStats, fetchPipelineStatus, exportRawReviewsExcel, fetchAdminAccessLog, apiUrl } from './api'
 import { downloadCSV } from './components/TrendsPage'
 import FilterBar from './components/Filterbar'
 import ReviewsTable from './components/ReviewsTable'
@@ -7,7 +7,7 @@ import TrendsPage from './components/TrendsPage'
 import AnalysisPage from './components/Analysispage'
 import SummaryPage from './components/Summarypage'
 import LoginPage from './components/LoginPage'
-import { RefreshCw, Download, ChevronDown, LogOut } from 'lucide-react'
+import { RefreshCw, Download, ChevronDown, LogOut, ShieldCheck, Users, Clock3, ArrowLeft } from 'lucide-react'
 import { SHOW_TRENDS_TAB } from './config/dashboard'
 
 const DEFAULT_FILTERS = {
@@ -80,6 +80,21 @@ function formatHeaderDate(value) {
   }
 }
 
+function formatAdminDate(value) {
+  if (!value) return 'Not available'
+  try {
+    return new Date(value).toLocaleString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return value
+  }
+}
+
 export default function App() {
   // ── Auth state ──────────────────────────────────────────────────────────────
   const [authChecked, setAuthChecked] = useState(false)
@@ -119,7 +134,195 @@ export default function App() {
   if (!authedEmail) return <LoginPage onLogin={email => setAuthedEmail(email)} />
 
   // ── Dashboard ───────────────────────────────────────────────────────────────
+  if (window.location.pathname === '/admin') {
+    return <AdminPanel authedEmail={authedEmail} onLogout={handleLogout} />
+  }
   return <Dashboard authedEmail={authedEmail} onLogout={handleLogout} />
+}
+
+function AdminMetric({ icon, label, value }) {
+  return (
+    <div className="glass-panel" style={{ borderRadius: 10, padding: 16, minHeight: 92 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+        {icon} {label}
+      </div>
+      <div style={{ marginTop: 12, fontFamily: 'Bebas Neue', fontSize: 34, letterSpacing: '0.02em', lineHeight: 1, color: 'var(--text)' }}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function AdminPanel({ authedEmail, onLogout }) {
+  const [accessLog, setAccessLog] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const loadAccessLog = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      setAccessLog(await fetchAdminAccessLog(200))
+    } catch (err) {
+      setError(err.message || 'Failed to fetch admin access log')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadAccessLog()
+  }, [loadAccessLog])
+
+  const summary = accessLog?.summary || []
+  const events = accessLog?.events || []
+  const lastLogin = events[0]?.login_at
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
+      <header
+        style={{
+          height: 56,
+          padding: '0 28px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          background: 'rgba(10,12,24,0.74)',
+          borderBottom: '1px solid var(--border)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 100,
+          backdropFilter: 'blur(16px)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <ShieldCheck size={20} color="var(--accent)" />
+          <div>
+            <div style={{ fontFamily: 'Bebas Neue', fontSize: 20, letterSpacing: '0.04em', color: 'var(--accent)', lineHeight: 1 }}>
+              Admin Panel
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Amazon Reviews Dashboard</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', textDecoration: 'none', fontSize: 12 }}>
+            <ArrowLeft size={13} /> Dashboard
+          </a>
+          <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>{authedEmail}</div>
+            <button
+              onClick={onLogout}
+              title="Sign out"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                background: 'none', border: 'none', padding: 0,
+                color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer',
+              }}
+            >
+              <LogOut size={11} /> Sign out
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="glass-panel" style={{ borderRadius: 14, padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <div>
+            <h1 style={{ margin: 0, fontFamily: 'Bebas Neue', fontSize: 30, letterSpacing: '0.02em', lineHeight: 1 }}>
+              Dashboard Access
+            </h1>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 3 }}>
+              Successful email OTP logins are recorded here.
+            </div>
+          </div>
+          <button
+            onClick={loadAccessLog}
+            disabled={loading}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px solid var(--border)',
+              background: 'rgba(255,255,255,0.03)',
+              color: 'var(--text-muted)',
+              cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <RefreshCw size={13} className={loading ? 'spin' : ''} /> Refresh
+          </button>
+        </div>
+
+        {error && (
+          <div className="glass-panel" style={{ borderRadius: 10, padding: 16, color: '#ff9b9b', borderColor: 'rgba(239,68,68,0.35)' }}>
+            {error}
+          </div>
+        )}
+
+        <div className="admin-metric-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+          <AdminMetric icon={<Users size={14} />} label="Unique Users" value={accessLog?.unique_users ?? '-'} />
+          <AdminMetric icon={<ShieldCheck size={14} />} label="Total Logins" value={accessLog?.total_logins ?? '-'} />
+          <AdminMetric icon={<Clock3 size={14} />} label="Last Login" value={lastLogin ? formatAdminDate(lastLogin) : '-'} />
+        </div>
+
+        <div className="admin-content-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 0.65fr) minmax(420px, 1fr)', gap: 14, alignItems: 'start' }}>
+          <section className="glass-panel" style={{ borderRadius: 14, overflow: 'hidden' }}>
+            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--border)', fontWeight: 700 }}>
+              Users
+            </div>
+            <div style={{ maxHeight: 520, overflow: 'auto' }}>
+              {summary.length ? summary.map(user => (
+                <div key={user.email} style={{ padding: '12px 16px', borderBottom: '1px solid rgba(120,131,167,0.1)' }}>
+                  <div style={{ color: 'var(--text)', fontWeight: 700, wordBreak: 'break-word' }}>{user.email}</div>
+                  <div style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 12 }}>
+                    {user.login_count} login{Number(user.login_count) === 1 ? '' : 's'} · Last {formatAdminDate(user.last_login_at)}
+                  </div>
+                </div>
+              )) : (
+                <div style={{ padding: 16, color: 'var(--text-muted)' }}>{loading ? 'Loading users...' : 'No logins recorded yet.'}</div>
+              )}
+            </div>
+          </section>
+
+          <section className="glass-panel" style={{ borderRadius: 14, overflow: 'hidden' }}>
+            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--border)', fontWeight: 700 }}>
+              Recent Logins
+            </div>
+            <div style={{ overflow: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+                <thead>
+                  <tr style={{ color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'left' }}>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>Email</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>Login Time</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>IP</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>Browser</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.length ? events.map(event => (
+                    <tr key={event.id} style={{ borderBottom: '1px solid rgba(120,131,167,0.1)' }}>
+                      <td style={{ padding: '10px 12px', fontWeight: 700, wordBreak: 'break-word' }}>{event.email}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatAdminDate(event.login_at)}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{event.ip_address || '-'}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-muted)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={event.user_agent || ''}>
+                        {event.user_agent || '-'}
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan="4" style={{ padding: 16, color: 'var(--text-muted)' }}>{loading ? 'Loading logins...' : 'No logins recorded yet.'}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  )
 }
 
 function Dashboard({ authedEmail, onLogout }) {
@@ -130,6 +333,7 @@ function Dashboard({ authedEmail, onLogout }) {
   const [scrapeStatus, setScrapeStatus] = useState(null)
   const [initialLoading, setInitialLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [exportingRaw, setExportingRaw] = useState(false)
   const [scrapeMenuOpen, setScrapeMenuOpen] = useState(false)
 
   useEffect(() => {
@@ -171,6 +375,17 @@ function Dashboard({ authedEmail, onLogout }) {
     setFilters(f => ({ ...f, ...updates }))
   }
 
+  const handleRawExport = async () => {
+    setExportingRaw(true)
+    try {
+      await exportRawReviewsExcel(filters)
+    } catch (error) {
+      window.alert(error?.message || 'Failed to export raw reviews')
+    } finally {
+      setExportingRaw(false)
+    }
+  }
+
   const visibleTabs = ['analysis', 'reviews', ...(SHOW_TRENDS_TAB ? ['trends'] : [])]
   const activeTab = visibleTabs.includes(tab) ? tab : 'analysis'
   const currentTab = TAB_META[activeTab]
@@ -209,13 +424,13 @@ function Dashboard({ authedEmail, onLogout }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div>
-            <div style={{ fontFamily: 'Bebas Neue', fontSize: 22, letterSpacing: '0.08em', color: 'var(--accent)', lineHeight: 1 }}>
-              VOC
+            <div style={{ fontFamily: 'Bebas Neue', fontSize: 20, letterSpacing: '0.04em', color: 'var(--accent)', lineHeight: 1 }}>
+              Amazon Reviews Dashboard
             </div>
           </div>
           <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Amazon VOC · <span style={{ color: 'var(--text)' }}>Qubo by Hero Electronix</span>
+            Qubo by Hero Electronix
           </div>
         </div>
 
@@ -338,6 +553,45 @@ function Dashboard({ authedEmail, onLogout }) {
           >
             <RefreshCw size={12} className={refreshing ? 'spin' : ''} /> Refresh
           </button>
+          <button
+            onClick={handleRawExport}
+            disabled={exportingRaw}
+            title="Export raw review Excel for the applied filters"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '6px 12px',
+              borderRadius: 7,
+              fontFamily: 'DM Sans',
+              border: '1px solid rgba(255,78,26,0.55)',
+              background: 'rgba(255,78,26,0.08)',
+              color: 'var(--accent)',
+              fontSize: 12,
+              cursor: exportingRaw ? 'not-allowed' : 'pointer',
+              opacity: exportingRaw ? 0.7 : 1,
+            }}
+          >
+            <Download size={12} /> {exportingRaw ? 'Exporting' : 'Export Raw'}
+          </button>
+          <a
+            href="/admin"
+            title="Open admin access log"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '6px 10px',
+              borderRadius: 7,
+              border: '1px solid var(--border)',
+              background: 'rgba(255,255,255,0.02)',
+              color: 'var(--text-muted)',
+              fontSize: 12,
+              textDecoration: 'none',
+            }}
+          >
+            <ShieldCheck size={12} /> Admin
+          </a>
           <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
             <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>{authedEmail}</div>

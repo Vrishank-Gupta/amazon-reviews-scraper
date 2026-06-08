@@ -52,9 +52,41 @@ export async function fetchReviews(filters = {}) {
   return res.json()
 }
 
+export async function exportRawReviewsExcel(filters = {}) {
+  const p = buildParams(filters)
+  if (filters.sentiment?.length) p.set('sentiment', filters.sentiment.join(','))
+  if (filters.rating?.length)    p.set('rating', filters.rating.join(','))
+
+  const res = await apiFetch(apiUrl(`/api/reviews/export/raw.xlsx?${p}`))
+  if (!res.ok) {
+    const message = await res.text().catch(() => '')
+    throw new Error(message || 'Failed to export raw reviews')
+  }
+
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') || ''
+  const filenameMatch = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)
+  const filename = filenameMatch ? decodeURIComponent(filenameMatch[1]) : 'raw_reviews_filtered.xlsx'
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function fetchFilters() {
   const res = await apiFetch(apiUrl('/api/filters'))
   return res.json()
+}
+
+export async function fetchAdminAccessLog(limit = 200) {
+  const res = await apiFetch(apiUrl(`/api/admin/access-log?limit=${limit}`))
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || 'Failed to fetch admin access log')
+  return data
 }
 
 export async function fetchAnalysis(filters = {}) {

@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import pymysql
@@ -7,15 +7,19 @@ import pymysql.cursors
 from dbutils.pooled_db import PooledDB
 import json
 import csv
+import io
+import re
 import subprocess
 import os
 import sys
 import smtplib
 import secrets
 import random
+import zipfile
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formataddr
+from xml.sax.saxutils import escape
 from datetime import datetime, timedelta
 from typing import Optional
 from collections import defaultdict
@@ -39,7 +43,7 @@ app.add_middleware(
     allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Session-Token"],
+    expose_headers=["X-Session-Token", "Content-Disposition"],
 )
 
 # ── Auth config ───────────────────────────────────────────────────────────────
@@ -50,6 +54,11 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_SENDER = os.getenv("SMTP_SENDER", "admin@quboworld.com")
 SMTP_SENDER_NAME = os.getenv("SMTP_SENDER_NAME", "")
 ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "@heroelectronix.com")
+ADMIN_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv("ADMIN_EMAILS", "").split(",")
+    if email.strip()
+}
 OTP_EXPIRY_MINUTES = 10
 SESSION_EXPIRY_DAYS = 7
 
@@ -85,12 +94,26 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 """
 
+AUTH_TABLE_LOGIN_EVENT_SQL = """
+CREATE TABLE IF NOT EXISTS auth_login_events (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  login_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ip_address VARCHAR(64) NULL,
+  user_agent VARCHAR(512) NULL,
+  session_expires_at DATETIME NULL,
+  INDEX idx_auth_login_events_login_at (login_at),
+  INDEX idx_auth_login_events_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+"""
+
 
 def ensure_auth_tables(conn):
     try:
         with conn.cursor() as cur:
             cur.execute(AUTH_TABLE_OTP_SQL)
             cur.execute(AUTH_TABLE_SESSION_SQL)
+            cur.execute(AUTH_TABLE_LOGIN_EVENT_SQL)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -98,19 +121,19 @@ def ensure_auth_tables(conn):
 
 def send_otp_email(to_email: str, otp: str):
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"Your VOC Dashboard Login Code: {otp}"
+    msg["Subject"] = f"Your Amazon Reviews Dashboard Login Code: {otp}"
     msg["From"] = formataddr((SMTP_SENDER_NAME, SMTP_SENDER)) if SMTP_SENDER_NAME else SMTP_SENDER
     msg["To"] = to_email
 
     plain = (
-        f"Your VOC Dashboard one-time login code is: {otp}\n\n"
+        f"Your Amazon Reviews Dashboard one-time login code is: {otp}\n\n"
         f"This code expires in {OTP_EXPIRY_MINUTES} minutes.\n\n"
         "If you did not request this, please ignore this email."
     )
     html = f"""
     <html><body style="font-family:sans-serif;background:#0a0c18;color:#e0e0e0;padding:32px;">
       <div style="max-width:480px;margin:0 auto;background:#141726;border-radius:12px;padding:32px;border:1px solid #1e2237;">
-        <div style="font-size:22px;font-weight:700;color:#ff4e1a;letter-spacing:0.08em;margin-bottom:8px;">VOC Dashboard</div>
+        <div style="font-size:22px;font-weight:700;color:#ff4e1a;letter-spacing:0.08em;margin-bottom:8px;">Amazon Reviews Dashboard</div>
         <div style="font-size:13px;color:#8a8fa8;margin-bottom:28px;">Qubo by Hero Electronix</div>
         <p style="font-size:14px;color:#c0c4d6;margin-bottom:24px;">Your one-time login code is:</p>
         <div style="font-size:36px;font-weight:700;letter-spacing:0.18em;color:#ffffff;background:#1e2237;border-radius:8px;padding:16px 24px;text-align:center;margin-bottom:24px;">{otp}</div>
@@ -126,6 +149,45 @@ def send_otp_email(to_email: str, otp: str):
         server.starttls()
         server.login(SMTP_USER, SMTP_PASSWORD)
         server.sendmail(SMTP_SENDER, to_email, msg.as_string())
+
+
+def _request_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if forwarded_for:
+        return forwarded_for[:64]
+    real_ip = request.headers.get("X-Real-IP", "").strip()
+    if real_ip:
+        return real_ip[:64]
+    return (request.client.host if request.client else "")[:64]
+
+
+def _session_email_from_request(request: Request) -> str:
+    token = request.headers.get("X-Session-Token", "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="No session token provided")
+
+    conn = get_conn()
+    try:
+        ensure_auth_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT email FROM auth_sessions WHERE token=%s AND expires_at > NOW()",
+                (token,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    return row["email"].strip().lower()
+
+
+def require_admin_email(request: Request) -> str:
+    email = _session_email_from_request(request)
+    if ADMIN_EMAILS and email not in ADMIN_EMAILS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return email
 
 
 # ── Auth middleware ───────────────────────────────────────────────────────────
@@ -255,6 +317,139 @@ def product_filter_sql(products: Optional[list], table_alias: str = "r") -> tupl
         return "", []
     placeholders = ",".join(["%s"] * len(products))
     return f" AND {table_alias}.product_name IN ({placeholders})", list(products)
+
+
+RAW_REVIEW_EXPORT_HEADERS = [
+    ("product_name", "Product Name"),
+    ("category", "Category"),
+    ("set_name", "Set Name"),
+    ("variant_label", "Variant Label"),
+    ("variant_dimension", "Variant Dimension"),
+    ("asin", "ASIN"),
+    ("scrape_asin", "Scrape ASIN"),
+    ("variant_asin", "Variant ASIN"),
+    ("star_rating", "Star Rating"),
+    ("rating_raw", "Rating Raw"),
+    ("review_title", "Review Title"),
+    ("review_text", "Review Text"),
+    ("posted_by", "Posted By"),
+    ("posting_date", "Posting Date"),
+    ("review_date_raw", "Review Date Raw"),
+    ("review_url", "Review URL"),
+    ("scrape_date", "Scrape Date"),
+    ("review_id", "Review ID"),
+]
+
+
+def _rating_to_number(value):
+    if value is None:
+        return ""
+    match = re.search(r"\d+(?:\.\d+)?", str(value))
+    if not match:
+        return ""
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return ""
+
+
+def _clean_review_title(value):
+    if not value:
+        return ""
+    lines = []
+    for line in str(value).splitlines():
+        if re.search(r"\d+(?:\.\d+)?\s+out\s+of\s+5\s+stars", line, flags=re.I):
+            continue
+        cleaned = line.strip()
+        if cleaned:
+            lines.append(cleaned)
+    return " ".join(lines)
+
+
+def _excel_col_name(index):
+    name = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def _xml_text(value):
+    text = str(value)
+    return "".join(
+        ch if ch in "\t\n\r" or ord(ch) >= 32 else " "
+        for ch in text
+    )
+
+
+def _xlsx_bytes(sheet_name, headers, rows):
+    def cell_xml(row_index, col_index, value):
+        ref = f"{_excel_col_name(col_index)}{row_index}"
+        if value is None:
+            value = ""
+        if isinstance(value, datetime):
+            value = value.date().isoformat()
+        elif hasattr(value, "isoformat"):
+            value = value.isoformat()
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f'<c r="{ref}"><v>{value}</v></c>'
+        return f'<c r="{ref}" t="inlineStr"><is><t>{escape(_xml_text(value))}</t></is></c>'
+
+    sheet_rows = []
+    header_cells = [cell_xml(1, index + 1, label) for index, (_, label) in enumerate(headers)]
+    sheet_rows.append(f'<row r="1">{"".join(header_cells)}</row>')
+    for row_index, row in enumerate(rows, start=2):
+        cells = [
+            cell_xml(row_index, col_index + 1, row.get(key, ""))
+            for col_index, (key, _) in enumerate(headers)
+        ]
+        sheet_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+
+    last_col = _excel_col_name(len(headers))
+    dimension = f"A1:{last_col}{max(len(rows) + 1, 1)}"
+    sheet_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="{dimension}"/>
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <sheetData>{''.join(sheet_rows)}</sheetData>
+  <autoFilter ref="{dimension}"/>
+</worksheet>'''
+    workbook_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="{escape(sheet_name)}" sheetId="1" r:id="rId1"/></sheets>
+</workbook>'''
+    content_types = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>'''
+    root_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>'''
+    workbook_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>'''
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", root_rels)
+        zf.writestr("xl/workbook.xml", workbook_xml)
+        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    return output.getvalue()
+
+
+def _raw_reviews_export_filename(date_from, date_to):
+    safe_from = re.sub(r"[^0-9A-Za-z_-]+", "", date_from or "")
+    safe_to = re.sub(r"[^0-9A-Za-z_-]+", "", date_to or "")
+    if safe_from or safe_to:
+        return f"raw_reviews_{safe_from or 'start'}_to_{safe_to or 'latest'}.xlsx"
+    return "raw_reviews_filtered.xlsx"
 
 
 _db_pool = PooledDB(
@@ -563,6 +758,100 @@ def get_reviews(
 
 
 # ── Filters ───────────────────────────────────────────────────────────────────
+
+@app.get("/api/reviews/export/raw.xlsx")
+def export_raw_reviews_excel(
+    category: Optional[str] = None,
+    sentiment: Optional[str] = None,
+    rating: Optional[str] = None,
+    product: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            products = resolve_products(product, category)
+            pf_sql, pf_params = product_filter_sql(products)
+            date_parse = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
+
+            query = f"""
+                SELECT
+                    r.review_id, r.asin, r.scrape_asin, r.variant_asin,
+                    r.variant_label, r.variant_dimension, r.product_name,
+                    r.category, r.rating, r.title, r.review, r.review_date,
+                    r.review_url, r.scrape_date, {date_parse} as posting_date
+                FROM raw_reviews r
+            """
+            params = []
+
+            if sentiment:
+                query += " JOIN review_tags t ON r.review_id = t.review_id"
+
+            query += " WHERE 1=1"
+            query += pf_sql
+            params.extend(pf_params)
+
+            if sentiment:
+                sentiments = [s.strip() for s in sentiment.split(",") if s.strip()]
+                if sentiments:
+                    placeholders = ",".join(["%s"] * len(sentiments))
+                    query += f" AND t.sentiment IN ({placeholders})"
+                    params.extend(sentiments)
+
+            if rating:
+                ratings_list = [r.strip() for r in rating.split(",") if r.strip()]
+                if ratings_list:
+                    placeholders = ",".join(["%s"] * len(ratings_list))
+                    query += f" AND r.rating IN ({placeholders})"
+                    params.extend(ratings_list)
+
+            if date_from:
+                query += f" AND {date_parse} >= %s"
+                params.append(date_from)
+            if date_to:
+                query += f" AND {date_parse} <= %s"
+                params.append(date_to)
+
+            query += " ORDER BY posting_date DESC, r.product_name ASC, r.review_id ASC, r.asin ASC"
+            cur.execute(query, params)
+            db_rows = cur.fetchall() or []
+
+        rows = []
+        for row in db_rows:
+            posting_date = row.get("posting_date")
+            scrape_date = row.get("scrape_date")
+            rows.append({
+                "product_name": row.get("product_name") or "",
+                "category": row.get("category") or "",
+                "set_name": row.get("variant_label") or row.get("product_name") or "",
+                "variant_label": row.get("variant_label") or "",
+                "variant_dimension": row.get("variant_dimension") or "",
+                "asin": row.get("asin") or "",
+                "scrape_asin": row.get("scrape_asin") or "",
+                "variant_asin": row.get("variant_asin") or "",
+                "star_rating": _rating_to_number(row.get("rating")),
+                "rating_raw": row.get("rating") or "",
+                "review_title": _clean_review_title(row.get("title")),
+                "review_text": row.get("review") or "",
+                "posted_by": "",
+                "posting_date": posting_date.isoformat() if hasattr(posting_date, "isoformat") else (posting_date or ""),
+                "review_date_raw": row.get("review_date") or "",
+                "review_url": row.get("review_url") or "",
+                "scrape_date": scrape_date.isoformat() if hasattr(scrape_date, "isoformat") else (scrape_date or ""),
+                "review_id": row.get("review_id") or "",
+            })
+
+        payload = _xlsx_bytes("Raw Reviews", RAW_REVIEW_EXPORT_HEADERS, rows)
+        filename = _raw_reviews_export_filename(date_from, date_to)
+        return StreamingResponse(
+            io.BytesIO(payload),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    finally:
+        conn.close()
+
 
 @app.get("/api/filters")
 def get_filters():
@@ -2444,7 +2733,7 @@ def auth_request_otp(req: OTPRequest):
 
 
 @app.post("/api/auth/verify-otp")
-def auth_verify_otp(req: OTPVerify):
+def auth_verify_otp(req: OTPVerify, request: Request):
     email = req.email.strip().lower()
     otp = req.otp.strip()
 
@@ -2471,6 +2760,18 @@ def auth_verify_otp(req: OTPVerify):
             cur.execute(
                 "INSERT INTO auth_sessions (email, token, expires_at) VALUES (%s, %s, %s)",
                 (email, token, session_expires),
+            )
+            cur.execute(
+                """
+                INSERT INTO auth_login_events (email, ip_address, user_agent, session_expires_at)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    email,
+                    _request_ip(request),
+                    request.headers.get("User-Agent", "")[:512],
+                    session_expires,
+                ),
             )
         conn.commit()
     finally:
@@ -2518,3 +2819,57 @@ def auth_logout(request: Request):
         finally:
             conn.close()
     return {"message": "Logged out"}
+
+
+@app.get("/api/admin/access-log")
+def admin_access_log(request: Request, limit: int = 200):
+    admin_email = require_admin_email(request)
+    bounded_limit = max(1, min(limit, 500))
+
+    conn = get_conn()
+    try:
+        ensure_auth_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS total_logins FROM auth_login_events")
+            totals = cur.fetchone() or {"total_logins": 0}
+            cur.execute(
+                "SELECT COUNT(DISTINCT email) AS unique_users FROM auth_login_events"
+            )
+            users = cur.fetchone() or {"unique_users": 0}
+            cur.execute(
+                """
+                SELECT email, COUNT(*) AS login_count, MAX(login_at) AS last_login_at
+                FROM auth_login_events
+                GROUP BY email
+                ORDER BY last_login_at DESC
+                """
+            )
+            summary = cur.fetchall() or []
+            cur.execute(
+                """
+                SELECT id, email, login_at, ip_address, user_agent, session_expires_at
+                FROM auth_login_events
+                ORDER BY login_at DESC
+                LIMIT %s
+                """,
+                (bounded_limit,),
+            )
+            events = cur.fetchall() or []
+    finally:
+        conn.close()
+
+    def serialize_row(row):
+        out = dict(row)
+        for key in ("login_at", "last_login_at", "session_expires_at"):
+            if key in out and hasattr(out[key], "isoformat"):
+                out[key] = out[key].isoformat()
+        return out
+
+    return {
+        "viewer_email": admin_email,
+        "admin_restricted": bool(ADMIN_EMAILS),
+        "total_logins": int(totals.get("total_logins") or 0),
+        "unique_users": int(users.get("unique_users") or 0),
+        "summary": [serialize_row(row) for row in summary],
+        "events": [serialize_row(row) for row in events],
+    }

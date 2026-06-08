@@ -142,11 +142,11 @@ export default function LoginPage({ onLogin }) {
       }}>
         {/* Header */}
         <div style={{ marginBottom: 28, textAlign: 'center' }}>
-          <div style={{ fontFamily: 'Bebas Neue', fontSize: 28, letterSpacing: '0.1em', color: 'var(--accent)', lineHeight: 1 }}>
-            VOC
+          <div style={{ fontFamily: 'Bebas Neue', fontSize: 28, letterSpacing: '0.04em', color: 'var(--accent)', lineHeight: 1 }}>
+            Amazon Reviews Dashboard
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, letterSpacing: '0.05em' }}>
-            Amazon VOC · Qubo by Hero Electronix
+            Qubo by Hero Electronix
           </div>
         </div>
 

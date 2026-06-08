@@ -86,6 +86,13 @@ h1, h2, h3, .display {
   backdrop-filter: blur(14px);
 }
 
+@media (max-width: 900px) {
+  .admin-metric-grid,
+  .admin-content-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
 .story-kicker {
   display: inline-flex;
   align-items: center;
