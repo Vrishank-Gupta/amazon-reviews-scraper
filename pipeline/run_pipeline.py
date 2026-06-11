@@ -58,6 +58,13 @@ try:
         cwd=pipeline_dir,  # run from pipeline/ so local imports resolve
     )
 
+    if os.getenv("REVIEW_REPORT_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
+        print("Step 3/3: Sending review report email...")
+        subprocess.check_call(
+            [sys.executable, os.path.join(pipeline_dir, "review_reporter.py")],
+            cwd=pipeline_dir,
+        )
+
     update_status("SUCCESS", "Pipeline completed successfully")
     print("Pipeline finished successfully.")
 
