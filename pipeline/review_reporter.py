@@ -29,6 +29,8 @@ load_project_env()
 DEFAULT_TO = "vrishank.gupta@heroelectronix.com"
 DEFAULT_CATEGORIES = ["Camera"]
 DEFAULT_DASHBOARD_URL = "https://voc.stage.platform.quboweb.com"
+FONT_STACK = "Aptos, 'Segoe UI', Calibri, Arial, sans-serif"
+DISPLAY_FONT_STACK = "Aptos Display, Aptos, 'Segoe UI Semibold', 'Segoe UI', Calibri, Arial, sans-serif"
 CATEGORY_ALIASES = {
     "cameras": "Camera",
     "camera": "Camera",
@@ -102,6 +104,14 @@ def color_for_rating(value):
 
 def color_for_negative(value):
     return "#b91c1c" if value >= 70 else "#d97706" if value >= 40 else "#15803d"
+
+
+def font_family():
+    return FONT_STACK
+
+
+def display_font_family():
+    return DISPLAY_FONT_STACK
 
 
 def category_label(category):
@@ -337,8 +347,9 @@ def make_csv(rows):
 
 def render_table_header(columns):
     return "".join(
-        f'<th align="{align}" style="padding:10px;background:#f8fafc;color:#64748b;'
-        f'text-transform:uppercase;font-size:11px;letter-spacing:.06em;border-bottom:1px solid #e5e7eb">{html(label)}</th>'
+        f'<th align="{align}" style="padding:9px 10px;background:#f8fafc;color:#64748b;'
+        f'text-transform:uppercase;font-family:{font_family()};font-size:10.5px;letter-spacing:.04em;'
+        f'font-weight:700;border-bottom:1px solid #e5e7eb">{html(label)}</th>'
         for label, align in columns
     )
 
@@ -422,8 +433,8 @@ def render_trend_section(current_rows, previous_rows, categories, current_start,
 
     return f"""
       <tr><td style="padding:0 36px 24px 36px">
-        <div style="font-size:18px;font-weight:800;color:#111827;margin-bottom:6px">Movement vs prior weekly view</div>
-        <div style="font-size:12px;color:#64748b;line-height:1.5;margin-bottom:8px">Compares this report window ({current_start} to {current_end}) with the same-length window ending 7 days earlier ({previous_start} to {previous_end}). Deltas show current minus prior window.</div>
+        <div style="font-family:{display_font_family()};font-size:18px;font-weight:650;color:#111827;margin-bottom:6px">Movement vs prior weekly view</div>
+        <div style="font-size:12.5px;color:#64748b;line-height:1.5;margin-bottom:8px">Compares this report window ({current_start} to {current_end}) with the same-length window ending 7 days earlier ({previous_start} to {previous_end}). Deltas show current minus prior window.</div>
         <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-size:13px;margin-bottom:12px">
           <tr>{render_table_header([('Category', 'left'), ('Reviews', 'right'), ('Δ reviews', 'right'), ('Avg', 'right'), ('Δ avg', 'right'), ('Neg %', 'right'), ('Δ neg', 'right')])}</tr>
           {category_rows}
@@ -573,21 +584,21 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
     )
 
     subject = f"{category_title} Reviews | Last 30 days ({start_date} to {end_date}) | {overall['reviews']} reviews"
-    html_body = f"""<!doctype html><html><body style="margin:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111827">
+    html_body = f"""<!doctype html><html><body style="margin:0;background:#f3f4f6;font-family:{font_family()};color:#111827;-webkit-font-smoothing:antialiased">
     <div style="display:none;max-height:0;overflow:hidden">{category_title} reviews report for {start_date} to {end_date}: {overall['reviews']} reviews.</div>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6"><tr><td align="center" style="padding:24px 12px">
     <table role="presentation" width="880" cellspacing="0" cellpadding="0" style="max-width:880px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e5e7eb">
       <tr><td style="background:#111827;padding:24px 30px;color:#ffffff">
-        <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:#93c5fd;font-weight:800">Amazon customer reviews report</div>
-        <div style="font-size:26px;font-weight:800;line-height:1.15;margin-top:8px">{html(category_title)} reviews · last 30 days</div>
-        <div style="font-size:13px;color:#cbd5e1;margin-top:10px">Report date: {report_date} · Review posted dates: {start_date} to {end_date} · Production data last scraped: {html(last_scraped)}</div>
+        <div style="font-family:{font_family()};font-size:11px;text-transform:uppercase;letter-spacing:.10em;color:#93c5fd;font-weight:700">Amazon customer reviews report</div>
+        <div style="font-family:{display_font_family()};font-size:25px;font-weight:650;line-height:1.18;margin-top:8px">{html(category_title)} reviews · last 30 days</div>
+        <div style="font-size:13px;color:#cbd5e1;margin-top:10px;line-height:1.45">Report date: {report_date} · Review posted dates: {start_date} to {end_date} · Production data last scraped: {html(last_scraped)}</div>
       </td></tr>
       <tr><td style="padding:18px 28px 4px 28px">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:14px 0"><tr>
-          <td style="width:25%;padding:7px"><div style="border:1px solid #e5e7eb;border-radius:12px;padding:13px;background:#fff"><div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Reviews in report</div><div style="font-size:28px;font-weight:800;color:#111827">{overall['reviews']}</div><div style="font-size:12px;color:#64748b">posted {html(earliest_review_date)} to {html(latest_review_date)}</div></div></td>
-          <td style="width:25%;padding:7px"><div style="border:1px solid #e5e7eb;border-radius:12px;padding:13px;background:#fff"><div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em">30-day review avg</div><div style="font-size:28px;font-weight:800;color:{color_for_rating(overall['avg_rating'])}">{overall['avg_rating']}★</div><div style="font-size:12px;color:#64748b">only reviews in this report</div></div></td>
-          <td style="width:25%;padding:7px"><div style="border:1px solid #e5e7eb;border-radius:12px;padding:13px;background:#fff"><div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em">1-2★ reviews</div><div style="font-size:28px;font-weight:800;color:#b91c1c">{overall['rating_dist'][1] + overall['rating_dist'][2]}</div><div style="font-size:12px;color:#64748b">{overall['bad_pct']}% of report reviews</div></div></td>
-          <td style="width:25%;padding:7px"><div style="border:1px solid #e5e7eb;border-radius:12px;padding:13px;background:#fff"><div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Tagged negative</div><div style="font-size:28px;font-weight:800;color:#b91c1c">{overall['sentiment']['Negative']}</div><div style="font-size:12px;color:#64748b">{overall['negative_pct']}% of report reviews</div></div></td>
+          <td style="width:25%;padding:7px"><div style="border:1px solid #e5e7eb;border-radius:12px;padding:13px;background:#fff"><div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:700">Reviews in report</div><div style="font-family:{display_font_family()};font-size:27px;font-weight:650;color:#111827;line-height:1.15;margin-top:5px">{overall['reviews']}</div><div style="font-size:12px;color:#64748b;line-height:1.35;margin-top:3px">posted {html(earliest_review_date)} to {html(latest_review_date)}</div></div></td>
+          <td style="width:25%;padding:7px"><div style="border:1px solid #e5e7eb;border-radius:12px;padding:13px;background:#fff"><div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:700">30-day review avg</div><div style="font-family:{display_font_family()};font-size:27px;font-weight:650;color:{color_for_rating(overall['avg_rating'])};line-height:1.15;margin-top:5px">{overall['avg_rating']}★</div><div style="font-size:12px;color:#64748b;line-height:1.35;margin-top:3px">only reviews in this report</div></div></td>
+          <td style="width:25%;padding:7px"><div style="border:1px solid #e5e7eb;border-radius:12px;padding:13px;background:#fff"><div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:700">1-2★ reviews</div><div style="font-family:{display_font_family()};font-size:27px;font-weight:650;color:#b91c1c;line-height:1.15;margin-top:5px">{overall['rating_dist'][1] + overall['rating_dist'][2]}</div><div style="font-size:12px;color:#64748b;line-height:1.35;margin-top:3px">{overall['bad_pct']}% of report reviews</div></div></td>
+          <td style="width:25%;padding:7px"><div style="border:1px solid #e5e7eb;border-radius:12px;padding:13px;background:#fff"><div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:700">Tagged negative</div><div style="font-family:{display_font_family()};font-size:27px;font-weight:650;color:#b91c1c;line-height:1.15;margin-top:5px">{overall['sentiment']['Negative']}</div><div style="font-size:12px;color:#64748b;line-height:1.35;margin-top:3px">{overall['negative_pct']}% of report reviews</div></div></td>
         </tr></table>
       </td></tr>
       <tr><td style="padding:0 36px 18px 36px">
@@ -601,7 +612,7 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
         <div style="font-size:12px;color:#64748b;line-height:1.6">30-day rating distribution: {rating_legend}</div>
       </td></tr>
       <tr><td style="padding:0 36px 24px 36px">
-        <div style="font-size:18px;font-weight:800;color:#111827;margin-bottom:8px">Category summary</div>
+        <div style="font-family:{display_font_family()};font-size:18px;font-weight:650;color:#111827;margin-bottom:8px">Category summary</div>
         <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-size:13px">
           <tr>{render_table_header([('Category', 'left'), ('Reviews', 'right'), ('30-day avg', 'right'), ('1-2★', 'right'), ('Neg %', 'right'), ('Most mentioned themes', 'left')])}</tr>
           {category_rows}
@@ -609,25 +620,25 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
       </td></tr>
       {trend_section}
       <tr><td style="padding:0 36px 24px 36px">
-        <div style="font-size:18px;font-weight:800;color:#111827;margin-bottom:8px">Set-wise review themes</div>
+        <div style="font-family:{display_font_family()};font-size:18px;font-weight:650;color:#111827;margin-bottom:8px">Set-wise review themes</div>
         <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-size:13px">
           <tr>{render_table_header([('Category', 'left'), ('Set / model', 'left'), ('Reviews', 'right'), ('Avg', 'right'), ('Neg %', 'right'), ('Themes customers mention', 'left'), ('Positive notes', 'left')])}</tr>
           {set_rows}
         </table>
       </td></tr>
       <tr><td style="padding:0 36px 24px 36px">
-        <div style="font-size:18px;font-weight:800;color:#111827;margin-bottom:8px">Model-level detail</div>
+        <div style="font-family:{display_font_family()};font-size:18px;font-weight:650;color:#111827;margin-bottom:8px">Model-level detail</div>
         {detail_blocks}
       </td></tr>
       <tr><td style="padding:0 36px 24px 36px">
-        <div style="font-size:18px;font-weight:800;color:#111827;margin-bottom:8px">Theme concentration across all included reviews</div>
+        <div style="font-family:{display_font_family()};font-size:18px;font-weight:650;color:#111827;margin-bottom:8px">Theme concentration across all included reviews</div>
         <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-size:13px">
           <tr>{render_table_header([('Theme', 'left'), ('Mentions', 'right'), ('Negative', 'right'), ('Positive', 'right'), ('Neutral', 'right')])}</tr>
           {theme_rows}
         </table>
       </td></tr>
       <tr><td style="padding:0 36px 24px 36px">
-        <div style="font-size:18px;font-weight:800;color:#111827;margin-bottom:8px">Amazon listing snapshot for context</div>
+        <div style="font-family:{display_font_family()};font-size:18px;font-weight:650;color:#111827;margin-bottom:8px">Amazon listing snapshot for context</div>
         <div style="font-size:13px;color:#334155;line-height:1.55;margin-bottom:8px">These are Amazon product-page ratings from the latest listing scrape. They are separate from the 30-day review metrics above.</div>
         <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-size:13px">
           <tr>{render_table_header([('Listing / set', 'left'), ('ASIN', 'left'), ('Amazon rating', 'right'), ('Total ratings', 'right')])}</tr>
