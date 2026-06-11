@@ -28,6 +28,7 @@ load_project_env()
 
 DEFAULT_TO = "vrishank.gupta@heroelectronix.com"
 DEFAULT_CATEGORIES = ["Camera"]
+DEFAULT_DASHBOARD_URL = "https://voc.stage.platform.quboweb.com"
 CATEGORY_ALIASES = {
     "cameras": "Camera",
     "camera": "Camera",
@@ -105,6 +106,26 @@ def color_for_negative(value):
 
 def category_label(category):
     return CATEGORY_LABELS.get(category, category)
+
+
+def parse_bool(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def delta_text(value, suffix="", decimals=1):
+    if value is None:
+        return "-"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:.{decimals}f}{suffix}"
+
+
+def delta_color(value, reverse=False):
+    if value is None or abs(value) < 0.05:
+        return "#64748b"
+    improving = value > 0
+    if reverse:
+        improving = value < 0
+    return "#15803d" if improving else "#b91c1c"
 
 
 def clean_set_name(row):
@@ -322,7 +343,100 @@ def render_table_header(columns):
     )
 
 
-def render_email(rows, snapshots, categories, start_date, end_date, report_date):
+def render_trend_section(current_rows, previous_rows, categories, current_start, current_end, previous_start, previous_end):
+    if not previous_rows:
+        return ""
+
+    current_by_category = defaultdict(list)
+    previous_by_category = defaultdict(list)
+    for row in current_rows:
+        current_by_category[row["category"]].append(row)
+    for row in previous_rows:
+        previous_by_category[row["category"]].append(row)
+
+    category_rows = ""
+    for category in categories:
+        current = summarize_group(current_by_category.get(category, []))
+        previous = summarize_group(previous_by_category.get(category, []))
+        review_delta = current["reviews"] - previous["reviews"]
+        avg_delta = current["avg_rating"] - previous["avg_rating"] if current["reviews"] and previous["reviews"] else None
+        neg_delta = current["negative_pct"] - previous["negative_pct"] if current["reviews"] and previous["reviews"] else None
+        category_rows += f"""
+        <tr>
+          <td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:#111827">{html(category_label(category))}</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb">{current['reviews']}</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb;color:{delta_color(review_delta)};font-weight:800">{delta_text(review_delta, '', 0)}</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb">{current['avg_rating']}★</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb;color:{delta_color(avg_delta)};font-weight:800">{delta_text(avg_delta, '★')}</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb">{current['negative_pct']}%</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb;color:{delta_color(neg_delta, reverse=True)};font-weight:800">{delta_text(neg_delta, ' pp')}</td>
+        </tr>
+        """
+
+    current_sets = {
+        (item["category"], item["set"]): item
+        for item in summarize_sets(current_rows)
+    }
+    previous_sets = {
+        (item["category"], item["set"]): item
+        for item in summarize_sets(previous_rows)
+    }
+    set_changes = []
+    for key, current in current_sets.items():
+        previous = previous_sets.get(key)
+        if not previous:
+            continue
+        current_summary = current["summary"]
+        previous_summary = previous["summary"]
+        if current_summary["reviews"] < 3 and previous_summary["reviews"] < 3:
+            continue
+        avg_delta = current_summary["avg_rating"] - previous_summary["avg_rating"]
+        neg_delta = current_summary["negative_pct"] - previous_summary["negative_pct"]
+        review_delta = current_summary["reviews"] - previous_summary["reviews"]
+        set_changes.append({
+            "category": current["category_label"],
+            "set": current["set"],
+            "reviews": current_summary["reviews"],
+            "review_delta": review_delta,
+            "avg": current_summary["avg_rating"],
+            "avg_delta": avg_delta,
+            "negative_pct": current_summary["negative_pct"],
+            "negative_delta": neg_delta,
+        })
+
+    set_changes.sort(key=lambda item: (abs(item["negative_delta"]), item["reviews"]), reverse=True)
+    set_rows = ""
+    for item in set_changes[:8]:
+        set_rows += f"""
+        <tr>
+          <td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-weight:700">{html(item['category'])}</td>
+          <td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:#111827">{html(item['set'])}</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb">{item['reviews']}</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb;color:{delta_color(item['review_delta'])};font-weight:800">{delta_text(item['review_delta'], '', 0)}</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb">{item['avg']}★</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb;color:{delta_color(item['avg_delta'])};font-weight:800">{delta_text(item['avg_delta'], '★')}</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb">{item['negative_pct']}%</td>
+          <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb;color:{delta_color(item['negative_delta'], reverse=True)};font-weight:800">{delta_text(item['negative_delta'], ' pp')}</td>
+        </tr>
+        """
+
+    return f"""
+      <tr><td style="padding:0 36px 24px 36px">
+        <div style="font-size:18px;font-weight:800;color:#111827;margin-bottom:6px">Movement vs prior weekly view</div>
+        <div style="font-size:12px;color:#64748b;line-height:1.5;margin-bottom:8px">Compares this report window ({current_start} to {current_end}) with the same-length window ending 7 days earlier ({previous_start} to {previous_end}). Deltas show current minus prior window.</div>
+        <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-size:13px;margin-bottom:12px">
+          <tr>{render_table_header([('Category', 'left'), ('Reviews', 'right'), ('Δ reviews', 'right'), ('Avg', 'right'), ('Δ avg', 'right'), ('Neg %', 'right'), ('Δ neg', 'right')])}</tr>
+          {category_rows}
+        </table>
+        {f'''<table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-size:13px">
+          <tr>{render_table_header([('Category', 'left'), ('Set / model', 'left'), ('Reviews', 'right'), ('Δ reviews', 'right'), ('Avg', 'right'), ('Δ avg', 'right'), ('Neg %', 'right'), ('Δ neg', 'right')])}</tr>
+          {set_rows}
+        </table>''' if set_rows else ''}
+      </td></tr>
+    """
+
+
+def render_email(rows, snapshots, categories, start_date, end_date, report_date, dashboard_url=DEFAULT_DASHBOARD_URL, trend_rows=None, trend_start=None, trend_end=None):
     overall = summarize_group(rows)
     set_summaries = summarize_sets(rows)
     category_groups = defaultdict(list)
@@ -333,6 +447,15 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date)
     earliest_review_date = min((row.get("parsed_date") for row in rows if row.get("parsed_date")), default=start_date)
     last_scraped = max((str(row.get("scrape_date")) for row in rows if row.get("scrape_date")), default="not available")
     category_title = ", ".join(category_label(category) for category in categories)
+    trend_section = render_trend_section(
+        rows,
+        trend_rows or [],
+        categories,
+        start_date,
+        end_date,
+        trend_start or "",
+        trend_end or "",
+    ) if trend_rows is not None else ""
 
     category_rows = ""
     for category in categories:
@@ -470,6 +593,7 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date)
       <tr><td style="padding:0 36px 18px 36px">
         <div style="font-size:13px;color:#334155;line-height:1.55;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px">
           <b>How to read this report:</b> “30-day review avg” and all set-wise ratings below are calculated only from Amazon reviews posted between {start_date} and {end_date}. “Amazon listing snapshot” is the broader product-page rating displayed on Amazon during the latest scrape and is shown separately for context.
+          <br><br>For product, review, keyword and category drill-downs, open the dashboard here: <a href="{html(dashboard_url)}" style="color:#2563eb;font-weight:800;text-decoration:none">{html(dashboard_url)}</a>.
         </div>
       </td></tr>
       <tr><td style="padding:0 36px 22px 36px">
@@ -483,6 +607,7 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date)
           {category_rows}
         </table>
       </td></tr>
+      {trend_section}
       <tr><td style="padding:0 36px 24px 36px">
         <div style="font-size:18px;font-weight:800;color:#111827;margin-bottom:8px">Set-wise review themes</div>
         <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-size:13px">
@@ -522,6 +647,7 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date)
         f"30-day review average: {overall['avg_rating']} stars\n"
         f"1-2 star reviews: {overall['rating_dist'][1] + overall['rating_dist'][2]} ({overall['bad_pct']}%)\n"
         f"Tagged negative reviews: {overall['sentiment']['Negative']} ({overall['negative_pct']}%)\n\n"
+        f"Dashboard drill-down: {dashboard_url}\n\n"
         "CSV attached with all referenced reviews.\n"
     )
     return subject, plain_body, html_body
@@ -553,10 +679,11 @@ def send_email(to_email, subject, plain_body, html_body, attachment_bytes, attac
         server.sendmail(sender, [to_email], msg.as_string())
 
 
-def send_review_report(categories=None, to_email=None, days=None, end_date=None):
+def send_review_report(categories=None, to_email=None, days=None, end_date=None, dashboard_url=None, include_trends=False):
     categories = categories or parse_categories(os.getenv("REVIEW_REPORT_CATEGORIES", "Camera"))
     to_email = to_email or os.getenv("REVIEW_REPORT_TO", DEFAULT_TO)
     days = int(days or os.getenv("REVIEW_REPORT_DAYS", "30"))
+    dashboard_url = dashboard_url or os.getenv("REVIEW_REPORT_DASHBOARD_URL", DEFAULT_DASHBOARD_URL)
     end = datetime.fromisoformat(end_date).date() if end_date else date.today()
     start = end - timedelta(days=days)
     start_s = start.isoformat()
@@ -567,7 +694,28 @@ def send_review_report(categories=None, to_email=None, days=None, end_date=None)
     if not rows:
         return {"sent": False, "reason": "No reviews found", "categories": categories, "start": start_s, "end": end_s}
 
-    subject, plain_body, html_body = render_email(rows, snapshots, categories, start_s, end_s, report_date)
+    trend_rows = None
+    trend_start_s = None
+    trend_end_s = None
+    if include_trends:
+        trend_end = end - timedelta(days=7)
+        trend_start = start - timedelta(days=7)
+        trend_start_s = trend_start.isoformat()
+        trend_end_s = trend_end.isoformat()
+        trend_rows, _ = fetch_report_rows(categories, trend_start_s, trend_end_s)
+
+    subject, plain_body, html_body = render_email(
+        rows,
+        snapshots,
+        categories,
+        start_s,
+        end_s,
+        report_date,
+        dashboard_url=dashboard_url,
+        trend_rows=trend_rows,
+        trend_start=trend_start_s,
+        trend_end=trend_end_s,
+    )
     attachment = make_csv(rows)
     safe_categories = "_".join(category_label(category).lower().replace(" ", "_") for category in categories)
     attachment_name = f"reviews_{safe_categories}_{start_s}_to_{end_s}.csv"
@@ -581,6 +729,7 @@ def send_review_report(categories=None, to_email=None, days=None, end_date=None)
         "categories": categories,
         "start": start_s,
         "end": end_s,
+        "include_trends": include_trends,
     }
 
 
@@ -590,6 +739,8 @@ def main():
     parser.add_argument("--to", default=os.getenv("REVIEW_REPORT_TO", DEFAULT_TO))
     parser.add_argument("--days", type=int, default=int(os.getenv("REVIEW_REPORT_DAYS", "30")))
     parser.add_argument("--end-date", default=os.getenv("REVIEW_REPORT_END_DATE", ""))
+    parser.add_argument("--dashboard-url", default=os.getenv("REVIEW_REPORT_DASHBOARD_URL", DEFAULT_DASHBOARD_URL))
+    parser.add_argument("--include-trends", action="store_true", default=parse_bool(os.getenv("REVIEW_REPORT_INCLUDE_TRENDS", "")))
     args = parser.parse_args()
 
     result = send_review_report(
@@ -597,6 +748,8 @@ def main():
         to_email=args.to,
         days=args.days,
         end_date=args.end_date or None,
+        dashboard_url=args.dashboard_url,
+        include_trends=args.include_trends,
     )
     print(json.dumps(result, ensure_ascii=False))
 
