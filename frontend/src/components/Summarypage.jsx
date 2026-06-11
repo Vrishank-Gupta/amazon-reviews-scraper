@@ -127,20 +127,20 @@ function ProductDrillDown({ row, filters, ratingDistribution }) {
 
   useEffect(() => {
     setLoading(true)
-    fetchAnalysis({ product: [row.product_name], date_from: filters.date_from, date_to: filters.date_to })
+    fetchAnalysis({ product: [row.product_name], rating: filters.rating, date_from: filters.date_from, date_to: filters.date_to })
       .then(setAnalysis)
       .catch(() => setAnalysis(null))
       .finally(() => setLoading(false))
-  }, [row.product_name, filters.date_from, filters.date_to])
+  }, [row.product_name, JSON.stringify(filters.rating), filters.date_from, filters.date_to])
 
   useEffect(() => {
     setWcLoading(true)
     setActiveWord(null)
-    fetchWordCloud({ product: [row.product_name], date_from: filters.date_from, date_to: filters.date_to })
+    fetchWordCloud({ product: [row.product_name], rating: filters.rating, date_from: filters.date_from, date_to: filters.date_to })
       .then(payload => setWcData(payload || []))
       .catch(() => setWcData([]))
       .finally(() => setWcLoading(false))
-  }, [row.product_name, filters.date_from, filters.date_to])
+  }, [row.product_name, JSON.stringify(filters.rating), filters.date_from, filters.date_to])
 
   const issueRows = analysis?.neg_pie || []
   const positiveRows = analysis?.pos_pie || []
@@ -268,6 +268,7 @@ export default function SummaryPage({ filters, allProducts }) {
   const apiParams = {
     product_category: filters.product_category || null,
     product: filters.product?.length ? filters.product : [],
+    rating: filters.rating?.length ? filters.rating : [],
     date_from: filters.date_from,
     date_to: filters.date_to,
   }
@@ -363,7 +364,7 @@ export default function SummaryPage({ filters, allProducts }) {
     <Card
       title="Product Comparison Table"
       sub="Grouped by category for easier scanning, with drill-down kept at row level."
-      tip="This stays at the bottom of Overview. The KPI cards and Amazon Rating Signal now sit together in the top row."
+      tip="This comparison table follows the portfolio overview and respects the parent product, date, and rating filters."
     >
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>

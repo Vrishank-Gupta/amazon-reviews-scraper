@@ -604,10 +604,11 @@ function PortfolioHealthStrip({ ratingSplit, topIssue, topCat, atRisk, onSelectI
       hoverColor: 'rgba(239,68,68,0.06)',
     },
   ]
+  const cardOrder = { 'Most At-Risk': 0, 'Top Issue - 7d': 1, 'Rating Split': 2, 'Top Category': 3 }
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, padding: '14px 16px', background: 'linear-gradient(135deg, rgba(24,28,44,0.9), rgba(18,22,36,0.95))', border: '1px solid var(--border)', borderRadius: 14 }}>
-      {cards.map(card => (
+      {[...cards].sort((a, b) => (cardOrder[a.label] ?? 99) - (cardOrder[b.label] ?? 99)).map(card => (
         <div
           key={card.label}
           onClick={card.onClick || undefined}
@@ -648,7 +649,7 @@ function AutoInsights({ insights }) {
   )
 }
 
-export default function AnalysisPage({ filters, allProducts, tree }) {
+export default function AnalysisPage({ filters, allProducts, tree, comparisonSlot = null }) {
   const [data, setData] = useState(null)
   const [cxoData, setCxoData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -678,6 +679,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
   const apiParams = {
     product_category: asArray(filters.product_category),
     product: filters.product?.length ? filters.product : [],
+    rating: filters.rating?.length ? filters.rating : [],
     date_from: filters.date_from,
     date_to: filters.date_to,
   }
@@ -707,10 +709,10 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
       return
     }
     const scoped = scopeToApi(issueFilter, tree)
-    fetchAnalysis({ ...scoped, date_from: apiParams.date_from, date_to: apiParams.date_to })
+    fetchAnalysis({ ...scoped, rating: apiParams.rating, date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(setLocalIssueData)
       .catch(() => setLocalIssueData(null))
-  }, [JSON.stringify(issueFilter), tree, apiParams.date_from, apiParams.date_to])
+  }, [JSON.stringify(issueFilter), tree, JSON.stringify(apiParams.rating), apiParams.date_from, apiParams.date_to])
 
   useEffect(() => {
     if (emptyScope(signalProd)) {
@@ -718,10 +720,10 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
       return
     }
     const scoped = scopeToApi(signalProd, tree)
-    fetchCxoTrends({ ...scoped, date_from: apiParams.date_from, date_to: apiParams.date_to })
+    fetchCxoTrends({ ...scoped, rating: apiParams.rating, date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(payload => setLocalTrendData(payload || null))
       .catch(() => setLocalTrendData(null))
-  }, [JSON.stringify(signalProd), tree, apiParams.date_from, apiParams.date_to])
+  }, [JSON.stringify(signalProd), tree, JSON.stringify(apiParams.rating), apiParams.date_from, apiParams.date_to])
 
   const kpi = data?.kpi || {}
   const trend = data?.daily_trend || []
@@ -831,6 +833,7 @@ export default function AnalysisPage({ filters, allProducts, tree }) {
           onSelectCategory={category => setCategoryCloud({ category, sentiment: 'Negative' })}
         />
       )}
+      {comparisonSlot}
       <AlertsBanner kpi={kpi} momentum={momentum} />
       <AutoInsights insights={autoInsights} />
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>

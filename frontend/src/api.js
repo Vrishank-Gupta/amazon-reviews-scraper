@@ -41,13 +41,13 @@ function buildParams(filters = {}) {
   if (filters.product?.length)   p.set('product', filters.product.join('|||'))
   if (filters.date_from)         p.set('date_from', filters.date_from)
   if (filters.date_to)           p.set('date_to', filters.date_to)
+  if (filters.rating?.length)    p.set('rating', filters.rating.join(','))
   return p
 }
 
 export async function fetchReviews(filters = {}) {
   const p = buildParams(filters)
   if (filters.sentiment?.length) p.set('sentiment', filters.sentiment.join(','))
-  if (filters.rating?.length)    p.set('rating', filters.rating.join(','))
   const res = await apiFetch(apiUrl(`/api/reviews?${p}`))
   return res.json()
 }
@@ -55,7 +55,6 @@ export async function fetchReviews(filters = {}) {
 export async function exportRawReviewsExcel(filters = {}) {
   const p = buildParams(filters)
   if (filters.sentiment?.length) p.set('sentiment', filters.sentiment.join(','))
-  if (filters.rating?.length)    p.set('rating', filters.rating.join(','))
 
   const res = await apiFetch(apiUrl(`/api/reviews/export/raw.xlsx?${p}`))
   if (!res.ok) {

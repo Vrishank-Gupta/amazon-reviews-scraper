@@ -319,6 +319,15 @@ def product_filter_sql(products: Optional[list], table_alias: str = "r") -> tupl
     return f" AND {table_alias}.product_name IN ({placeholders})", list(products)
 
 
+def rating_filter_sql(rating: Optional[str], table_alias: str = "r") -> tuple:
+    """Returns (sql_fragment, params_list) for exact raw rating values."""
+    ratings = [r.strip() for r in (rating or "").split(",") if r.strip()]
+    if not ratings:
+        return "", []
+    placeholders = ",".join(["%s"] * len(ratings))
+    return f" AND {table_alias}.rating IN ({placeholders})", ratings
+
+
 RAW_REVIEW_EXPORT_HEADERS = [
     ("product_name", "Product Name"),
     ("category", "Category"),
@@ -1566,6 +1575,7 @@ def get_trends(
 def get_cxo_trends(
     product: Optional[str] = None,
     category: Optional[str] = None,
+    rating: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
@@ -1583,13 +1593,15 @@ def get_cxo_trends(
             if date_to:
                 date_filter += f" AND {_rd} <= %s"
                 base_params.append(date_to)
+            rating_filter, rating_params = rating_filter_sql(rating)
+            base_params.extend(rating_params)
 
             # 1. Daily sentiment counts
             cur.execute(f"""
                 SELECT DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day, t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY day, t.sentiment
                 ORDER BY day
@@ -1607,7 +1619,7 @@ def get_cxo_trends(
                     SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 4 THEN 1 ELSE 0 END) as star_4,
                     SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 5 THEN 1 ELSE 0 END) as star_5
                 FROM raw_reviews r
-                WHERE 1=1 {pf_sql} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY day ORDER BY day
             """, list(base_params))
@@ -1619,7 +1631,7 @@ def get_cxo_trends(
                     t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY day, r.product_name, t.sentiment
                 ORDER BY day
@@ -1631,7 +1643,7 @@ def get_cxo_trends(
                 SELECT DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day, t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                   AND t.sentiment = 'Negative'
                   AND {_rd} IS NOT NULL
                 GROUP BY day, t.primary_categories
@@ -1645,7 +1657,7 @@ def get_cxo_trends(
                     ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) as rating,
                     COUNT(*) as count
                 FROM raw_reviews r
-                WHERE 1=1 {pf_sql} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                 GROUP BY r.product_name, rating
                 ORDER BY r.product_name, r.rating
             """, list(base_params))
@@ -1662,7 +1674,7 @@ def get_cxo_trends(
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE {_rd} >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-                  {pf_sql}
+                  {pf_sql} {rating_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY yw, t.sentiment
                 ORDER BY yw
@@ -1678,12 +1690,12 @@ def get_cxo_trends(
                                 MAX(STR_TO_DATE(REGEXP_REPLACE(r2.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')),
                                 MIN(STR_TO_DATE(REGEXP_REPLACE(r2.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y'))
                             )/2 DAY)
-                        FROM raw_reviews r2 WHERE 1=1 {pf_sql} {date_filter}
+                        FROM raw_reviews r2 WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                     ) THEN 'first' ELSE 'second' END as half,
                     t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                   AND t.sentiment = 'Negative'
                   AND {_rd} IS NOT NULL
                 GROUP BY half, t.primary_categories
@@ -1700,7 +1712,7 @@ def get_cxo_trends(
                     SUM(CASE WHEN t.sentiment='Neutral' THEN 1 ELSE 0 END) as neutral
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                 GROUP BY r.product_name
             """, list(base_params))
             product_rows = cur.fetchall()
@@ -1710,7 +1722,7 @@ def get_cxo_trends(
                 SELECT r.product_name, t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                   AND t.sentiment = 'Negative'
                 GROUP BY r.product_name, t.primary_categories
             """, list(base_params))
@@ -1935,6 +1947,7 @@ def get_cxo_trends(
 def get_wordcloud(
     product: Optional[str] = None,
     product_category: Optional[str] = None,   # product group filter (Camera/Dashcam)
+    rating: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     category: Optional[str] = None,           # taxonomy category drill-down
@@ -1953,13 +1966,15 @@ def get_wordcloud(
             if date_to:
                 date_filter += f" AND {_rd} <= %s"
                 base_params.append(date_to)
+            rating_filter, rating_params = rating_filter_sql(rating)
+            base_params.extend(rating_params)
 
             if category:
                 cur.execute(f"""
                     SELECT t.sub_tags, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {pf_sql} {date_filter}
+                    WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                     AND JSON_CONTAINS(t.primary_categories, %s)
                 """, list(base_params) + [json.dumps(category)])
                 rows = cur.fetchall()
@@ -1969,7 +1984,7 @@ def get_wordcloud(
                     SELECT t.sub_tags, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {pf_sql} {date_filter}
+                    WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                 """, list(base_params))
                 rows = cur.fetchall()
 
@@ -1977,7 +1992,7 @@ def get_wordcloud(
                     SELECT t.primary_categories, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {pf_sql} {date_filter}
+                    WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                 """, list(base_params))
                 cat_rows = cur.fetchall()
 
@@ -2027,6 +2042,7 @@ def get_reviews_by_keyword(
     keyword: str,
     product: Optional[str] = None,
     product_category: Optional[str] = None,
+    rating: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     category: Optional[str] = None,
@@ -2051,6 +2067,9 @@ def get_reviews_by_keyword(
                 date_filter += f" AND {_rd} <= %s"
                 base_params.append(date_to)
 
+            rating_filter, rating_params = rating_filter_sql(rating)
+            base_params.extend(rating_params)
+
             category_filter = ""
             if category:
                 category_filter = " AND JSON_CONTAINS(t.primary_categories, %s)"
@@ -2069,7 +2088,7 @@ def get_reviews_by_keyword(
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE (t.sub_tags LIKE %s OR t.primary_categories LIKE %s)
-                {pf_sql} {date_filter} {category_filter} {sentiment_filter}
+                {pf_sql} {date_filter} {rating_filter} {category_filter} {sentiment_filter}
                 ORDER BY {_rd} DESC
                 LIMIT 500
             """, base_params)
@@ -2096,6 +2115,7 @@ def get_reviews_by_keyword(
 def get_analysis(
     product: Optional[str] = None,
     category: Optional[str] = None,
+    rating: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
@@ -2104,6 +2124,7 @@ def get_analysis(
         with conn.cursor() as cur:
             products = resolve_products(product, category)
             pf_sql, base_params = product_filter_sql(products)
+            rating_filter, rating_params = rating_filter_sql(rating)
 
             date_filter = ""
             if date_from:
@@ -2118,6 +2139,7 @@ def get_analysis(
             kpi_params = list(base_params)
             if date_from: kpi_params.append(date_from)
             if date_to: kpi_params.append(date_to)
+            kpi_params.extend(rating_params)
 
             cur.execute(f"""
                 SELECT t.sentiment, COUNT(*) as count
@@ -2126,6 +2148,7 @@ def get_analysis(
                 WHERE 1=1 {pf_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
+                  {rating_filter}
                 GROUP BY t.sentiment
             """, kpi_params)
             sentiment_kpi = {row["sentiment"]: row["count"] for row in cur.fetchall()}
@@ -2133,6 +2156,7 @@ def get_analysis(
             rating_params = list(base_params)
             if date_from: rating_params.append(date_from)
             if date_to: rating_params.append(date_to)
+            rating_params.extend(rating_filter_sql(rating)[1])
 
             cur.execute(f"""
                 SELECT
@@ -2146,6 +2170,7 @@ def get_analysis(
                 WHERE 1=1 {pf_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
+                  {rating_filter}
             """, rating_params)
             rating_row = cur.fetchone() or {}
             star_1 = int(rating_row.get("star_1") or 0)
@@ -2158,6 +2183,7 @@ def get_analysis(
             trend_params = list(base_params)
             if date_from: trend_params.append(date_from)
             if date_to: trend_params.append(date_to)
+            trend_params.extend(rating_filter_sql(rating)[1])
 
             cur.execute(f"""
                 SELECT
@@ -2169,6 +2195,7 @@ def get_analysis(
                 WHERE 1=1 {pf_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
+                  {rating_filter}
                 GROUP BY day, t.sentiment
                 ORDER BY day
             """, trend_params)
@@ -2187,6 +2214,7 @@ def get_analysis(
             pie_params = list(base_params)
             if date_from: pie_params.append(date_from)
             if date_to: pie_params.append(date_to)
+            pie_params.extend(rating_filter_sql(rating)[1])
 
             cur.execute(f"""
                 SELECT t.primary_categories, t.sentiment
@@ -2195,6 +2223,7 @@ def get_analysis(
                 WHERE 1=1 {pf_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
+                  {rating_filter}
             """, pie_params)
             pie_rows = cur.fetchall()
 
@@ -2260,6 +2289,7 @@ def get_analysis(
 def get_summary(
     product: Optional[str] = None,
     category: Optional[str] = None,
+    rating: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
@@ -2270,6 +2300,7 @@ def get_summary(
         with conn.cursor() as cur:
             products = resolve_products(product, category)
             pf_sql, base_params = product_filter_sql(products)
+            rating_filter, rating_params = rating_filter_sql(rating)
 
             # Determine the current comparison window.
             # If no date filter is selected, summary should match the dashboard's
@@ -2296,6 +2327,7 @@ def get_summary(
                 if p_to:
                     period_filter += f" AND {review_date_sql} <= %s"
                     params.append(str(p_to))
+                params.extend(rating_params)
                 cur.execute(f"""
                     SELECT
                         COALESCE(r.variant_asin, r.asin) as asin,
@@ -2308,6 +2340,7 @@ def get_summary(
                     JOIN review_tags t ON r.review_id = t.review_id
                     WHERE 1=1 {pf_sql}
                       {period_filter}
+                      {rating_filter}
                     GROUP BY COALESCE(r.variant_asin, r.asin)
                 """, params)
                 return {row["asin"]: row for row in cur.fetchall()}
@@ -2472,6 +2505,7 @@ def generate_summaries(product: Optional[str] = None, category: Optional[str] = 
 def get_rating_trends(
     product: Optional[str] = None,
     category: Optional[str] = None,
+    rating: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
@@ -2496,6 +2530,8 @@ def get_rating_trends(
             if date_to:
                 date_filter += f" AND {_rd} <= %s"
                 base_params.append(date_to)
+            rating_filter, rating_params = rating_filter_sql(rating)
+            base_params.extend(rating_params)
 
             # Daily avg rating — grouped by review_date so review-derived charts align to the selected window.
             cur.execute(f"""
@@ -2510,7 +2546,7 @@ def get_rating_trends(
                     SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 4 THEN 1 ELSE 0 END) as star_4,
                     SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 5 THEN 1 ELSE 0 END) as star_5
                 FROM raw_reviews r
-                WHERE 1=1 {pf_sql} {date_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY day, r.product_name
                 ORDER BY day

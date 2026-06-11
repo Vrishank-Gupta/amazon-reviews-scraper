@@ -658,10 +658,12 @@ function Dashboard({ authedEmail, onLogout }) {
             <span style={{ fontSize: 24 }}>⟳</span><span>Loading…</span>
           </div>
         ) : activeTab === 'analysis' ? (
-          <>
-            <AnalysisPage filters={filters} allProducts={options.products} tree={options.tree} />
-            <SummaryPage filters={filters} allProducts={options.products} />
-          </>
+          <AnalysisPage
+            filters={filters}
+            allProducts={options.products}
+            tree={options.tree}
+            comparisonSlot={<SummaryPage filters={filters} allProducts={options.products} />}
+          />
         ) : activeTab === 'reviews' ? (
           <div className="glass-panel" style={{ borderRadius: 14, padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Calendar, ChevronDown, Package, SlidersHorizontal, X } from 'lucide-react'
+import { Calendar, ChevronDown, Package, SlidersHorizontal, Star, X } from 'lucide-react'
 
 const SC = { Positive: '#22c55e', Neutral: '#eab308', Negative: '#ef4444' }
 const DATE_PRESETS = [
@@ -442,10 +442,34 @@ function RatingDropdown({ filters, options, onChange }) {
   const all = options.ratings || []
   const label = selected.length === 0 ? 'All Ratings' : selected.map(r => `${r} star`).join(', ')
   const toggle = r => onChange({ rating: selected.includes(r) ? selected.filter(x => x !== r) : [...selected, r] })
+  const ratingNumber = r => Math.round(parseFloat(r))
+  const applyGroup = stars => onChange({ rating: all.filter(r => stars.includes(ratingNumber(r))) })
+  const groupActive = stars => {
+    const group = all.filter(r => stars.includes(ratingNumber(r)))
+    return group.length > 0 && selected.length === group.length && group.every(r => selected.includes(r))
+  }
   return (
-    <Dropdown trigger={() => <PillBtn label={label} active={selected.length > 0} />}>
+    <Dropdown trigger={() => <PillBtn label={label} active={selected.length > 0} icon={<Star size={12} />} />}>
       {close => (
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, padding: '0 0 6px', borderBottom: '1px solid var(--border)', marginBottom: 4 }}>
+            {[
+              { label: 'Negative', stars: [1, 2], color: '#ef4444' },
+              { label: 'Neutral', stars: [3], color: '#eab308' },
+              { label: 'Positive', stars: [4, 5], color: '#22c55e' },
+            ].map(group => {
+              const active = groupActive(group.stars)
+              return (
+                <button
+                  key={group.label}
+                  onClick={() => { applyGroup(group.stars); close() }}
+                  style={{ padding: '6px 8px', borderRadius: 6, border: `1px solid ${active ? group.color : 'var(--border)'}`, background: active ? `${group.color}14` : 'var(--surface2)', color: active ? group.color : 'var(--text-muted)', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'DM Sans' }}
+                >
+                  {group.label}
+                </button>
+              )
+            })}
+          </div>
           {selected.length > 0 && (
             <button onClick={() => { onChange({ rating: [] }); close() }} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', borderRadius: 6, background: 'rgba(255,78,26,0.08)', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 12, fontWeight: 600, textAlign: 'left', width: '100%' }}>
               All Ratings
@@ -532,13 +556,13 @@ export default function FilterBar({ filters, options, onChange, tab }) {
       </div>
       <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
       <ProductDropdown filters={filters} options={options} onChange={onChange} />
+      <RatingDropdown filters={filters} options={options} onChange={onChange} />
 
       {showReviewFilters && (
         <>
           <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
           <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Reviews only:</span>
           <SentimentDropdown filters={filters} onChange={onChange} />
-          <RatingDropdown filters={filters} options={options} onChange={onChange} />
         </>
       )}
 
