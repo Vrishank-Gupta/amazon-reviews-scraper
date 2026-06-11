@@ -61,7 +61,13 @@ try:
     if os.getenv("REVIEW_REPORT_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
         print("Step 3/3: Sending review report email...")
         subprocess.check_call(
-            [sys.executable, os.path.join(pipeline_dir, "review_reporter.py")],
+            [
+                sys.executable,
+                os.path.join(pipeline_dir, "review_reporter.py"),
+                "--categories",
+                "Camera",
+                "--include-trends",
+            ],
             cwd=pipeline_dir,
         )
 
