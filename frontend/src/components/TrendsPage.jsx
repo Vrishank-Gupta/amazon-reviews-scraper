@@ -10,7 +10,7 @@ import {
 
 // â”€â”€ CSV export (imported by App.jsx) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function downloadCSV(reviews) {
-  const cols = ['review_id','asin','product_name','rating','sentiment','primary_categories','sub_tags','review','review_url','scrape_date']
+  const cols = ['review_id','reviewer_name','asin','product_name','rating','sentiment','primary_categories','sub_tags','review','review_url','scrape_date']
   const escape = v => {
     if (v === null || v === undefined) return ''
     const s = Array.isArray(v) ? v.join('; ') : String(v)
@@ -411,6 +411,8 @@ export default function TrendsPage({ products: allProducts, filters }) {
   const productCategory = asArray(filters?.product_category)
   const dateFrom = filters?.date_from || ''
   const dateTo   = filters?.date_to   || ''
+  const ratingFilter = filters?.rating || []
+  const verifiedPurchaseFilter = filters?.verified_purchase || []
 
   useEffect(() => {
     if (!allProducts?.length) return
@@ -420,11 +422,13 @@ export default function TrendsPage({ products: allProducts, filters }) {
     if (selectedProducts.length) p.set('product', selectedProducts.join('|||'))
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo)   p.set('date_to',   dateTo)
+    if (ratingFilter.length) p.set('rating', ratingFilter.join(','))
+    if (verifiedPurchaseFilter.length) p.set('verified_purchase', verifiedPurchaseFilter.join(','))
     fetch(apiUrl(`/api/trends/cxo?${p}`), { headers: authHeaders() })
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); setHasData(true) })
       .catch(() => setLoading(false))
-  }, [JSON.stringify(productCategory), JSON.stringify(selectedProducts), dateFrom, dateTo, allProducts?.length])
+  }, [JSON.stringify(productCategory), JSON.stringify(selectedProducts), JSON.stringify(ratingFilter), JSON.stringify(verifiedPurchaseFilter), dateFrom, dateTo, allProducts?.length])
 
   const toggleCat = c => setHiddenCats(s => { const n=new Set(s); n.has(c)?n.delete(c):n.add(c); return n })
 
@@ -466,6 +470,8 @@ export default function TrendsPage({ products: allProducts, filters }) {
     const p = new URLSearchParams({ product: effectiveIssueProd })
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo)   p.set('date_to', dateTo)
+    if (ratingFilter.length) p.set('rating', ratingFilter.join(','))
+    if (verifiedPurchaseFilter.length) p.set('verified_purchase', verifiedPurchaseFilter.join(','))
     fetch(apiUrl(`/api/trends/cxo?${p}`), { headers: authHeaders() })
       .then(r => r.json())
       .then(d => {
@@ -473,7 +479,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
         setLocalDailyCats(d?.daily_categories || null)
       })
       .catch(() => { setLocalMomentum(null); setLocalDailyCats(null) })
-  }, [effectiveIssueProd, dateFrom, dateTo])
+  }, [effectiveIssueProd, JSON.stringify(ratingFilter), JSON.stringify(verifiedPurchaseFilter), dateFrom, dateTo])
   const issueMomentum = localMomentum ?? momentum
   const activeDailyCats = localDailyCats ?? dailyCats
 

@@ -316,6 +316,58 @@ function OverviewCards({ kpi, ratingKpi, productCount, periodLabel }) {
   )
 }
 
+function PurchaseSplitPanel({ purchaseKpi, purchaseSentiment }) {
+  const total = purchaseKpi?.total || 0
+  const rows = [
+    { key: 'verified', label: 'Verified', value: purchaseKpi?.verified || 0, pct: purchaseKpi?.verified_pct || 0, color: '#22c55e' },
+    { key: 'unverified', label: 'Unverified', value: purchaseKpi?.unverified || 0, pct: purchaseKpi?.unverified_pct || 0, color: '#f97316' },
+    { key: 'unknown', label: 'Unknown', value: purchaseKpi?.unknown || 0, pct: purchaseKpi?.unknown_pct || 0, color: '#94a3b8' },
+  ]
+  const sentimentByType = Object.fromEntries((purchaseSentiment || []).map(row => [row.purchase_type, row]))
+  const verifiedNeg = sentimentByType.Verified?.neg_pct || 0
+  const unverifiedNeg = sentimentByType.Unverified?.neg_pct || 0
+  const gap = unverifiedNeg - verifiedNeg
+
+  if (!total) return <EmptyState />
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ height: 14, borderRadius: 999, overflow: 'hidden', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', display: 'flex' }}>
+        {rows.map(row => (
+          <div key={row.key} title={`${row.label}: ${row.value.toLocaleString()} reviews`} style={{ width: `${row.pct}%`, minWidth: row.value ? 8 : 0, background: row.color }} />
+        ))}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {rows.map(row => (
+          <div key={row.key} style={{ display: 'grid', gridTemplateColumns: '86px 1fr 70px', gap: 8, alignItems: 'center' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: row.color }} />
+              {row.label}
+            </span>
+            <div style={{ height: 5, borderRadius: 999, background: 'var(--border)', overflow: 'hidden' }}>
+              <div style={{ width: `${row.pct}%`, height: '100%', background: row.color }} />
+            </div>
+            <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 800, textAlign: 'right' }}>{row.pct.toFixed(1)}%</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Verified Neg Rate</div>
+          <div style={{ fontFamily: 'Bebas Neue', fontSize: 24, lineHeight: 1.1, color: '#ef4444' }}>{verifiedNeg.toFixed(1)}%</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Unverified Neg Rate</div>
+          <div style={{ fontFamily: 'Bebas Neue', fontSize: 24, lineHeight: 1.1, color: gap > 5 ? '#f97316' : '#ef4444' }}>{unverifiedNeg.toFixed(1)}%</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+        {gap > 5 ? `Unverified reviews are ${gap.toFixed(1)} pts more negative than verified reviews.` : `${total.toLocaleString()} reviews include purchase-status signals.`}
+      </div>
+    </div>
+  )
+}
+
 function VolumeTip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   const point = payload[0]?.payload || {}
@@ -439,9 +491,11 @@ function CategoryReviewMix({ rows, onSelect }) {
         const negWidth = total ? (row.Negative / total) * 100 : 0
         const neuWidth = total ? (row.Neutral / total) * 100 : 0
         const posWidth = total ? (row.Positive / total) * 100 : 0
+        const verifiedTotal = (row.verified || 0) + (row.unverified || 0) + (row.unknown || 0)
+        const verifiedPct = verifiedTotal ? ((row.verified || 0) / verifiedTotal) * 100 : 0
 
         return (
-          <div key={row.category} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 54px', gap: 12, alignItems: 'center' }}>
+          <div key={row.category} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 54px 78px', gap: 12, alignItems: 'center' }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{row.category}</div>
             <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
               <div style={{ width: `${Math.max(scale * 100, 8)}%`, minWidth: 120, maxWidth: '100%' }}>
@@ -453,6 +507,9 @@ function CategoryReviewMix({ rows, onSelect }) {
               </div>
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'right' }}>{total}</div>
+            <div title={`${row.verified || 0} verified, ${row.unverified || 0} unverified, ${row.unknown || 0} unknown`} style={{ fontSize: 11, color: verifiedTotal ? '#22c55e' : 'var(--text-muted)', textAlign: 'right', fontWeight: 700 }}>
+              {verifiedTotal ? `${verifiedPct.toFixed(0)}% VP` : '-'}
+            </div>
           </div>
         )
       })}
@@ -461,6 +518,7 @@ function CategoryReviewMix({ rows, onSelect }) {
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: '#ef4444' }} /> Negative</span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: '#eab308' }} /> Neutral</span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: '#22c55e' }} /> Positive</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: '#22c55e', opacity: 0.65 }} /> VP = verified purchase share</span>
       </div>
     </div>
   )
@@ -680,6 +738,7 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
     product_category: asArray(filters.product_category),
     product: filters.product?.length ? filters.product : [],
     rating: filters.rating?.length ? filters.rating : [],
+    verified_purchase: filters.verified_purchase?.length ? filters.verified_purchase : [],
     date_from: filters.date_from,
     date_to: filters.date_to,
   }
@@ -709,10 +768,10 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
       return
     }
     const scoped = scopeToApi(issueFilter, tree)
-    fetchAnalysis({ ...scoped, rating: apiParams.rating, date_from: apiParams.date_from, date_to: apiParams.date_to })
+    fetchAnalysis({ ...scoped, rating: apiParams.rating, verified_purchase: apiParams.verified_purchase, date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(setLocalIssueData)
       .catch(() => setLocalIssueData(null))
-  }, [JSON.stringify(issueFilter), tree, JSON.stringify(apiParams.rating), apiParams.date_from, apiParams.date_to])
+  }, [JSON.stringify(issueFilter), tree, JSON.stringify(apiParams.rating), JSON.stringify(apiParams.verified_purchase), apiParams.date_from, apiParams.date_to])
 
   useEffect(() => {
     if (emptyScope(signalProd)) {
@@ -720,15 +779,17 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
       return
     }
     const scoped = scopeToApi(signalProd, tree)
-    fetchCxoTrends({ ...scoped, rating: apiParams.rating, date_from: apiParams.date_from, date_to: apiParams.date_to })
+    fetchCxoTrends({ ...scoped, rating: apiParams.rating, verified_purchase: apiParams.verified_purchase, date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(payload => setLocalTrendData(payload || null))
       .catch(() => setLocalTrendData(null))
-  }, [JSON.stringify(signalProd), tree, JSON.stringify(apiParams.rating), apiParams.date_from, apiParams.date_to])
+  }, [JSON.stringify(signalProd), tree, JSON.stringify(apiParams.rating), JSON.stringify(apiParams.verified_purchase), apiParams.date_from, apiParams.date_to])
 
   const kpi = data?.kpi || {}
   const trend = data?.daily_trend || []
   const dailyRating = cxoData?.daily_rating || []
   const ratingKpi = data?.rating_kpi || null
+  const purchaseKpi = data?.purchase_kpi || null
+  const purchaseSentiment = data?.purchase_sentiment || []
   const momentum = cxoData?.category_momentum || []
   const periodLabel = getPeriodLabel(filters)
   const activeTrend = localTrendData?.daily_trend ?? trend
@@ -779,6 +840,16 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
       insights.push({ tone: 'alert', title: 'Negative share elevated', body: `${negShare.toFixed(0)}% of reviews are negative. Investigate top issues below.` })
     } else if (negShare > 0 && negShare <= 20) {
       insights.push({ tone: 'good', title: 'Sentiment healthy', body: `${negShare.toFixed(0)}% negative rate - within the acceptable range.` })
+    }
+    const purchase = data.purchase_kpi || {}
+    const purchaseRows = Object.fromEntries((data.purchase_sentiment || []).map(row => [row.purchase_type, row]))
+    if ((purchase.unverified_pct || 0) >= 20 && (purchase.unverified || 0) >= 10) {
+      insights.push({ tone: 'warn', title: 'Unverified share material', body: `${purchase.unverified_pct}% of reviews are unverified. Use the purchase filter to isolate whether issues are purchase-backed.` })
+    }
+    const verifiedNeg = purchaseRows.Verified?.neg_pct || 0
+    const unverifiedNeg = purchaseRows.Unverified?.neg_pct || 0
+    if ((purchaseRows.Unverified?.total || 0) >= 5 && unverifiedNeg > verifiedNeg + 8) {
+      insights.push({ tone: 'warn', title: 'Unverified reviews skew negative', body: `Unverified negative rate is ${unverifiedNeg.toFixed(1)}% vs ${verifiedNeg.toFixed(1)}% for verified reviews.` })
     }
     const trend = data.daily_trend || []
     if (trend.length >= 8) {
@@ -836,8 +907,11 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
       {comparisonSlot}
       <AlertsBanner kpi={kpi} momentum={momentum} />
       <AutoInsights insights={autoInsights} />
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '300px minmax(280px, 360px) 1fr', gap: 16, alignItems: 'start' }}>
         <OverviewCards kpi={kpi} ratingKpi={ratingKpi} productCount={scopedProducts.length || allProducts?.length || 0} periodLabel={periodLabel} />
+        <Card title="Verified Purchase Split" sub="Purchase-backed mix and negative-rate gap for the current filter scope.">
+          <PurchaseSplitPanel purchaseKpi={purchaseKpi} purchaseSentiment={purchaseSentiment} />
+        </Card>
         <Card title="Amazon Listing Rating Signal" tip="Amazon product-page rating snapshots are listing-level signals. Product/set-name averages come from scraped reviews.">
           <RatingTrendChart filters={filters} tree={tree} />
         </Card>

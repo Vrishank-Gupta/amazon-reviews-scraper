@@ -42,6 +42,7 @@ function buildParams(filters = {}) {
   if (filters.date_from)         p.set('date_from', filters.date_from)
   if (filters.date_to)           p.set('date_to', filters.date_to)
   if (filters.rating?.length)    p.set('rating', filters.rating.join(','))
+  if (filters.verified_purchase?.length) p.set('verified_purchase', filters.verified_purchase.join(','))
   return p
 }
 

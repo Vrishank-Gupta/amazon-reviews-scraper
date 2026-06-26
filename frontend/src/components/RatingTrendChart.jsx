@@ -287,6 +287,8 @@ export default function RatingTrendChart({ filters, tree }) {
 
   const productCategory = asArray(filters?.product_category)
   const activeProducts = filters?.product?.length ? filters.product : []
+  const ratingFilter = filters?.rating || []
+  const verifiedPurchaseFilter = filters?.verified_purchase || []
   const dateFrom = filters?.date_from || ''
   const dateTo = filters?.date_to || ''
 
@@ -294,7 +296,9 @@ export default function RatingTrendChart({ filters, tree }) {
     setLoading(true)
     const params = new URLSearchParams()
     if (productCategory.length) params.set('category', productCategory.join('|||'))
-    else if (activeProducts.length) params.set('product', activeProducts.join('|||'))
+    if (activeProducts.length) params.set('product', activeProducts.join('|||'))
+    if (ratingFilter.length) params.set('rating', ratingFilter.join(','))
+    if (verifiedPurchaseFilter.length) params.set('verified_purchase', verifiedPurchaseFilter.join(','))
     if (dateFrom) params.set('date_from', dateFrom)
     if (dateTo) params.set('date_to', dateTo)
 
@@ -305,7 +309,7 @@ export default function RatingTrendChart({ filters, tree }) {
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [JSON.stringify(productCategory), JSON.stringify(activeProducts), dateFrom, dateTo])
+  }, [JSON.stringify(productCategory), JSON.stringify(activeProducts), JSON.stringify(ratingFilter), JSON.stringify(verifiedPurchaseFilter), dateFrom, dateTo])
 
   const products = data?.products || []
   const days = data?.days || []

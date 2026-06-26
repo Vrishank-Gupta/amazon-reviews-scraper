@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Calendar, ChevronDown, Package, SlidersHorizontal, Star, X } from 'lucide-react'
+import { BadgeCheck, Calendar, ChevronDown, Package, SlidersHorizontal, Star, X } from 'lucide-react'
 
 const SC = { Positive: '#22c55e', Neutral: '#eab308', Negative: '#ef4444' }
 const DATE_PRESETS = [
@@ -492,6 +492,49 @@ function RatingDropdown({ filters, options, onChange }) {
   )
 }
 
+function VerifiedPurchaseDropdown({ filters, options, onChange }) {
+  const selected = filters.verified_purchase || []
+  const all = options.verified_purchase || [
+    { value: 'verified', label: 'Verified Purchase' },
+    { value: 'unverified', label: 'Unverified' },
+    { value: 'unknown', label: 'Unknown' },
+  ]
+  const label = selected.length === 0
+    ? 'All Purchases'
+    : all.filter(item => selected.includes(item.value)).map(item => item.label).join(' / ')
+  const toggle = value => onChange({
+    verified_purchase: selected.includes(value)
+      ? selected.filter(item => item !== value)
+      : [...selected, value],
+  })
+
+  return (
+    <Dropdown trigger={() => <PillBtn label={label} active={selected.length > 0} icon={<BadgeCheck size={12} />} />} minWidth={240}>
+      {close => (
+        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {selected.length > 0 && (
+            <button onClick={() => { onChange({ verified_purchase: [] }); close() }} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', borderRadius: 6, background: 'rgba(255,78,26,0.08)', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 12, fontWeight: 600, textAlign: 'left', width: '100%' }}>
+              All Purchases
+            </button>
+          )}
+          {all.map(item => {
+            const sel = selected.includes(item.value)
+            const color = item.value === 'verified' ? '#22c55e' : item.value === 'unverified' ? '#eab308' : 'var(--text-muted)'
+            return (
+              <button key={item.value} onClick={() => toggle(item.value)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 6, background: sel ? `${color}12` : 'transparent', border: 'none', cursor: 'pointer', color: sel ? color : 'var(--text-muted)', fontSize: 12, fontWeight: sel ? 600 : 400, textAlign: 'left' }}>
+                <BadgeCheck size={13} />
+                <span style={{ flex: 1 }}>{item.label}</span>
+                {typeof item.count === 'number' && <span style={{ fontSize: 10, opacity: 0.75 }}>{item.count}</span>}
+                {sel && <span style={{ fontSize: 11 }}>✓</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </Dropdown>
+  )
+}
+
 export default function FilterBar({ filters, options, onChange, tab }) {
   const showReviewFilters = tab === 'reviews'
   const selectedCategories = asArray(filters.product_category)
@@ -500,7 +543,8 @@ export default function FilterBar({ filters, options, onChange, tab }) {
   const hasDate = !!(filters.date_from || filters.date_to)
   const hasSent = (filters.sentiment || []).length > 0
   const hasRating = (filters.rating || []).length > 0
-  const hasAny = isFiltered || hasDate || hasSent || hasRating
+  const hasVerified = (filters.verified_purchase || []).length > 0
+  const hasAny = isFiltered || hasDate || hasSent || hasRating || hasVerified
 
   const activePreset = (() => {
     if (!filters.date_from && !filters.date_to) return 'All'
@@ -529,6 +573,7 @@ export default function FilterBar({ filters, options, onChange, tab }) {
     date_to: null,
     sentiment: [],
     rating: [],
+    verified_purchase: [],
   })
 
   const productChipLabel = (() => {
@@ -557,6 +602,7 @@ export default function FilterBar({ filters, options, onChange, tab }) {
       <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
       <ProductDropdown filters={filters} options={options} onChange={onChange} />
       <RatingDropdown filters={filters} options={options} onChange={onChange} />
+      <VerifiedPurchaseDropdown filters={filters} options={options} onChange={onChange} />
 
       {showReviewFilters && (
         <>
@@ -580,6 +626,12 @@ export default function FilterBar({ filters, options, onChange, tab }) {
             {(filters.rating || []).map(r => (
               <ActiveChip key={r} label={`${r} star`} onRemove={() => onChange({ rating: (filters.rating || []).filter(x => x !== r) })} />
             ))}
+            {(filters.verified_purchase || []).map(value => {
+              const item = (options.verified_purchase || []).find(option => option.value === value)
+              return (
+                <ActiveChip key={value} label={item?.label || value} color={value === 'verified' ? '#22c55e' : value === 'unverified' ? '#eab308' : 'var(--text-muted)'} onRemove={() => onChange({ verified_purchase: (filters.verified_purchase || []).filter(x => x !== value) })} />
+              )
+            })}
           </div>
         </>
       )}

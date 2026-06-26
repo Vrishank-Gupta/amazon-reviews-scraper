@@ -18,6 +18,13 @@ def _norm_variant_label(value):
     return re.sub(r"\s+", " ", (value or "").strip()).casefold()
 
 
+def _display_variant_label(seed_asin, variant_asin, variant_label, fallback_product_name):
+    normalized = _norm_variant_label(variant_label)
+    if (variant_asin or seed_asin) == "B0FPGC9FFX" and normalized in {"4g", "dashcam 4g live", "4g dashcam"}:
+        return "4G Dashcam"
+    return variant_label or fallback_product_name or seed_asin
+
+
 def parse_amazon_date(date_str):
     """
     Parse Amazon India review date strings like:
@@ -192,12 +199,14 @@ def _resolve_review_variant(review, seed_asin, product_name, variant_metadata):
     if not variant_asin:
         variant_asin = seed_asin
 
+    display_label = _display_variant_label(seed_asin, variant_asin, variant_label, product_name)
+
     return {
         "scrape_asin": seed_asin,
         "variant_asin": variant_asin,
-        "variant_label": variant_label,
+        "variant_label": display_label,
         "variant_dimension": dimension_name,
-        "product_name": variant_label,
+        "product_name": display_label,
     }
 
 
@@ -211,13 +220,21 @@ def _extract_reviews(driver):
             const bodyEl   = r.querySelector('[data-hook="review-body"] span');
             const dateEl   = r.querySelector('[data-hook="review-date"]');
             const formatEl = r.querySelector('[data-hook="format-strip"]');
+            const reviewerEl = r.querySelector(
+                '[data-hook="review-author"], .a-profile-name'
+            );
+            const verifiedEl = r.querySelector('[data-hook="avp-badge"]');
+            const formatText = formatEl ? formatEl.innerText.trim() : "";
+            const verifiedText = verifiedEl ? verifiedEl.innerText.trim() : "";
             return {
                 review_id:   id,
+                reviewer_name: reviewerEl ? reviewerEl.innerText.trim() : "",
                 rating:      ratingEl ? ratingEl.innerText.trim() : "",
                 title:       titleEl  ? titleEl.innerText.trim()  : "",
                 review:      bodyEl   ? bodyEl.innerText.trim()   : "",
                 review_date: dateEl   ? dateEl.innerText.trim()   : "",
-                variant_text: formatEl ? formatEl.innerText.trim() : "",
+                variant_text: formatText,
+                verified_purchase: /verified purchase/i.test(verifiedText || formatText),
                 review_url:  id ? "https://www.amazon.in/review/" + id : ""
             };
         });

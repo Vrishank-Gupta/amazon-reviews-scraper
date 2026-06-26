@@ -53,6 +53,24 @@ CATEGORY_LABELS = {
 }
 
 
+def load_asin_names():
+    path = os.path.join(project_root, "data", "asins.csv")
+    result = {}
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                asin = (row.get("asin") or "").strip()
+                product_name = (row.get("product_name") or "").strip()
+                if asin and product_name:
+                    result[asin] = product_name
+    except FileNotFoundError:
+        pass
+    return result
+
+
+ASIN_NAME_MAP = load_asin_names()
+
+
 def get_conn():
     return pymysql.connect(
         host=os.getenv("DB_HOST", "localhost"),
@@ -138,12 +156,36 @@ def delta_color(value, reverse=False):
     return "#15803d" if improving else "#b91c1c"
 
 
+def purchase_label(value):
+    if value is None:
+        return "Unknown"
+    return "Verified" if value else "Unverified"
+
+
+def amazon_product_url(asin):
+    asin = str(asin or "").strip()
+    return f"https://www.amazon.in/dp/{asin}" if asin else ""
+
+
+def product_link(label, asin):
+    url = amazon_product_url(asin)
+    if not url:
+        return html(label)
+    return f'<a href="{html(url)}" style="color:#2563eb;font-weight:800;text-decoration:none">{html(label)}</a>'
+
+
 def clean_set_name(row):
+    canonical = ASIN_NAME_MAP.get(row.get("variant_asin")) or ASIN_NAME_MAP.get(row.get("asin"))
+    if canonical:
+        return canonical
+
     label = (row.get("variant_label") or "").strip()
     product = (row.get("product_name") or "").strip()
     source = label or product
     low = source.lower()
 
+    if (row.get("variant_asin") or row.get("asin")) == "B0FPGC9FFX" or low in {"4g", "dashcam 4g live", "4g dashcam"} or "dashcam 4g live" in low:
+        return "4G Dashcam"
     if "baby" in low:
         return "Baby Monitor"
     if "outdoor" in low or "bullet" in low:
@@ -185,9 +227,10 @@ def fetch_report_rows(categories, start_date, end_date):
             cur.execute(
                 f"""
                 SELECT
-                    r.review_id, r.asin, r.variant_asin, r.variant_label, r.variant_dimension,
+                    r.review_id, r.reviewer_name, r.asin, r.variant_asin, r.variant_label, r.variant_dimension,
                     r.product_name, r.category, r.rating, {rating_sql} AS rating_num,
                     r.title, r.review, r.review_date, r.review_url, r.scrape_date,
+                    r.verified_purchase,
                     DATE_FORMAT({date_sql}, '%%Y-%%m-%%d') AS parsed_date,
                     t.sentiment, t.primary_categories, t.sub_tags
                 FROM raw_reviews r
@@ -232,8 +275,13 @@ def summarize_group(rows):
     primary_sent = defaultdict(Counter)
     sub_tags = Counter()
     sub_sent = defaultdict(Counter)
+    purchase = Counter()
+    purchase_sent = defaultdict(Counter)
     for row in rows:
         sent = row.get("sentiment") or "Unknown"
+        purchase_type = purchase_label(row.get("verified_purchase"))
+        purchase[purchase_type] += 1
+        purchase_sent[purchase_type][sent] += 1
         for theme in row["primary_categories"]:
             primary[theme] += 1
             primary_sent[theme][sent] += 1
@@ -247,6 +295,13 @@ def summarize_group(rows):
         "sentiment": sentiment,
         "negative_pct": percent(sentiment["Negative"], total),
         "bad_pct": percent(rating_dist[1] + rating_dist[2], total),
+        "purchase": purchase,
+        "purchase_sent": purchase_sent,
+        "verified_pct": percent(purchase["Verified"], total),
+        "unverified_pct": percent(purchase["Unverified"], total),
+        "unknown_purchase_pct": percent(purchase["Unknown"], total),
+        "verified_negative_pct": percent(purchase_sent["Verified"]["Negative"], purchase["Verified"]),
+        "unverified_negative_pct": percent(purchase_sent["Unverified"]["Negative"], purchase["Unverified"]),
         "primary": primary,
         "primary_sent": primary_sent,
         "sub_tags": sub_tags,
@@ -262,6 +317,9 @@ def summarize_sets(rows):
     summaries = []
     for (category, set_name), items in grouped.items():
         summary = summarize_group(items)
+        asin_counts = Counter((row.get("variant_asin") or row.get("asin") or "").strip() for row in items)
+        asin_counts.pop("", None)
+        representative_asin = asin_counts.most_common(1)[0][0] if asin_counts else ""
         neg_theme_parts = []
         for theme, count in summary["primary"].most_common(5):
             negative = summary["primary_sent"][theme]["Negative"]
@@ -299,6 +357,8 @@ def summarize_sets(rows):
             "category": category,
             "category_label": category_label(category),
             "set": set_name,
+            "asin": representative_asin,
+            "product_url": amazon_product_url(representative_asin),
             "summary": summary,
             "negative_themes": neg_theme_parts,
             "positive_notes": positive_parts,
@@ -318,14 +378,15 @@ def summarize_sets(rows):
 def make_csv(rows):
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=[
-        "review_id", "review_date", "scrape_date", "category", "set_name",
+        "review_id", "reviewer_name", "review_date", "scrape_date", "category", "set_name",
         "product_name", "asin", "variant_asin", "rating", "rating_num",
-        "sentiment", "primary_categories", "sub_tags", "title", "review", "review_url",
+        "verified_purchase", "sentiment", "primary_categories", "sub_tags", "title", "review", "review_url",
     ])
     writer.writeheader()
     for row in rows:
         writer.writerow({
             "review_id": row.get("review_id"),
+            "reviewer_name": row.get("reviewer_name"),
             "review_date": row.get("parsed_date"),
             "scrape_date": row.get("scrape_date"),
             "category": category_label(row.get("category")),
@@ -335,6 +396,10 @@ def make_csv(rows):
             "variant_asin": row.get("variant_asin"),
             "rating": row.get("rating"),
             "rating_num": row.get("rating_num"),
+            "verified_purchase": (
+                "Unknown" if row.get("verified_purchase") is None
+                else "Yes" if row.get("verified_purchase") else "No"
+            ),
             "sentiment": row.get("sentiment"),
             "primary_categories": "; ".join(row.get("primary_categories") or []),
             "sub_tags": "; ".join(row.get("sub_tags") or []),
@@ -421,7 +486,7 @@ def render_trend_section(current_rows, previous_rows, categories, current_start,
         set_rows += f"""
         <tr>
           <td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-weight:700">{html(item['category'])}</td>
-          <td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:#111827">{html(item['set'])}</td>
+          <td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:#111827">{product_link(item['set'], item.get('asin'))}</td>
           <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb">{item['reviews']}</td>
           <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb;color:{delta_color(item['review_delta'])};font-weight:800">{delta_text(item['review_delta'], '', 0)}</td>
           <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb">{item['avg']}★</td>
@@ -474,7 +539,7 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
         if not cat_rows:
             category_rows += (
                 f'<tr><td style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:700">'
-                f'{html(category_label(category))}</td><td colspan="5" style="padding:10px;border-bottom:1px solid #e5e7eb;color:#64748b">'
+                f'{html(category_label(category))}</td><td colspan="6" style="padding:10px;border-bottom:1px solid #e5e7eb;color:#64748b">'
                 f'No reviews found in this report window.</td></tr>'
             )
             continue
@@ -490,6 +555,7 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
           <td align="right" style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:{color_for_rating(summary['avg_rating'])}">{summary['avg_rating']}★</td>
           <td align="right" style="padding:10px;border-bottom:1px solid #e5e7eb">{summary['rating_dist'][1] + summary['rating_dist'][2]}</td>
           <td align="right" style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:{color_for_negative(summary['negative_pct'])}">{summary['negative_pct']}%</td>
+          <td align="right" style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:#15803d">{summary['verified_pct']}%</td>
           <td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#334155;line-height:1.4">{themes or 'No dominant tagged theme'}</td>
         </tr>
         """
@@ -502,10 +568,11 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
         set_rows += f"""
         <tr>
           <td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-weight:700">{html(item['category_label'])}</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:#111827">{html(item['set'])}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:#111827">{product_link(item['set'], item.get('asin'))}</td>
           <td align="right" style="padding:10px;border-bottom:1px solid #e5e7eb">{summary['reviews']}</td>
           <td align="right" style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:{color_for_rating(summary['avg_rating'])}">{summary['avg_rating']}★</td>
           <td align="right" style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:{color_for_negative(summary['negative_pct'])}">{summary['negative_pct']}%</td>
+          <td align="right" style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:800;color:#15803d">{summary['verified_pct']}%</td>
           <td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#334155;line-height:1.4">{themes}</td>
           <td style="padding:10px;border-bottom:1px solid #e5e7eb;color:#334155;line-height:1.4">{positives}</td>
         </tr>
@@ -529,8 +596,8 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
         detail_blocks += f"""
         <div style="border:1px solid #e5e7eb;border-radius:14px;padding:14px 16px;margin:10px 0;background:#ffffff">
           <div style="font-size:12px;color:#64748b;font-weight:800;text-transform:uppercase;letter-spacing:.06em">{html(item['category_label'])}</div>
-          <div style="font-size:16px;font-weight:800;color:#111827;margin-top:3px">{html(item['set'])}</div>
-          <div style="font-size:12px;color:#64748b;margin-top:3px">{summary['reviews']} reviews · 30-day avg {summary['avg_rating']}★ · {summary['negative_pct']}% tagged negative · Rating mix: {html(dist)}</div>
+          <div style="font-size:16px;font-weight:800;color:#111827;margin-top:3px">{product_link(item['set'], item.get('asin'))}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:3px">{summary['reviews']} reviews · 30-day avg {summary['avg_rating']}★ · {summary['negative_pct']}% tagged negative · {summary['verified_pct']}% verified purchase · Rating mix: {html(dist)}</div>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px"><tr>
             <td valign="top" style="width:50%;padding-right:10px"><div style="font-size:12px;font-weight:800;color:#b91c1c;margin-bottom:4px">What customers are highlighting</div><ul style="margin:0;padding-left:17px;color:#334155;font-size:13px;line-height:1.45">{negative_items}</ul></td>
             <td valign="top" style="width:50%;padding-left:10px"><div style="font-size:12px;font-weight:800;color:#15803d;margin-bottom:4px">Positive notes in same window</div><ul style="margin:0;padding-left:17px;color:#334155;font-size:13px;line-height:1.45">{positive_items}</ul></td>
@@ -566,7 +633,7 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
         total_ratings = int(snap["total_ratings"]) if snap.get("total_ratings") is not None else 0
         snapshot_rows += f"""
         <tr>
-          <td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-weight:700;color:#111827">{html(set_name)}</td>
+          <td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-weight:700;color:#111827">{product_link(set_name, snap.get('asin'))}</td>
           <td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;color:#64748b">{html(snap.get('asin'))}</td>
           <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-weight:800">{rating if rating is not None else '-'}★</td>
           <td align="right" style="padding:9px 10px;border-bottom:1px solid #e5e7eb">{total_ratings:,}</td>
@@ -581,6 +648,32 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
     rating_legend = " &nbsp; ".join(
         f'<span>{star}★: <b>{overall["rating_dist"][star]}</b></span>'
         for star in range(1, 6)
+    )
+
+    purchase_counts = overall["purchase"]
+    verified_count = purchase_counts["Verified"]
+    unverified_count = purchase_counts["Unverified"]
+    unknown_purchase_count = purchase_counts["Unknown"]
+    verified_pct = overall["verified_pct"]
+    unverified_pct = overall["unverified_pct"]
+    unknown_purchase_pct = overall["unknown_purchase_pct"]
+    verified_negative_pct = overall["verified_negative_pct"]
+    unverified_negative_pct = overall["unverified_negative_pct"]
+    purchase_gap = round(unverified_negative_pct - verified_negative_pct, 1)
+    if purchase_gap > 0:
+        purchase_gap_text = f"Unverified reviews are {purchase_gap} pp more negative than verified reviews."
+    elif purchase_gap < 0:
+        purchase_gap_text = f"Verified reviews are {abs(purchase_gap)} pp more negative than unverified reviews."
+    else:
+        purchase_gap_text = "Verified and unverified reviews have the same negative rate."
+    purchase_bar = "".join(
+        f'<td style="width:{max(2, pct)}%;background:{color};height:12px"></td>'
+        for pct, color in [
+            (verified_pct, "#15803d"),
+            (unverified_pct, "#d97706"),
+            (unknown_purchase_pct, "#94a3b8"),
+        ]
+        if pct > 0
     )
 
     subject = f"{category_title} Reviews | Last 30 days ({start_date} to {end_date}) | {overall['reviews']} reviews"
@@ -612,9 +705,19 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
         <div style="font-size:12px;color:#64748b;line-height:1.6">30-day rating distribution: {rating_legend}</div>
       </td></tr>
       <tr><td style="padding:0 36px 24px 36px">
+        <div style="font-family:{display_font_family()};font-size:18px;font-weight:650;color:#111827;margin-bottom:8px">Verified purchase analysis</div>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:4px 0 10px 0"><tr>{purchase_bar or '<td style="background:#e5e7eb;height:12px"></td>'}</tr></table>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin-bottom:10px"><tr>
+          <td style="width:33.33%;padding:7px"><div style="border:1px solid #dcfce7;border-radius:12px;padding:12px;background:#f0fdf4"><div style="font-size:10.5px;color:#166534;text-transform:uppercase;letter-spacing:.04em;font-weight:800">Verified purchase</div><div style="font-family:{display_font_family()};font-size:25px;font-weight:650;color:#15803d;line-height:1.15;margin-top:5px">{verified_count}</div><div style="font-size:12px;color:#166534;line-height:1.35;margin-top:3px">{verified_pct}% of report · {verified_negative_pct}% negative</div></div></td>
+          <td style="width:33.33%;padding:7px"><div style="border:1px solid #fed7aa;border-radius:12px;padding:12px;background:#fff7ed"><div style="font-size:10.5px;color:#9a3412;text-transform:uppercase;letter-spacing:.04em;font-weight:800">Unverified</div><div style="font-family:{display_font_family()};font-size:25px;font-weight:650;color:#d97706;line-height:1.15;margin-top:5px">{unverified_count}</div><div style="font-size:12px;color:#9a3412;line-height:1.35;margin-top:3px">{unverified_pct}% of report · {unverified_negative_pct}% negative</div></div></td>
+          <td style="width:33.33%;padding:7px"><div style="border:1px solid #e5e7eb;border-radius:12px;padding:12px;background:#f8fafc"><div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:800">Unknown status</div><div style="font-family:{display_font_family()};font-size:25px;font-weight:650;color:#64748b;line-height:1.15;margin-top:5px">{unknown_purchase_count}</div><div style="font-size:12px;color:#64748b;line-height:1.35;margin-top:3px">{unknown_purchase_pct}% of report</div></div></td>
+        </tr></table>
+        <div style="font-size:13px;color:#334155;line-height:1.5;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:11px 13px">{html(purchase_gap_text)}</div>
+      </td></tr>
+      <tr><td style="padding:0 36px 24px 36px">
         <div style="font-family:{display_font_family()};font-size:18px;font-weight:650;color:#111827;margin-bottom:8px">Category summary</div>
         <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-size:13px">
-          <tr>{render_table_header([('Category', 'left'), ('Reviews', 'right'), ('30-day avg', 'right'), ('1-2★', 'right'), ('Neg %', 'right'), ('Most mentioned themes', 'left')])}</tr>
+          <tr>{render_table_header([('Category', 'left'), ('Reviews', 'right'), ('30-day avg', 'right'), ('1-2★', 'right'), ('Neg %', 'right'), ('Verified %', 'right'), ('Most mentioned themes', 'left')])}</tr>
           {category_rows}
         </table>
       </td></tr>
@@ -622,7 +725,7 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
       <tr><td style="padding:0 36px 24px 36px">
         <div style="font-family:{display_font_family()};font-size:18px;font-weight:650;color:#111827;margin-bottom:8px">Set-wise review themes</div>
         <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-size:13px">
-          <tr>{render_table_header([('Category', 'left'), ('Set / model', 'left'), ('Reviews', 'right'), ('Avg', 'right'), ('Neg %', 'right'), ('Themes customers mention', 'left'), ('Positive notes', 'left')])}</tr>
+          <tr>{render_table_header([('Category', 'left'), ('Set / model', 'left'), ('Reviews', 'right'), ('Avg', 'right'), ('Neg %', 'right'), ('Verified %', 'right'), ('Themes customers mention', 'left'), ('Positive notes', 'left')])}</tr>
           {set_rows}
         </table>
       </td></tr>
@@ -658,6 +761,10 @@ def render_email(rows, snapshots, categories, start_date, end_date, report_date,
         f"30-day review average: {overall['avg_rating']} stars\n"
         f"1-2 star reviews: {overall['rating_dist'][1] + overall['rating_dist'][2]} ({overall['bad_pct']}%)\n"
         f"Tagged negative reviews: {overall['sentiment']['Negative']} ({overall['negative_pct']}%)\n\n"
+        f"Verified purchase reviews: {verified_count} ({verified_pct}%), negative rate {verified_negative_pct}%\n"
+        f"Unverified reviews: {unverified_count} ({unverified_pct}%), negative rate {unverified_negative_pct}%\n"
+        f"Unknown purchase status: {unknown_purchase_count} ({unknown_purchase_pct}%)\n"
+        f"{purchase_gap_text}\n\n"
         f"Dashboard drill-down: {dashboard_url}\n\n"
         "CSV attached with all referenced reviews.\n"
     )

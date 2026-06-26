@@ -9,7 +9,7 @@ import os
 import random
 import sys
 import time
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pymysql
 from selenium import webdriver
@@ -37,12 +37,42 @@ os.makedirs(_DEFAULT_CHROME_PROFILE, exist_ok=True)
 PAUSE_BETWEEN_ASINS = float(os.getenv("SCRAPER_PAUSE", "8"))
 
 _asin_filter_raw = os.getenv("SCRAPE_ASINS", "").strip()
-_cli_asins = [a for a in sys.argv[1:] if a.strip()]
+BACKFILL_VERIFIED_PURCHASE_DAYS = int(os.getenv("BACKFILL_VERIFIED_PURCHASE_DAYS", "0") or "0")
+_cli_asins = []
+_args = iter(sys.argv[1:])
+for arg in _args:
+    if arg == "--backfill-verified-purchase-days":
+        BACKFILL_VERIFIED_PURCHASE_DAYS = int(next(_args, "30"))
+    elif arg == "--days":
+        os.environ["SCRAPE_DAYS_BACK"] = next(_args, os.environ.get("SCRAPE_DAYS_BACK", "30"))
+    elif arg.strip():
+        _cli_asins.append(arg)
 ASIN_FILTER = (
     set(_cli_asins)
     if _cli_asins
     else set(a.strip() for a in _asin_filter_raw.split(",") if a.strip())
 )
+
+
+def load_asin_names():
+    result = {}
+    try:
+        with open(ASINS_CSV, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                asin = (row.get("asin") or "").strip()
+                product_name = (row.get("product_name") or "").strip()
+                if asin and product_name:
+                    result[asin] = product_name
+    except FileNotFoundError:
+        pass
+    return result
+
+
+ASIN_NAME_MAP = load_asin_names()
+
+
+def canonical_product_name(asin, fallback=""):
+    return ASIN_NAME_MAP.get((asin or "").strip()) or fallback
 
 
 # ── DB ─────────────────────────────────────────────────────────────────────────
@@ -102,11 +132,14 @@ def ensure_review_variant_columns(conn):
         "variant_asin": "ALTER TABLE raw_reviews ADD COLUMN variant_asin VARCHAR(20) NULL AFTER scrape_asin",
         "variant_label": "ALTER TABLE raw_reviews ADD COLUMN variant_label VARCHAR(255) NULL AFTER variant_asin",
         "variant_dimension": "ALTER TABLE raw_reviews ADD COLUMN variant_dimension VARCHAR(64) NULL AFTER variant_label",
+        "reviewer_name": "ALTER TABLE raw_reviews ADD COLUMN reviewer_name VARCHAR(255) NULL AFTER review_id",
+        "verified_purchase": "ALTER TABLE raw_reviews ADD COLUMN verified_purchase TINYINT(1) NULL AFTER review_date",
     }
     indexes = {
         "idx_raw_reviews_scrape_asin": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_scrape_asin (scrape_asin)",
         "idx_raw_reviews_variant_asin": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_variant_asin (variant_asin)",
         "idx_raw_reviews_variant_label": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_variant_label (variant_label)",
+        "idx_raw_reviews_verified_purchase": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_verified_purchase (verified_purchase)",
     }
 
     cur = conn.cursor()
@@ -145,6 +178,7 @@ def insert_reviews(reviews: list, conn) -> int:
     missing_id = [r for r in reviews if not r.get("review_id")]
     if missing_id:
         print(f"  ⚠️  {len(missing_id)}/{len(reviews)} reviews have no review_id — skipping them (page structure may differ)")
+    conn.ping(reconnect=True)
     ensure_review_variant_columns(conn)
     cur = conn.cursor()
     inserted = 0
@@ -153,24 +187,27 @@ def insert_reviews(reviews: list, conn) -> int:
             continue
         values = {
             "review_id": r["review_id"],
+            "reviewer_name": r.get("reviewer_name", ""),
             "asin": r.get("variant_asin") or r.get("asin"),
             "scrape_asin": r.get("scrape_asin") or r.get("asin"),
             "variant_asin": r.get("variant_asin") or r.get("asin"),
             "variant_label": r.get("variant_label") or r.get("product_name"),
             "variant_dimension": r.get("variant_dimension") or "Set name",
-            "product_name": r["product_name"],
+            "product_name": canonical_product_name(r.get("variant_asin") or r.get("asin"), r["product_name"]),
             "category": r.get("category", ""),
             "rating": r["rating"],
             "title": r["title"],
             "review": r["review"],
             "review_date": r["review_date"],
+            "verified_purchase": 1 if r.get("verified_purchase") else 0,
             "review_url": r["review_url"],
             "scrape_date": r["scrape_date"],
         }
         cur.execute(
             """
             UPDATE raw_reviews
-            SET asin=%s,
+            SET reviewer_name=COALESCE(NULLIF(%s, ''), reviewer_name),
+                asin=%s,
                 scrape_asin=%s,
                 variant_asin=%s,
                 variant_label=%s,
@@ -181,11 +218,13 @@ def insert_reviews(reviews: list, conn) -> int:
                 title=%s,
                 review=%s,
                 review_date=%s,
+                verified_purchase=%s,
                 review_url=%s,
                 scrape_date=%s
             WHERE review_id=%s
             """,
             (
+                values["reviewer_name"],
                 values["asin"],
                 values["scrape_asin"],
                 values["variant_asin"],
@@ -197,6 +236,7 @@ def insert_reviews(reviews: list, conn) -> int:
                 values["title"],
                 values["review"],
                 values["review_date"],
+                values["verified_purchase"],
                 values["review_url"],
                 values["scrape_date"],
                 values["review_id"],
@@ -207,13 +247,14 @@ def insert_reviews(reviews: list, conn) -> int:
         cur.execute(
             """
             INSERT IGNORE INTO raw_reviews
-                (review_id, asin, scrape_asin, variant_asin, variant_label, variant_dimension,
+                (review_id, reviewer_name, asin, scrape_asin, variant_asin, variant_label, variant_dimension,
                  product_name, category, rating, title,
-                 review, review_date, review_url, scrape_date)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 review, review_date, verified_purchase, review_url, scrape_date)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
                 values["review_id"],
+                values["reviewer_name"],
                 values["asin"],
                 values["scrape_asin"],
                 values["variant_asin"],
@@ -222,7 +263,7 @@ def insert_reviews(reviews: list, conn) -> int:
                 values["product_name"],
                 values["category"],
                 values["rating"], values["title"], values["review"],
-                values["review_date"], values["review_url"], values["scrape_date"],
+                values["review_date"], values["verified_purchase"], values["review_url"], values["scrape_date"],
             ),
         )
         inserted += cur.rowcount
@@ -234,6 +275,7 @@ def insert_reviews(reviews: list, conn) -> int:
 def insert_rating_snapshot(asin: str, product_name: str, snapshot: dict, conn):
     if not snapshot or not snapshot.get("overall_rating"):
         return
+    conn.ping(reconnect=True)
     cur = conn.cursor()
     cur.execute(
         """
@@ -416,13 +458,18 @@ def scrape_asin(row: dict, driver, db_conn) -> dict:
     try:
         print(f"  Reading product variation map...")
         variant_metadata = scrape_product_variations(driver, asin)
-        product_name = variant_metadata.get("selected_label") or csv_product_name or asin
+        product_name = csv_product_name or variant_metadata.get("selected_label") or asin
 
         # Wait until reviews page is ready (handles login automatically)
         wait_until_reviews_ready(driver, asin)
 
         # Use latest DB date as cutoff so we only fetch genuinely new reviews
-        cutoff = get_asin_cutoff_date(asin, db_conn)
+        cutoff = None
+        if BACKFILL_VERIFIED_PURCHASE_DAYS > 0:
+            cutoff = date.today() - timedelta(days=BACKFILL_VERIFIED_PURCHASE_DAYS)
+            print(f"  Verified-purchase backfill: fetching reviews since {cutoff}")
+        else:
+            cutoff = get_asin_cutoff_date(asin, db_conn)
         if cutoff:
             print(f"  Cutoff: {cutoff} (last scrape − 3d buffer) — fetching newer reviews")
         else:

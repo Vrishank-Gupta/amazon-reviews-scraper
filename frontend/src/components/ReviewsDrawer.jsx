@@ -126,6 +126,8 @@ export default function ReviewsDrawer({
     else if (productCategories.length) params.set('product_category', productCategories.join('|||'))
     if (filters?.date_from) params.set('date_from', filters.date_from)
     if (filters?.date_to) params.set('date_to', filters.date_to)
+    if (filters?.rating?.length) params.set('rating', filters.rating.join(','))
+    if (filters?.verified_purchase?.length) params.set('verified_purchase', filters.verified_purchase.join(','))
     if (sentiment) params.set('sentiment', sentiment)
     if (taxonomyCategory) params.set('category', taxonomyCategory)
 
@@ -134,7 +136,18 @@ export default function ReviewsDrawer({
       .then(setReviews)
       .catch(() => setReviews([]))
       .finally(() => setLoading(false))
-  }, [category, productName, sentiment, taxonomyCategory, filters?.product?.join(','), JSON.stringify(filters?.product_category || []), filters?.date_from, filters?.date_to])
+  }, [
+    category,
+    productName,
+    sentiment,
+    taxonomyCategory,
+    filters?.product?.join(','),
+    JSON.stringify(filters?.product_category || []),
+    JSON.stringify(filters?.rating || []),
+    JSON.stringify(filters?.verified_purchase || []),
+    filters?.date_from,
+    filters?.date_to,
+  ])
 
   // Close on Escape
   useEffect(() => {

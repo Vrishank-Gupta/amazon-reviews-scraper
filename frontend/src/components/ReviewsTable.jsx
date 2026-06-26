@@ -57,6 +57,30 @@ function SentimentBadge({ sentiment }) {
   )
 }
 
+function VerifiedBadge({ value }) {
+  if (value === null || value === undefined) {
+    return <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Unknown</span>
+  }
+  const color = value ? '#22c55e' : '#eab308'
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: 20,
+        background: `${color}18`,
+        border: `1px solid ${color}35`,
+        color,
+        fontSize: 10,
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {value ? 'Verified' : 'Unverified'}
+    </span>
+  )
+}
+
 function Stars({ rating }) {
   const n = Math.round(parseFloat(rating) || 0)
   const color = n >= 4 ? '#22c55e' : n === 3 ? '#eab308' : '#ef4444'
@@ -164,9 +188,11 @@ export default function ReviewsTable({ data }) {
         const haystack = [
           row.product_name,
           row.category,
+          row.reviewer_name,
           row.review,
           row.title,
           row.sentiment,
+          row.verified_purchase === true ? 'verified purchase' : row.verified_purchase === false ? 'unverified purchase' : 'unknown purchase',
           ...(row.primary_categories || []),
           ...(row.sub_tags || []),
         ]
@@ -211,13 +237,14 @@ export default function ReviewsTable({ data }) {
 
   const stats = useMemo(() => {
     const total = filtered.length
+    const verified = filtered.filter(row => row.verified_purchase === true).length
     const negative = filtered.filter(row => row.sentiment === 'Negative').length
     const positive = filtered.filter(row => row.sentiment === 'Positive').length
     const neutral = filtered.filter(row => row.sentiment === 'Neutral').length
     const avgStars = filtered.length
       ? (filtered.reduce((sum, row) => sum + (parseFloat(row.rating) || 0), 0) / filtered.length).toFixed(1)
       : '0.0'
-    return { total, negative, positive, neutral, avgStars }
+    return { total, verified, negative, positive, neutral, avgStars }
   }, [filtered])
 
   const setSort = key => {
@@ -244,9 +271,10 @@ export default function ReviewsTable({ data }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 10 }}>
         {[
           { label: 'Total Reviews', value: stats.total, color: 'var(--accent)' },
+          { label: 'Verified', value: stats.verified, color: '#22c55e' },
           { label: 'Negative', value: stats.negative, color: '#ef4444' },
           { label: 'Positive', value: stats.positive, color: '#22c55e' },
           { label: 'Neutral', value: stats.neutral, color: '#eab308' },
@@ -299,7 +327,7 @@ export default function ReviewsTable({ data }) {
               setQuery(event.target.value)
               setPage(0)
             }}
-            placeholder="Search product, category, review text, or tags"
+            placeholder="Search reviewer, product, category, review text, or tags"
             style={{
               width: '100%',
               background: 'rgba(255,255,255,0.02)',
@@ -329,7 +357,9 @@ export default function ReviewsTable({ data }) {
               <tr>
                 <th style={thStyle}>Category</th>
                 <th style={thStyle}>Product</th>
+                <th style={thStyle}>Reviewer</th>
                 <th style={thStyle}>Rating</th>
+                <th style={thStyle}>Purchase</th>
                 <th style={thStyle}>Sentiment</th>
                 <th style={thStyle}>Date</th>
                 <th style={thStyle}>Tags</th>
@@ -351,8 +381,14 @@ export default function ReviewsTable({ data }) {
                   <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }}>
                     {row.product_name || row.asin || 'Unknown Product'}
                   </td>
+                  <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                    <HighlightText text={row.reviewer_name || '—'} query={normalizedQuery} />
+                  </td>
                   <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
                     <Stars rating={row.rating} />
+                  </td>
+                  <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+                    <VerifiedBadge value={row.verified_purchase} />
                   </td>
                   <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
                     <SentimentBadge sentiment={row.sentiment} />

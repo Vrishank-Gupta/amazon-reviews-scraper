@@ -127,20 +127,20 @@ function ProductDrillDown({ row, filters, ratingDistribution }) {
 
   useEffect(() => {
     setLoading(true)
-    fetchAnalysis({ product: [row.product_name], rating: filters.rating, date_from: filters.date_from, date_to: filters.date_to })
+    fetchAnalysis({ product: [row.product_name], rating: filters.rating, verified_purchase: filters.verified_purchase, date_from: filters.date_from, date_to: filters.date_to })
       .then(setAnalysis)
       .catch(() => setAnalysis(null))
       .finally(() => setLoading(false))
-  }, [row.product_name, JSON.stringify(filters.rating), filters.date_from, filters.date_to])
+  }, [row.product_name, JSON.stringify(filters.rating), JSON.stringify(filters.verified_purchase || []), filters.date_from, filters.date_to])
 
   useEffect(() => {
     setWcLoading(true)
     setActiveWord(null)
-    fetchWordCloud({ product: [row.product_name], rating: filters.rating, date_from: filters.date_from, date_to: filters.date_to })
+    fetchWordCloud({ product: [row.product_name], rating: filters.rating, verified_purchase: filters.verified_purchase, date_from: filters.date_from, date_to: filters.date_to })
       .then(payload => setWcData(payload || []))
       .catch(() => setWcData([]))
       .finally(() => setWcLoading(false))
-  }, [row.product_name, JSON.stringify(filters.rating), filters.date_from, filters.date_to])
+  }, [row.product_name, JSON.stringify(filters.rating), JSON.stringify(filters.verified_purchase || []), filters.date_from, filters.date_to])
 
   const issueRows = analysis?.neg_pie || []
   const positiveRows = analysis?.pos_pie || []
@@ -269,6 +269,7 @@ export default function SummaryPage({ filters, allProducts }) {
     product_category: filters.product_category || null,
     product: filters.product?.length ? filters.product : [],
     rating: filters.rating?.length ? filters.rating : [],
+    verified_purchase: filters.verified_purchase?.length ? filters.verified_purchase : [],
     date_from: filters.date_from,
     date_to: filters.date_to,
   }

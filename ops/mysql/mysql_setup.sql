@@ -75,6 +75,7 @@ SET time_zone = '+00:00';
 
 CREATE TABLE IF NOT EXISTS `raw_reviews` (
   `review_id` VARCHAR(64) NOT NULL,
+  `reviewer_name` VARCHAR(255) DEFAULT NULL,
   `asin` VARCHAR(20) NOT NULL,
   `scrape_asin` VARCHAR(20) DEFAULT NULL,
   `variant_asin` VARCHAR(20) DEFAULT NULL,
@@ -86,6 +87,7 @@ CREATE TABLE IF NOT EXISTS `raw_reviews` (
   `title` TEXT,
   `review` LONGTEXT,
   `review_date` VARCHAR(255) DEFAULT NULL,
+  `verified_purchase` TINYINT(1) DEFAULT NULL,
   `review_url` TEXT,
   `scrape_date` DATE NOT NULL,
   PRIMARY KEY (`review_id`, `asin`),
@@ -95,6 +97,7 @@ CREATE TABLE IF NOT EXISTS `raw_reviews` (
   KEY `idx_raw_reviews_variant_label` (`variant_label`),
   KEY `idx_raw_reviews_product_name` (`product_name`),
   KEY `idx_raw_reviews_category` (`category`),
+  KEY `idx_raw_reviews_verified_purchase` (`verified_purchase`),
   KEY `idx_raw_reviews_scrape_date` (`scrape_date`),
   KEY `idx_raw_reviews_asin_scrape_date` (`asin`, `scrape_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

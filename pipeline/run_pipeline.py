@@ -11,6 +11,13 @@ from shared.env import load_project_env
 
 load_project_env()
 
+DEFAULT_REPORT_CATEGORIES = ["Camera", "Dashcam", "VDB", "Locks"]
+DEFAULT_REPORT_TO = "vrishank.gupta@heroelectronix.com"
+
+
+def parse_csv_env(value):
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
 
 def get_conn():
     return pymysql.connect(
@@ -24,6 +31,11 @@ def get_conn():
 
 conn = get_conn()
 cur = conn.cursor()
+
+
+def report_categories():
+    configured = parse_csv_env(os.getenv("REVIEW_REPORT_CATEGORIES"))
+    return configured or DEFAULT_REPORT_CATEGORIES
 
 
 def update_status(status, message=None):
@@ -46,30 +58,36 @@ try:
 
     pipeline_dir = os.path.join(project_root, "pipeline")
 
-    print("Step 1/2: Scraping reviews...")
+    print("Step 1/3: Scraping reviews...")
     subprocess.check_call(
         [sys.executable, os.path.join(pipeline_dir, "scraper_runner.py")] + sys.argv[1:],
         cwd=pipeline_dir,
     )
 
-    print("Step 2/2: Tagging reviews...")
+    print("Step 2/3: Tagging reviews...")
     subprocess.check_call(
         [sys.executable, os.path.join(pipeline_dir, "tagger.py")],
         cwd=pipeline_dir,  # run from pipeline/ so local imports resolve
     )
 
     if os.getenv("REVIEW_REPORT_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
-        print("Step 3/3: Sending review report email...")
-        subprocess.check_call(
-            [
-                sys.executable,
-                os.path.join(pipeline_dir, "review_reporter.py"),
-                "--categories",
-                "Camera",
-                "--include-trends",
-            ],
-            cwd=pipeline_dir,
-        )
+        to_email = os.getenv("REVIEW_REPORT_TO", DEFAULT_REPORT_TO).strip() or DEFAULT_REPORT_TO
+        categories = report_categories()
+        print(f"Step 3/3: Sending {len(categories)} review report email(s) to {to_email}...")
+        for category_name in categories:
+            print(f"  Sending {category_name} review report...")
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    os.path.join(pipeline_dir, "review_reporter.py"),
+                    "--categories",
+                    category_name,
+                    "--to",
+                    to_email,
+                    "--include-trends",
+                ],
+                cwd=pipeline_dir,
+            )
 
     update_status("SUCCESS", "Pipeline completed successfully")
     print("Pipeline finished successfully.")

@@ -15,6 +15,7 @@ const DEFAULT_FILTERS = {
   product: [],
   sentiment: [],
   rating: [],
+  verified_purchase: [],
   date_from: null,
   date_to: null,
 }
