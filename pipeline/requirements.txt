@@ -2,3 +2,10 @@ pymysql
 python-dotenv
 openai
 selenium
+scikit-learn
+numpy
+scipy
+joblib
+datasets
+transformers
+accelerate

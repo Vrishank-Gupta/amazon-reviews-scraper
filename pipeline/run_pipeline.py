@@ -64,9 +64,11 @@ try:
         cwd=pipeline_dir,
     )
 
-    print("Step 2/3: Tagging reviews...")
+    tagger_backend = os.getenv("TAGGER_BACKEND", "llm").strip().lower()
+    tagger_script = "local_ml_tagger.py" if tagger_backend in {"local", "local_ml", "ml"} else "tagger.py"
+    print(f"Step 2/3: Tagging reviews ({tagger_backend})...")
     subprocess.check_call(
-        [sys.executable, os.path.join(pipeline_dir, "tagger.py")],
+        [sys.executable, os.path.join(pipeline_dir, tagger_script)],
         cwd=pipeline_dir,  # run from pipeline/ so local imports resolve
     )
 

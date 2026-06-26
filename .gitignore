@@ -11,6 +11,10 @@ frontend/.env.production
 *.log
 logs/
 .netlify/
+.venv-ml/
+models/
+data/ml/*.tsv
+data/ml/*.jsonl
 
 # Chrome profile — stores Amazon login session, never commit
 chrome-profile/
