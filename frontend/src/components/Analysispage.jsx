@@ -967,14 +967,6 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
     return insights.slice(0, 3)
   }, [data, cxoData, kpi, momentum])
 
-  if (loading && !hasData) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--text-muted)', gap: 10 }}>
-        <span style={{ fontSize: 20 }}>...</span> Loading overview...
-      </div>
-    )
-  }
-
   const signalRows = useMemo(
     () => aggregateSignalRows(activeTrend, activeDailyRating, trendGranularity),
     [activeTrend, activeDailyRating, trendGranularity],
@@ -996,6 +988,14 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
   const rateMin = rateVals.length ? Math.max(0, Math.floor(Math.min(...rateVals) / 5) * 5 - 5) : 0
   const rateMax = rateVals.length ? Math.min(100, Math.ceil(Math.max(...rateVals) / 5) * 5 + 10) : 100
   const sentimentColors = { Positive: '#22c55e', Negative: '#ef4444', Neutral: '#eab308' }
+
+  if (loading && !hasData) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--text-muted)', gap: 10 }}>
+        <span style={{ fontSize: 20 }}>...</span> Loading overview...
+      </div>
+    )
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
