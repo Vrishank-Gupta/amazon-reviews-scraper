@@ -141,11 +141,11 @@ function KPI({ label, value, sub, color, delta, deltaInvert, tip }) {
         <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>{label}</span>
         {tip && <InfoTip text={tip} />}
       </div>
-      <div style={{ fontFamily:'Bebas Neue', fontSize:30, lineHeight:1, color }}>{value ?? 'â€”'}</div>
+      <div style={{ fontFamily:'Bebas Neue', fontSize:30, lineHeight:1, color }}>{value ?? '-'}</div>
       {sub && <div style={{ fontSize:11, color:'var(--text-muted)', lineHeight:1.4 }}>{sub}</div>}
       {delta != null && (
         <div style={{ fontSize:11, fontWeight:700, color:deltaColor, marginTop:1 }}>
-          {delta > 0 ? `â†‘ +${delta}%` : delta < 0 ? `â†“ ${delta}%` : 'â†’ flat'} vs prior 7d
+          {delta > 0 ? `Up +${delta}%` : delta < 0 ? `Down ${delta}%` : 'Flat'} vs prior 7d
         </div>
       )}
     </div>
@@ -195,9 +195,9 @@ function IssueWatchlist({ momentum, onRowClick }) {
         // Signal
         const signal = isNew    ? { label: 'NEW',       color: '#f97316', bg: 'rgba(249,115,22,0.12)' }
                      : resolved ? { label: 'RESOLVED',  color: '#22c55e', bg: 'rgba(34,197,94,0.12)'  }
-                     : rising   ? { label: 'RISING â†‘',  color: '#ef4444', bg: 'rgba(239,68,68,0.12)'  }
-                     : falling  ? { label: 'FALLING â†“', color: '#22c55e', bg: 'rgba(34,197,94,0.12)'  }
-                     :            { label: 'STABLE â†’',  color: '#94a3b8', bg: 'rgba(148,163,184,0.08)' }
+                     : rising   ? { label: 'RISING',  color: '#ef4444', bg: 'rgba(239,68,68,0.12)'  }
+                     : falling  ? { label: 'FALLING', color: '#22c55e', bg: 'rgba(34,197,94,0.12)'  }
+                     :            { label: 'STABLE',  color: '#94a3b8', bg: 'rgba(148,163,184,0.08)' }
 
         // Sparkline-style inline bar
         const barW = Math.round((total / maxTotal) * 100)
@@ -228,7 +228,7 @@ function IssueWatchlist({ momentum, onRowClick }) {
               <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                 {priority && (
                   <span style={{ display:'inline-flex', alignItems:'center', gap:2, fontSize:9, fontWeight:700, color:priority.color, flexShrink:0, background:`${priority.color}15`, border:`1px solid ${priority.color}30`, borderRadius:4, padding:'1px 5px', whiteSpace:'nowrap' }}>
-                    {priority.label} <span style={{ opacity:0.65, fontWeight:400 }}>Â· {priority.sub}</span>
+                    {priority.label} <span style={{ opacity:0.65, fontWeight:400 }}>- {priority.sub}</span>
                   </span>
                 )}
                     <span title={m.category} style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
@@ -247,10 +247,10 @@ function IssueWatchlist({ momentum, onRowClick }) {
             <div style={{ display:'flex', flexDirection:'column', gap:1, alignItems:'flex-end' }}>
               <div style={{ fontSize:10, color:'var(--text-muted)' }}>
                 <span style={{ color:'rgba(255,255,255,0.3)' }}>{m.first}</span>
-                <span style={{ color:'var(--border)', margin:'0 3px' }}>â†’</span>
+                <span style={{ color:'var(--border)', margin:'0 3px' }}>-&gt;</span>
                 <span style={{ color:barColor, fontWeight:700 }}>{m.second}</span>
               </div>
-              <div style={{ fontSize:9, color:'var(--text-muted)' }}>early â†’ recent</div>
+              <div style={{ fontSize:9, color:'var(--text-muted)' }}>early -&gt; recent</div>
             </div>
 
             {/* Signal badge */}
@@ -264,7 +264,7 @@ function IssueWatchlist({ momentum, onRowClick }) {
       })}
 
       <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4, fontStyle:'italic', textAlign:'right' }}>
-        Ranked by total volume Â· early = first half Â· recent = second half of period
+        Ranked by total volume - early = first half - recent = second half of period
       </div>
     </div>
   )
@@ -273,7 +273,7 @@ function IssueWatchlist({ momentum, onRowClick }) {
 function Stars({ rating }) {
   const n = Math.round(parseFloat(rating)||0)
   const color = n>=4?'#22c55e':n>=3?'#eab308':'#ef4444'
-  return <span style={{ color, fontSize:13 }}>{'â˜…'.repeat(n)}{'â˜†'.repeat(Math.max(0,5-n))} <span style={{ fontSize:11, color:'var(--text-muted)' }}>{parseFloat(rating||0).toFixed(1)}</span></span>
+  return <span style={{ color, fontSize:13 }}>{`${n}/5`} <span style={{ fontSize:11, color:'var(--text-muted)' }}>{parseFloat(rating||0).toFixed(1)}</span></span>
 }
 
 function Toggle({ value, options, onChange }) {
@@ -370,11 +370,11 @@ function ConsistencyWatch({ ratingDist, productSummary }) {
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
               <div>
-                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>1â˜… Share</div>
+                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>1-star Share</div>
                 <div style={{ fontSize:13, fontWeight:700, color:'#ef4444' }}>{item.onePct}%</div>
               </div>
               <div>
-                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>5â˜… Share</div>
+                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>5-star Share</div>
                 <div style={{ fontSize:13, fontWeight:700, color:'#22c55e' }}>{item.fivePct}%</div>
               </div>
               <div>
@@ -523,10 +523,10 @@ export default function TrendsPage({ products: allProducts, filters }) {
   const filterSummary = [
     productCategory.length > 0 && `Category: ${productCategory.slice(0, 2).join(', ')}${productCategory.length > 2 ? ` +${productCategory.length - 2} more` : ''}`,
     selectedProducts.length > 0 && `Products: ${selectedProducts.slice(0, 2).join(', ')}${selectedProducts.length > 2 ? ` +${selectedProducts.length - 2} more` : ''}`,
-    dateFrom && dateTo && `${fmtDay(dateFrom)} â†’ ${fmtDay(dateTo)}`,
+    dateFrom && dateTo && `${fmtDay(dateFrom)} -> ${fmtDay(dateTo)}`,
     dateFrom && !dateTo && `From ${fmtDay(dateFrom)}`,
     !dateFrom && dateTo && `Until ${fmtDay(dateTo)}`,
-  ].filter(Boolean).join(' Â· ')
+  ].filter(Boolean).join(' - ')
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
@@ -566,7 +566,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
       {thisWeek && priorWeek && (
         <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'14px 20px' }}>
           <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:10 }}>
-            <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>ðŸ“‹ Week-on-Week Digest</span>
+            <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>Week-on-Week Digest</span>
             <InfoTip text="Compares the current calendar week vs the prior calendar week. Only available when the selected date range covers at least 14 days." />
           </div>
           <div style={{ display:'flex', gap:28, flexWrap:'wrap' }}>
@@ -589,7 +589,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
                 <div key={label} style={{ display:'flex', flexDirection:'column', gap:2 }}>
                   <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>{label}</div>
                   <div style={{ fontSize:20, fontFamily:'Bebas Neue', color:'var(--text)' }}>{fmt(thisVal)}</div>
-                  {delta!=null && <div style={{ fontSize:11, fontWeight:700, color }}>{delta>0?`â†‘ +${delta}%`:`â†“ ${delta}%`} WoW</div>}
+                  {delta!=null && <div style={{ fontSize:11, fontWeight:700, color }}>{delta>0?`Up +${delta}%`:`Down ${delta}%`} WoW</div>}
                 </div>
               )
             })}
@@ -615,7 +615,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
         <Card
           title="Consistency Watch"
           tip="This highlights products where 1-star and 5-star review shares are both meaningfully present. That usually signals inconsistent customer experience, which average rating alone can hide."
-          sub="High 1â˜… and high 5â˜… together = inconsistent experience worth investigating"
+          sub="High 1-star and high 5-star together = inconsistent experience worth investigating"
         >
           <ConsistencyWatch ratingDist={displayedRatingDist} productSummary={productSummary} />
         </Card>
@@ -624,8 +624,8 @@ export default function TrendsPage({ products: allProducts, filters }) {
       {/* â”€â”€ SECTION 2: BRAND HEALTH SCORE â”€â”€ */}
       <Card
         title="Brand Health Score"
-        tip="Composite score from 0â€“100. Formula: 100 minus the 7-day rolling negative rate. Below 60 is critical and requires immediate action. 60â€“75 is a watch zone. Above 75 is healthy. The rolling average smooths out day-to-day noise so you see the real trend."
-        sub="7-day rolling score Â· 75+ healthy Â· 60â€“75 watch Â· below 60 critical"
+        tip="Composite score from 0-100. Formula: 100 minus the 7-day rolling negative rate. Below 60 is critical and requires immediate action. 60-75 is a watch zone. Above 75 is healthy. The rolling average smooths out day-to-day noise so you see the real trend."
+        sub="7-day rolling score - 75+ healthy - 60-75 watch - below 60 critical"
       >
         {!healthData.length ? <Empty /> : (
           <>
@@ -642,7 +642,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
                     <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>Based on {healthData.length}-day window</div>
                     {healthDelta !== null && (
                       <div style={{ fontSize:12, fontWeight:700, color:deltaColor, marginTop:3 }}>
-                        {healthDelta > 0 ? `â†‘ +${healthDelta} pts` : healthDelta < 0 ? `â†“ ${healthDelta} pts` : 'â†’ flat'} vs start of period
+                        {healthDelta > 0 ? `Up +${healthDelta} pts` : healthDelta < 0 ? `Down ${healthDelta} pts` : 'Flat'} vs start of period
                       </div>
                     )}
                   </div>
@@ -674,7 +674,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
       <ProductPerformanceScorecard Card={Card} productSummary={productSummary} />
       {false && <Card
         title="Product Performance Scorecard"
-        tip="This is the core filtered comparison view for leadership and analysts. Review Rating is the average of scraped review stars within the selected period only, so it reflects the exact filter window being analyzed here. Health Score = 100 minus negative rate %. Sorted best to worst. The Verdict column gives an instant action signal: âœ… Good means no action needed, âš ï¸ Watch means monitor closely, ðŸ”´ Act Now means escalate immediately."
+        tip="This is the core filtered comparison view for leadership and analysts. Review Rating is the average of scraped review stars within the selected period only, so it reflects the exact filter window being analyzed here. Health Score = 100 minus negative rate %. Sorted best to worst. The Verdict column gives an instant action signal: Good means no action needed, Watch means monitor closely, Act Now means escalate immediately."
         sub="Review Rating = avg stars from reviews in the selected period"
       >
         {!productSummary.length ? <Empty /> : (
@@ -691,7 +691,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
                 {productSummary.sort((a,b)=>a.neg_pct-b.neg_pct).map((row,i) => {
                   const health = Math.max(0,100-row.neg_pct)
                   const hColor = health>=75?'#22c55e':health>=60?'#eab308':'#ef4444'
-                  const verdict = health>=75?'âœ… Good':health>=60?'âš ï¸ Watch':'ðŸ”´ Act Now'
+                  const verdict = health>=75?'Good':health>=60?'Watch':'Act Now'
                   return (
                     <tr key={row.product} style={{ background:i%2===0?'var(--surface)':'var(--surface2)' }}>
                       <td style={{ padding:'10px 12px', fontSize:13, fontWeight:600 }}>{row.product}</td>
@@ -849,8 +849,8 @@ export default function TrendsPage({ products: allProducts, filters }) {
       {/* â”€â”€ SECTION 8: RATING DISTRIBUTION â”€â”€ */}
       <Card
         title="Rating Distribution by Product"
-        tip="Horizontal bar breakdown of 1â˜… through 5â˜… reviews per product. A healthy product is top-heavy â€” most reviews at 4â˜… and 5â˜…. A bimodal distribution (both 1â˜… and 5â˜… are high) means polarised opinions, often a sign of a quality consistency issue."
-        sub='Healthy = top-heavy (4â˜… + 5â˜…). Bimodal = quality consistency issue.'
+        tip="Horizontal bar breakdown of 1-star through 5-star reviews per product. A healthy product is top-heavy - most reviews at 4-star and 5-star. A bimodal distribution (both 1-star and 5-star are high) means polarised opinions, often a sign of a quality consistency issue."
+        sub='Healthy = top-heavy (4-star + 5-star). Bimodal = quality consistency issue.'
         controls={
           <select value={ratingDistProd || ''} onChange={e => setRatingDistProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: ratingDistProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
             <option value="">All Products</option>
@@ -871,7 +871,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
                     const color = star>=4?'#22c55e':star===3?'#eab308':'#ef4444'
                     return (
                       <div key={star} style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <div style={{ width:20, fontSize:11, color:'var(--text-muted)', textAlign:'right' }}>{star}â˜…</div>
+                        <div style={{ width:20, fontSize:11, color:'var(--text-muted)', textAlign:'right' }}>{star}*</div>
                         <div style={{ flex:1, height:8, background:'var(--border)', borderRadius:4, overflow:'hidden' }}>
                           <div style={{ height:'100%', width:`${pct}%`, background:color, borderRadius:4, transition:'width 0.4s' }} />
                         </div>
@@ -891,7 +891,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
       {false && <Card
         title="Rating Trends"
         tip="Three views of rating health over time. Top: Amazon's displayed product-page rating, sourced from listing snapshots and forward-filled between scrape dates. This can be shared across variation families. The scorecards use only scraped reviews inside the selected period. Middle: daily average of scraped reviews. Bottom: total number of ratings on Amazon."
-        sub="Top chart = Amazon listing rating Â· scorecards = review-period rating"
+        sub="Top chart = Amazon listing rating - scorecards = review-period rating"
       >
         <RatingTrendChart filters={filters} allProducts={allProducts} tree={tree} />
       </Card>}
