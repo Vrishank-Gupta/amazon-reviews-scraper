@@ -231,7 +231,7 @@ function IssueWatchlist({ momentum, onRowClick }) {
                     {priority.label} <span style={{ opacity:0.65, fontWeight:400 }}>Â· {priority.sub}</span>
                   </span>
                 )}
-                    <span title={item.category} style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    <span title={m.category} style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                   {m.category}
                 </span>
               </div>
