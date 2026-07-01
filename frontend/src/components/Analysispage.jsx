@@ -25,6 +25,96 @@ function fmtDay(day) {
   }
 }
 
+function fmtPeriodLabel(point) {
+  if (!point) return ''
+  if (point.period_label) return point.period_label
+  return fmtDay(point.day)
+}
+
+function periodKey(day, granularity) {
+  const date = new Date(day)
+  if (Number.isNaN(date.getTime())) return { key: day, label: day, sort: day }
+  if (granularity === 'month') {
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+    return {
+      key,
+      label: date.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }),
+      sort: key,
+    }
+  }
+  if (granularity === 'week') {
+    const start = new Date(date)
+    const dayOfWeek = start.getDay() || 7
+    start.setDate(start.getDate() - dayOfWeek + 1)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    const key = start.toISOString().slice(0, 10)
+    return {
+      key,
+      label: `${fmtDay(start.toISOString().slice(0, 10))} - ${fmtDay(end.toISOString().slice(0, 10))}`,
+      sort: key,
+    }
+  }
+  return { key: day, label: fmtDay(day), sort: day }
+}
+
+function aggregateSignalRows(trendRows = [], ratingRows = [], granularity = 'day') {
+  const ratingByDay = Object.fromEntries((ratingRows || []).map(row => [row.day, row]))
+  const buckets = new Map()
+  const ensureBucket = day => {
+    const period = periodKey(day, granularity)
+    if (!buckets.has(period.key)) {
+      buckets.set(period.key, {
+        day: period.key,
+        period_label: period.label,
+        sort: period.sort,
+        Positive: 0,
+        Negative: 0,
+        Neutral: 0,
+        total: 0,
+        rating_sum: 0,
+        rating_count: 0,
+        star_1: 0,
+        star_2: 0,
+        star_3: 0,
+        star_4: 0,
+        star_5: 0,
+      })
+    }
+    return buckets.get(period.key)
+  }
+
+  ;(trendRows || []).forEach(row => {
+    const bucket = ensureBucket(row.day)
+    bucket.Positive += row.Positive || 0
+    bucket.Negative += row.Negative || 0
+    bucket.Neutral += row.Neutral || 0
+    bucket.total += row.total || row.Positive + row.Negative + row.Neutral || 0
+  })
+
+  ;(ratingRows || []).forEach(row => {
+    const bucket = ensureBucket(row.day)
+    const total = row.total || 0
+    bucket.star_1 += row.star_1 || 0
+    bucket.star_2 += row.star_2 || 0
+    bucket.star_3 += row.star_3 || 0
+    bucket.star_4 += row.star_4 || 0
+    bucket.star_5 += row.star_5 || 0
+    if (row.avg_rating && total) {
+      bucket.rating_sum += Number(row.avg_rating) * total
+      bucket.rating_count += total
+    }
+    if (!bucket.total && total) bucket.total = total
+  })
+
+  return [...buckets.values()]
+    .sort((left, right) => String(left.sort).localeCompare(String(right.sort)))
+    .map(row => ({
+      ...row,
+      avg_rating: row.rating_count ? +(row.rating_sum / row.rating_count).toFixed(2) : null,
+    }))
+}
+
 function asArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean)
   return value ? [value] : []
@@ -375,11 +465,15 @@ function VolumeTip({ active, payload, label }) {
 
   return (
     <div style={{ background: '#16161f', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', fontSize: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
-      <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtDay(label)}</div>
+      <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtPeriodLabel(point) || fmtDay(label)}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-          <span style={{ color: 'var(--text-muted)' }}>Reviews that day</span>
+          <span style={{ color: 'var(--text-muted)' }}>Reviews</span>
           <span style={{ fontWeight: 700 }}>{total}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ color: 'var(--text-muted)' }}>Avg rating</span>
+          <span style={{ fontWeight: 700 }}>{point.avg_rating != null ? `${Number(point.avg_rating).toFixed(2)} / 5` : '-'}</span>
         </div>
         {[
           ['Negative', point.Negative, '#ef4444'],
@@ -399,25 +493,29 @@ function VolumeTip({ active, payload, label }) {
 function RateTip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   const rolling = payload.find(point => point.dataKey === 'rolling_neg')?.value
-  const daily = payload.find(point => point.dataKey === 'neg_rate')?.value
+  const periodRate = payload.find(point => point.dataKey === 'neg_rate')?.value
   const point = payload[0]?.payload || {}
   const total = (point.Positive || 0) + (point.Negative || 0) + (point.Neutral || 0)
 
   return (
     <div style={{ background: '#16161f', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', fontSize: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
-      <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtDay(label)}</div>
+      <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtPeriodLabel(point) || fmtDay(label)}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-          <span style={{ color: 'var(--text-muted)' }}>7d rolling neg rate</span>
+          <span style={{ color: 'var(--text-muted)' }}>Rolling neg rate</span>
           <span style={{ fontWeight: 700, color: '#ff4e1a' }}>{rolling}%</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-          <span style={{ color: 'var(--text-muted)' }}>Daily neg rate</span>
-          <span style={{ fontWeight: 700, color: '#ef4444' }}>{daily}%</span>
+          <span style={{ color: 'var(--text-muted)' }}>Period neg rate</span>
+          <span style={{ fontWeight: 700, color: '#ef4444' }}>{periodRate}%</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-          <span style={{ color: 'var(--text-muted)' }}>Reviews that day</span>
+          <span style={{ color: 'var(--text-muted)' }}>Reviews</span>
           <span style={{ fontWeight: 700 }}>{total}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ color: 'var(--text-muted)' }}>Avg rating</span>
+          <span style={{ fontWeight: 700 }}>{point.avg_rating != null ? `${Number(point.avg_rating).toFixed(2)} / 5` : '-'}</span>
         </div>
       </div>
     </div>
@@ -713,6 +811,7 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
   const [loading, setLoading] = useState(true)
   const [hasData, setHasData] = useState(false)
   const [trendMode, setTrendMode] = useState('sentiment')
+  const [trendGranularity, setTrendGranularity] = useState('week')
   const [emergingCat, setEmergingCat] = useState(null)
   const [issueFilter, setIssueFilter] = useState(null)
   const [localIssueData, setLocalIssueData] = useState(null)
@@ -876,14 +975,20 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
     )
   }
 
-  const trendWithRolling = activeTrend.map((point, index, rows) => {
+  const signalRows = useMemo(
+    () => aggregateSignalRows(activeTrend, activeDailyRating, trendGranularity),
+    [activeTrend, activeDailyRating, trendGranularity],
+  )
+
+  const trendWithRolling = signalRows.map((point, index, rows) => {
     const window = rows.slice(Math.max(0, index - 6), index + 1)
     const total = window.reduce((sum, row) => sum + (row.Positive + row.Negative + row.Neutral), 0)
     const negative = window.reduce((sum, row) => sum + row.Negative, 0)
+    const pointTotal = point.Positive + point.Negative + point.Neutral
     return {
       ...point,
       rolling_neg: total ? +((negative / total) * 100).toFixed(1) : 0,
-      neg_rate: point.Negative ? +((point.Negative / (point.Positive + point.Negative + point.Neutral)) * 100).toFixed(1) : 0,
+      neg_rate: pointTotal ? +((point.Negative / pointTotal) * 100).toFixed(1) : 0,
     }
   })
 
@@ -937,7 +1042,7 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
 
       <Card
         title="Customer Signal Over Time"
-        tip="Neg Rate shows the 7-day rolling problem rate. Sentiment shows daily positive, negative, and neutral breakdown. Reviews shows the daily stacked split from 1-star to 5-star."
+        tip="Switch between daily, weekly, and monthly periods. Neg Rate shows rolling problem rate. Sentiment shows positive, negative, and neutral breakdown. Reviews shows the stacked split from 1-star to 5-star."
         controls={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <CategoryProductSelect
@@ -947,11 +1052,12 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
               allLabel="All Products In Scope"
               onChange={setSignalProd}
             />
+            <Toggle value={trendGranularity} onChange={setTrendGranularity} options={[{ v: 'day', l: 'Daily' }, { v: 'week', l: 'Weekly' }, { v: 'month', l: 'Monthly' }]} />
             <Toggle value={trendMode} onChange={setTrendMode} options={[{ v: 'rate', l: 'Neg Rate %' }, { v: 'sentiment', l: 'Sentiment' }, { v: 'reviews', l: 'Reviews' }]} />
           </div>
         }
       >
-        {activeTrend.length === 0 ? (
+        {signalRows.length === 0 ? (
           <EmptyState text="No trend data - review dates may not be parsed correctly yet." />
         ) : trendMode === 'rate' ? (
           <ResponsiveContainer width="100%" height={200}>
@@ -963,7 +1069,7 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+              <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(value, index) => signalRows[index]?.period_label || fmtDay(value)} />
               <YAxis domain={[rateMin, rateMax]} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={value => `${value}%`} width={36} />
               <Tooltip content={<RateTip />} />
               {rateMax >= 30 && <ReferenceLine y={30} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value: '30%', fill: '#eab308', fontSize: 10, position: 'insideRight' }} />}
@@ -974,7 +1080,7 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
           </ResponsiveContainer>
         ) : trendMode === 'sentiment' ? (
           <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={activeTrend} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
+            <AreaChart data={signalRows} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
               <defs>
                 {Object.entries(sentimentColors).map(([sentiment, color]) => (
                   <linearGradient key={sentiment} id={`ov-${sentiment}`} x1="0" y1="0" x2="0" y2="1">
@@ -984,7 +1090,7 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
                 ))}
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+              <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(value, index) => signalRows[index]?.period_label || fmtDay(value)} />
               <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
               <Tooltip content={<VolumeTip />} />
               {['Negative', 'Positive', 'Neutral'].map(sentiment => (
@@ -992,25 +1098,29 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
               ))}
             </AreaChart>
           </ResponsiveContainer>
-        ) : !activeDailyRating.length ? (
+        ) : !signalRows.length ? (
           <EmptyState text="No daily review volume available for the selected filters." />
         ) : (
           <>
             <ResponsiveContainer width="100%" height={220}>
-              <ComposedChart data={activeDailyRating} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
+              <ComposedChart data={signalRows} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={fmtDay} />
+                <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(value, index) => signalRows[index]?.period_label || fmtDay(value)} />
                 <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
                 <Tooltip content={({ active, payload, label }) => {
                   if (!active || !payload?.length) return null
                   const point = payload[0]?.payload || {}
                   return (
                     <div style={{ background: '#16161f', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', fontSize: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
-                      <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtDay(label)}</div>
+                      <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.06em' }}>{fmtPeriodLabel(point) || fmtDay(label)}</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
                           <span style={{ color: 'var(--text-muted)' }}>Total reviews</span>
                           <span style={{ fontWeight: 700 }}>{point.total || 0}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Avg rating</span>
+                          <span style={{ fontWeight: 700 }}>{point.avg_rating != null ? `${Number(point.avg_rating).toFixed(2)} / 5` : '-'}</span>
                         </div>
                         {[
                           ['5 star', point.star_5, '#22c55e'],
