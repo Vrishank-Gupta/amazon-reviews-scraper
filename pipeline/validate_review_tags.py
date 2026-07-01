@@ -43,6 +43,35 @@ ALLOWED_CATEGORIES = set(TAXONOMY)
 ALLOWED_TAGS = set(TAG_TO_CATEGORIES)
 NEGATIVE_ONLY_CATEGORIES = {"False / Excessive Alerts"}
 
+TAG_EVIDENCE = {
+    "Motion detection too sensitive": [
+        "too sensitive", "sensitive", "false alert", "false alerts", "too many alert",
+        "too many notification", "notification spam", "alert spam", "detecting everything",
+    ],
+    "Alerts triggered constantly with nothing in frame": [
+        "false alert", "false alerts", "nothing in frame", "without anyone", "no one there",
+        "too many alert", "alert constantly", "alerts constantly",
+    ],
+    "Notification spam making phone unusable": [
+        "notification spam", "alert spam", "too many notification", "too many alert",
+        "phone unusable", "constantly notifying",
+    ],
+    "Two-way talk clear and real-time": [
+        "two-way", "two way", "talk", "speaker", "audio", "voice", "mic", "microphone",
+    ],
+    "Speaker too weak or inaudible": [
+        "speaker", "sound", "audio", "hear", "inaudible", "voice", "mic", "microphone",
+        "two-way", "two way", "talk",
+    ],
+}
+
+CATEGORY_EVIDENCE = {
+    "False / Excessive Alerts": [
+        "alert", "alerts", "notification", "notifications", "too sensitive",
+        "false detection", "false trigger", "false alerts", "notification spam",
+    ],
+}
+
 ALIASES = {
     "Clear footage without major echo": "Good two-way talk audio",
     "Poor clarity beyond 10 feet": "Faces or number plates not readable",
@@ -155,6 +184,31 @@ def repair_row(row):
             issues.append("non_negative_negative_only_category")
         categories = [category for category in categories if category not in NEGATIVE_ONLY_CATEGORIES]
         tags = [tag for tag in tags if not (set(TAG_TO_CATEGORIES[tag]) <= NEGATIVE_ONLY_CATEGORIES)]
+
+    filtered_tags = []
+    for tag in tags:
+        evidence = TAG_EVIDENCE.get(tag)
+        if evidence and not any(token in review_text for token in evidence):
+            issues.append("subtag_without_text_evidence")
+            continue
+        if tag == "Two-way talk clear and real-time" and sentiment == "Negative":
+            issues.append("positive_subtag_on_negative_review")
+            continue
+        filtered_tags.append(tag)
+    tags = filtered_tags
+
+    filtered_categories = []
+    for category in categories:
+        evidence = CATEGORY_EVIDENCE.get(category)
+        if (
+            evidence
+            and not any(token in review_text for token in evidence)
+            and not any(category in TAG_TO_CATEGORIES[tag] for tag in tags)
+        ):
+            issues.append("category_without_text_evidence")
+            continue
+        filtered_categories.append(category)
+    categories = filtered_categories
 
     categories = dedupe(categories)
     tags = dedupe(tags)

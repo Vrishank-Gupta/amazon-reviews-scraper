@@ -75,6 +75,35 @@ ALLOWED_CATEGORIES = set(TAXONOMY)
 ALLOWED_TAGS = set(TAG_TO_CATEGORIES)
 NEGATIVE_ONLY_CATEGORIES = {"False / Excessive Alerts"}
 
+TAG_EVIDENCE = {
+    "Motion detection too sensitive": [
+        "too sensitive", "sensitive", "false alert", "false alerts", "too many alert",
+        "too many notification", "notification spam", "alert spam", "detecting everything",
+    ],
+    "Alerts triggered constantly with nothing in frame": [
+        "false alert", "false alerts", "nothing in frame", "without anyone", "no one there",
+        "too many alert", "alert constantly", "alerts constantly",
+    ],
+    "Notification spam making phone unusable": [
+        "notification spam", "alert spam", "too many notification", "too many alert",
+        "phone unusable", "constantly notifying",
+    ],
+    "Two-way talk clear and real-time": [
+        "two-way", "two way", "talk", "speaker", "audio", "voice", "mic", "microphone",
+    ],
+    "Speaker too weak or inaudible": [
+        "speaker", "sound", "audio", "hear", "inaudible", "voice", "mic", "microphone",
+        "two-way", "two way", "talk",
+    ],
+}
+
+CATEGORY_EVIDENCE = {
+    "False / Excessive Alerts": [
+        "alert", "alerts", "notification", "notifications", "too sensitive",
+        "false detection", "false trigger", "false alerts", "notification spam",
+    ],
+}
+
 
 def first_star(rating: str):
     try:
@@ -95,10 +124,13 @@ def is_home_camera(product_name: str) -> bool:
     return any(token in product for token in ["camera", "cam", "3mp", "4mp", "ptz", "bullet", "360"])
 
 
-def sanitize_result(result: dict, product_name: str, rating: str) -> dict:
+def sanitize_result(result: dict, product_name: str, rating: str, title: str = "", review: str = "") -> dict:
     sentiment = result.get("sentiment") if result.get("sentiment") in {"Positive", "Neutral", "Negative"} else "Neutral"
     star = first_star(rating)
     text_join = " ".join(str(x).lower() for x in [result.get("reason", ""), result.get("summary", "")])
+    review_text = " ".join(str(x).lower() for x in [
+        title, review, result.get("reason", ""), result.get("summary", "")
+    ])
 
     if star in {1, 2} and sentiment == "Positive":
         sentiment = "Negative"
@@ -146,6 +178,25 @@ def sanitize_result(result: dict, product_name: str, rating: str) -> dict:
             item for item in tags
             if not (set(TAG_TO_CATEGORIES[item]) <= NEGATIVE_ONLY_CATEGORIES)
         ]
+
+    gated_tags = []
+    for tag in tags:
+        evidence = TAG_EVIDENCE.get(tag)
+        if evidence and not any(token in review_text for token in evidence):
+            continue
+        if tag == "Two-way talk clear and real-time" and sentiment == "Negative":
+            continue
+        gated_tags.append(tag)
+    tags = gated_tags
+
+    categories = [
+        category for category in categories
+        if not (
+            category in CATEGORY_EVIDENCE
+            and not any(token in review_text for token in CATEGORY_EVIDENCE[category])
+            and not any(category in TAG_TO_CATEGORIES[tag] for tag in tags)
+        )
+    ]
 
     seen = set()
     categories = [item for item in categories if not (item in seen or seen.add(item))]
@@ -251,12 +302,12 @@ for batch in chunks(rows, BATCH_SIZE):
 
     results = {item["id"]: item for item in parsed.get("results", [])}
 
-    for review_id, asin, product_name, rating, _, _ in batch:
+    for review_id, asin, product_name, rating, title, review in batch:
         if review_id not in results:
             print(f"  Missing result for {review_id}")
             continue
 
-        result = sanitize_result(results[review_id], product_name, rating)
+        result = sanitize_result(results[review_id], product_name, rating, title, review)
         if not args.dry_run:
             cur.execute(
                 """
