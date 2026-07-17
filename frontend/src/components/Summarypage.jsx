@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { fetchSummary, fetchCxoTrends, fetchAnalysis, fetchWordCloud } from '../api'
-import { InfoTip, StarLabel, Delta, Card } from './shared'
+import { InfoTip, StarLabel, Delta, Card, productDisplayName } from './shared'
 import WordCloud from './Wordcloud'
 import ReviewsDrawer from './ReviewsDrawer'
 
@@ -149,28 +149,28 @@ function ProductDrillDown({ row, filters, ratingDistribution }) {
 
   return (
     <div style={{ padding: '16px 18px', background: 'var(--surface2)', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
+      <div className="dashboard-grid-3">
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', minWidth: 0 }}>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#ef4444', marginBottom: 8 }}>Issue Volume</div>
           {loading ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading...</div> : issueRows.length ? issueRows.map(item => (
             <div key={item.category} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 12, padding: '5px 0' }}>
-              <span style={{ color: 'var(--text)' }}>{item.category}</span>
+              <span className="product-name-one-line" style={{ color: 'var(--text)' }}>{item.category}</span>
               <span style={{ color: '#ef4444', fontWeight: 700 }}>{item.count}</span>
             </div>
           )) : <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No issue breakdown yet.</div>}
         </div>
 
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', minWidth: 0 }}>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#22c55e', marginBottom: 8 }}>Positive Volume</div>
           {loading ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading...</div> : positiveRows.length ? positiveRows.map(item => (
             <div key={item.category} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 12, padding: '5px 0' }}>
-              <span style={{ color: 'var(--text)' }}>{item.category}</span>
+              <span className="product-name-one-line" style={{ color: 'var(--text)' }}>{item.category}</span>
               <span style={{ color: '#22c55e', fontWeight: 700 }}>{item.count}</span>
             </div>
           )) : <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No positive breakdown yet.</div>}
         </div>
 
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
           <div>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Rating Distribution</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Moved here from the overview layer so the split is visible in product drill-down.</div>
@@ -180,7 +180,7 @@ function ProductDrillDown({ row, filters, ratingDistribution }) {
       </div>
 
       {(row.ai_issues?.length || row.ai_positives?.length) ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div className="dashboard-grid-2" style={{ gap: 14 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#ef4444' }}>Top Issues</div>
             {(row.ai_issues || []).length ? row.ai_issues.map((issue, index) => (
@@ -300,8 +300,8 @@ export default function SummaryPage({ filters, allProducts }) {
   }
 
   const sorted = [...rows].sort((left, right) => {
-    const leftValue = left[sortKey] ?? (sortKey === 'category' ? left.category : 0)
-    const rightValue = right[sortKey] ?? (sortKey === 'category' ? right.category : 0)
+    const leftValue = sortKey === 'product_name' ? productDisplayName(left) : left[sortKey] ?? (sortKey === 'category' ? left.category : 0)
+    const rightValue = sortKey === 'product_name' ? productDisplayName(right) : right[sortKey] ?? (sortKey === 'category' ? right.category : 0)
     return typeof leftValue === 'string'
       ? leftValue.localeCompare(rightValue) * sortDir
       : (leftValue - rightValue) * sortDir
@@ -318,7 +318,7 @@ export default function SummaryPage({ filters, allProducts }) {
     sorted.forEach(row => {
       const category = row.category || 'Other'
       if (tableCatFilter && category !== tableCatFilter) return
-      if (q && !row.product_name?.toLowerCase().includes(q)) return
+      if (q && !productDisplayName(row).toLowerCase().includes(q)) return
       if (!groups[category]) groups[category] = []
       groups[category].push(row)
     })
@@ -428,7 +428,17 @@ export default function SummaryPage({ filters, allProducts }) {
         </div>
 
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table className="dashboard-table" style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '13%' }} />
+            </colgroup>
             <thead>
               <tr>
                 <TH onClick={() => handleSort('product_name')} sortDir={sortKey === 'product_name' ? sortDir : null} tip="Product name with health status pill">Product</TH>
@@ -483,6 +493,7 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
   const isWatch = health >= 60 && health < 75
   const rowBackground = isDrill ? 'rgba(255,78,26,0.05)' : isActNow ? 'rgba(239,68,68,0.05)' : rowBg
   const leftBorder = isDrill ? '3px solid var(--accent)' : isActNow ? '3px solid #ef4444' : isWatch ? '3px solid #eab308' : '3px solid transparent'
+  const displayName = productDisplayName(row)
 
   return (
     <>
@@ -498,7 +509,7 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--accent)' }}>{category}</span>
               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>· {itemCount} product{itemCount !== 1 ? 's' : ''}</span>
               {rollup && (
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16, fontSize: 11 }}>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16, fontSize: 11, flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
                   <span style={{ color: 'var(--text-muted)' }}>{rollup.totalReviews.toLocaleString()} reviews</span>
                   <span style={{ color: rollup.weightedAvg >= 4 ? '#22c55e' : rollup.weightedAvg >= 3 ? '#eab308' : '#ef4444', fontWeight: 700 }}>
                     {rollup.weightedAvg.toFixed(2)}★
@@ -520,9 +531,9 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
             onMouseEnter={event => { event.currentTarget.style.background = 'rgba(255,78,26,0.04)' }}
             onMouseLeave={event => { event.currentTarget.style.background = rowBackground }}
           >
-            <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600, borderBottom: isDrill ? 'none' : '1px solid var(--border)', maxWidth: 230 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <span title={row.product_name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.product_name}</span>
+            <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 600, borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, minWidth: 0 }}>
+                <span title={displayName} style={{ minWidth: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.35 }}>{displayName}</span>
                 <HealthPill negPct={row.neg_pct} />
               </div>
             </td>
@@ -538,7 +549,7 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
             <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
               <span style={{ color: row.neg_pct > 50 ? '#ef4444' : row.neg_pct > 30 ? '#eab308' : '#22c55e', fontWeight: 700 }}>{row.neg_pct}%</span>
             </td>
-            <td style={{ padding: '12px 14px', color: 'var(--accent)', fontSize: 12, borderBottom: isDrill ? 'none' : '1px solid var(--border)', fontWeight: 700 }}>
+            <td style={{ padding: '12px 14px', color: 'var(--accent)', fontSize: 12, borderBottom: isDrill ? 'none' : '1px solid var(--border)', fontWeight: 700, whiteSpace: 'normal' }}>
               {isDrill ? 'collapse ^' : 'drill down v'}
             </td>
           </tr>

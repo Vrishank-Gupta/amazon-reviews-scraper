@@ -36,7 +36,7 @@ function Dropdown({ trigger, children, align = 'left', minWidth = 220 }) {
   }, [])
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} style={{ position: 'relative', minWidth: 0, maxWidth: '100%' }}>
       <div onClick={() => setOpen(o => !o)}>{trigger(open)}</div>
       {open && (
         <div
@@ -49,9 +49,12 @@ function Dropdown({ trigger, children, align = 'left', minWidth = 220 }) {
             border: '1px solid var(--border)',
             borderRadius: 10,
             boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
-            minWidth,
+            minWidth: 0,
+            maxWidth: 'calc(100vw - 28px)',
             overflow: 'hidden',
+            '--menu-width': `${minWidth}px`,
           }}
+          className="filter-menu"
           onClick={e => e.stopPropagation()}
         >
           {children(() => setOpen(false))}
@@ -64,6 +67,7 @@ function Dropdown({ trigger, children, align = 'left', minWidth = 220 }) {
 function PillBtn({ label, active, icon }) {
   return (
     <button
+      title={label}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -79,10 +83,12 @@ function PillBtn({ label, active, icon }) {
         fontFamily: 'DM Sans',
         transition: 'all 0.15s',
         whiteSpace: 'nowrap',
+        maxWidth: 'min(260px, calc(100vw - 48px))',
+        minWidth: 0,
       }}
     >
-      {icon}
-      {label}
+      <span style={{ flexShrink: 0, display: 'inline-flex' }}>{icon}</span>
+      <span className="filter-pill-label">{label}</span>
       <ChevronDown size={11} style={{ opacity: 0.6 }} />
     </button>
   )
@@ -91,6 +97,7 @@ function PillBtn({ label, active, icon }) {
 function ActiveChip({ label, color, onRemove }) {
   return (
     <span
+      title={label}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -103,9 +110,11 @@ function ActiveChip({ label, color, onRemove }) {
         fontSize: 11,
         fontWeight: 600,
         whiteSpace: 'nowrap',
+        maxWidth: 260,
+        minWidth: 0,
       }}
     >
-      {label}
+      <span className="active-filter-label">{label}</span>
       <button onClick={onRemove} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0, lineHeight: 1, display: 'flex', opacity: 0.7 }}>
         <X size={11} />
       </button>
@@ -371,8 +380,8 @@ function ProductDropdown({ filters, options, onChange }) {
                 {visibleProds.map(prod => {
                   const sel = isProdSelected(prod)
                   return (
-                    <button key={prod} onMouseEnter={() => setHoveredProd(prod)} onMouseLeave={() => setHoveredProd(null)} onClick={() => toggleProduct(prod)} style={{ width: '100%', padding: '7px 14px 7px 34px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 7, background: sel ? 'rgba(255,78,26,0.04)' : 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: sel ? 'var(--text)' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
-                      <Check sel={sel} /> {prod}
+                    <button key={prod} title={prod} onMouseEnter={() => setHoveredProd(prod)} onMouseLeave={() => setHoveredProd(null)} onClick={() => toggleProduct(prod)} style={{ width: '100%', padding: '7px 14px 7px 34px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 7, background: sel ? 'rgba(255,78,26,0.04)' : 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: sel ? 'var(--text)' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
+                      <Check sel={sel} /> <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prod}</span>
                       {hoveredProd === prod && (
                         <span onClick={e => { e.stopPropagation(); onChange({ product_category: [], product: [prod] }) }} style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: '2px 6px', borderRadius: 4, background: 'rgba(255,78,26,0.18)' }}>
                           only
@@ -388,8 +397,8 @@ function ProductDropdown({ filters, options, onChange }) {
           {filteredUncategorisedProducts.map(prod => {
             const sel = isProdSelected(prod)
             return (
-              <button key={prod} onMouseEnter={() => setHoveredProd(prod)} onMouseLeave={() => setHoveredProd(null)} onClick={() => toggleProduct(prod)} style={{ width: '100%', padding: '8px 14px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 7, background: sel ? 'rgba(255,78,26,0.06)' : 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: sel ? 'var(--text)' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
-                <Check sel={sel} /> {prod}
+              <button key={prod} title={prod} onMouseEnter={() => setHoveredProd(prod)} onMouseLeave={() => setHoveredProd(null)} onClick={() => toggleProduct(prod)} style={{ width: '100%', padding: '8px 14px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 7, background: sel ? 'rgba(255,78,26,0.06)' : 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: sel ? 'var(--text)' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
+                <Check sel={sel} /> <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prod}</span>
                 {hoveredProd === prod && (
                   <span onClick={e => { e.stopPropagation(); onChange({ product_category: [], product: [prod] }) }} style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: '2px 6px', borderRadius: 4, background: 'rgba(255,78,26,0.18)' }}>
                     only
@@ -584,7 +593,7 @@ export default function FilterBar({ filters, options, onChange, tab }) {
   })()
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 12 }}>
+    <div className="filter-bar" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginRight: 4 }}>
         <SlidersHorizontal size={13} style={{ color: 'var(--text-muted)' }} />
         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Filters</span>
@@ -615,7 +624,7 @@ export default function FilterBar({ filters, options, onChange, tab }) {
       {hasAny && (
         <>
           <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', minWidth: 0 }}>
             {isFiltered && <ActiveChip label={productChipLabel} onRemove={() => onChange({ product_category: [], product: [] })} />}
             {hasDate && (
               <ActiveChip label={activePreset && activePreset !== 'All' ? `Last ${activePreset}` : `${fmtDate(filters.date_from)} to ${fmtDate(filters.date_to)}`} onRemove={() => onChange({ date_from: null, date_to: null })} />

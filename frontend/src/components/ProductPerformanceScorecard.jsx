@@ -22,7 +22,16 @@ export default function ProductPerformanceScorecard({ Card, productSummary }) {
     >
       {!productSummary.length ? <EmptyState /> : (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table className="dashboard-table" style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '30%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '12%' }} />
+            </colgroup>
             <thead>
               <tr>
                 {['Product', 'Reviews', 'Review Rating', 'Neg %', 'Pos %', 'Health', 'Verdict'].map(header => (
@@ -37,7 +46,9 @@ export default function ProductPerformanceScorecard({ Card, productSummary }) {
                 const verdict = health >= 75 ? '✅ Good' : health >= 60 ? '⚠️ Watch' : '🔴 Act Now'
                 return (
                   <tr key={row.product} style={{ background: index % 2 === 0 ? 'var(--surface)' : 'var(--surface2)' }}>
-                    <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 600 }}>{row.product}</td>
+                    <td title={row.product} style={{ padding: '10px 12px', fontSize: 13, fontWeight: 600 }}>
+                      <span className="product-name-clamp">{row.product}</span>
+                    </td>
                     <td style={{ padding: '10px 12px', fontSize: 13 }}>{row.total?.toLocaleString()}</td>
                     <td style={{ padding: '10px 12px' }}><Stars rating={row.avg_rating} /></td>
                     <td style={{ padding: '10px 12px' }}>

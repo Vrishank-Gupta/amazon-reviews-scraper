@@ -439,6 +439,7 @@ function Dashboard({ authedEmail, onLogout }) {
           <div
             style={{
               position: 'relative',
+              minWidth: 0,
             }}
           >
             <button
@@ -447,7 +448,8 @@ function Dashboard({ authedEmail, onLogout }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 10,
-                maxWidth: 320,
+                maxWidth: 'min(320px, 100%)',
+                minWidth: 0,
                 padding: '6px 10px',
                 borderRadius: 8,
                 border: '1px solid var(--border)',
@@ -460,7 +462,7 @@ function Dashboard({ authedEmail, onLogout }) {
                 <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                   Last Scrape
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--text)' }}>
+                <div className="product-name-one-line" style={{ fontSize: 12, color: 'var(--text)' }}>
                   {headerScrapeLabel}
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -493,7 +495,8 @@ function Dashboard({ authedEmail, onLogout }) {
                   position: 'absolute',
                   top: 'calc(100% + 8px)',
                   right: 0,
-                  width: 320,
+                  width: 'min(320px, calc(100vw - 28px))',
+                  maxWidth: 'calc(100vw - 28px)',
                   maxHeight: 260,
                   overflowY: 'auto',
                   padding: '10px 12px',
@@ -523,9 +526,10 @@ function Dashboard({ authedEmail, onLogout }) {
                       color: 'var(--text)',
                       fontSize: 12,
                       lineHeight: 1.4,
+                      minWidth: 0,
                     }}
                   >
-                    {product}
+                    <span title={product} className="product-name-clamp">{product}</span>
                   </div>
                 )) : (
                   <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
@@ -647,7 +651,7 @@ function Dashboard({ authedEmail, onLogout }) {
         </div>
       </div>
 
-      <main style={{ flex: 1, padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+      <main className="dashboard-main" style={{ flex: 1, padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
         <div className="glass-panel" style={{ borderRadius: 14, padding: '14px 20px' }}>
           <h1 style={{ margin: 0, fontSize: 28, lineHeight: 1.05, color: 'var(--text)', fontFamily: 'Bebas Neue', letterSpacing: '0.02em' }}>
             {currentTab.title}

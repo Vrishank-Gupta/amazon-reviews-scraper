@@ -236,7 +236,7 @@ function CategoryProductSelect({ value, onChange, products = [], tree = {}, allL
         {label}
       </button>
       {open && (
-        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', width: 360, maxHeight: 360, overflowY: 'auto', zIndex: 300, background: '#14141e', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 14px 30px rgba(0,0,0,0.55)', padding: 6 }}>
+        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', width: 'min(360px, calc(100vw - 28px))', maxHeight: 360, overflowY: 'auto', zIndex: 300, background: '#14141e', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 14px 30px rgba(0,0,0,0.55)', padding: 6 }}>
           <input
             value={query}
             onChange={event => setQuery(event.target.value)}
@@ -258,9 +258,9 @@ function CategoryProductSelect({ value, onChange, products = [], tree = {}, allL
                 {items.map(product => {
                   const selected = selectedProductSet.has(product)
                   return (
-                    <button key={product} onClick={() => toggleProduct(product)} style={{ width: '100%', padding: '6px 9px 6px 28px', textAlign: 'left', border: 'none', borderRadius: 6, background: selectedProducts.includes(product) ? 'rgba(255,78,26,0.07)' : 'transparent', color: selected ? 'var(--text)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, display: 'flex', gap: 7, alignItems: 'center' }}>
+                    <button key={product} onClick={() => toggleProduct(product)} style={{ width: '100%', padding: '6px 9px 6px 28px', textAlign: 'left', border: 'none', borderRadius: 6, background: selectedProducts.includes(product) ? 'rgba(255,78,26,0.07)' : 'transparent', color: selected ? 'var(--text)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, display: 'flex', gap: 7, alignItems: 'center', minWidth: 0 }}>
                       <span>{selected ? '✓' : '□'}</span>
-                      <span title={product} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{product}</span>
+                      <span title={product} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{product}</span>
                     </button>
                   )
                 })}
@@ -270,9 +270,9 @@ function CategoryProductSelect({ value, onChange, products = [], tree = {}, allL
           {otherProducts.length > 0 && otherProducts.map(product => {
             const selected = selectedProductSet.has(product)
             return (
-              <button key={product} onClick={() => toggleProduct(product)} style={{ width: '100%', padding: '6px 9px', textAlign: 'left', border: 'none', borderRadius: 6, background: selectedProducts.includes(product) ? 'rgba(255,78,26,0.07)' : 'transparent', color: selected ? 'var(--text)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, display: 'flex', gap: 7, alignItems: 'center' }}>
+              <button key={product} onClick={() => toggleProduct(product)} style={{ width: '100%', padding: '6px 9px', textAlign: 'left', border: 'none', borderRadius: 6, background: selectedProducts.includes(product) ? 'rgba(255,78,26,0.07)' : 'transparent', color: selected ? 'var(--text)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, display: 'flex', gap: 7, alignItems: 'center', minWidth: 0 }}>
                 <span>{selected ? '✓' : '□'}</span>
-                <span title={product}>{product}</span>
+                <span title={product} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{product}</span>
               </button>
             )
           })}
@@ -593,7 +593,7 @@ function CategoryReviewMix({ rows, onSelect }) {
         const verifiedPct = verifiedTotal ? ((row.verified || 0) / verifiedTotal) * 100 : 0
 
         return (
-          <div key={row.category} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 54px 78px', gap: 12, alignItems: 'center' }}>
+          <div key={row.category} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 180px) minmax(0, 1fr) 54px 78px', gap: 12, alignItems: 'center', minWidth: 0 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{row.category}</div>
             <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
               <div style={{ width: `${Math.max(scale * 100, 8)}%`, minWidth: 120, maxWidth: '100%' }}>
@@ -691,6 +691,15 @@ function CategoryWordCloudPanel({ category, sentiment, filters, onClose }) {
 }
 
 function PortfolioHealthStrip({ ratingSplit, topIssue, topCat, atRisk, onSelectIssue, onSelectCategory }) {
+  const clampText = {
+    minWidth: 0,
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflowWrap: 'anywhere',
+    lineHeight: 1.35,
+  }
   const totalStars = ratingSplit?.total || 0
   const splitRows = [
     { label: '1-2 Stars', value: ratingSplit?.bad || 0, color: '#ef4444' },
@@ -725,7 +734,7 @@ function PortfolioHealthStrip({ ratingSplit, topIssue, topCat, atRisk, onSelectI
       icon: 'Alert',
       content: topIssue ? (
         <>
-          <div title={topIssue.category} style={{ marginTop: 6, fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{topIssue.category}</div>
+          <div title={topIssue.category} style={{ marginTop: 6, fontSize: 14, fontWeight: 700, color: 'var(--text)', ...clampText }}>{topIssue.category}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{topIssue.mentions} mentions - {topIssue.isNew ? 'new this period' : 'growing'}</div>
           <div style={{ marginTop: 6, display: 'inline-block', fontSize: 10, fontWeight: 700, color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 999, padding: '2px 8px' }}>Investigate</div>
         </>
@@ -738,7 +747,7 @@ function PortfolioHealthStrip({ ratingSplit, topIssue, topCat, atRisk, onSelectI
       icon: 'Good',
       content: topCat ? (
         <>
-          <div title={topCat.category} style={{ marginTop: 6, fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{topCat.category}</div>
+          <div title={topCat.category} style={{ marginTop: 6, fontSize: 14, fontWeight: 700, color: 'var(--text)', ...clampText }}>{topCat.category}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{topCat.total} reviews - {topCat.total ? ((topCat.Positive / topCat.total) * 100).toFixed(0) : 0}% positive</div>
           <div style={{ marginTop: 6, display: 'inline-block', fontSize: 10, fontWeight: 700, color: '#22c55e', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 999, padding: '2px 8px' }}>Performing well</div>
         </>
@@ -751,7 +760,7 @@ function PortfolioHealthStrip({ ratingSplit, topIssue, topCat, atRisk, onSelectI
       icon: 'Risk',
       content: atRisk ? (
         <>
-          <div title={atRisk.product_name} style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{atRisk.product_name}</div>
+          <div title={atRisk.product_name} style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: 'var(--text)', ...clampText }}>{atRisk.product_name}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{atRisk.review_count} reviews - <span style={{ color: '#ef4444', fontWeight: 700 }}>{atRisk.neg_pct}% neg</span></div>
           <div style={{ marginTop: 6, display: 'inline-block', fontSize: 10, fontWeight: 700, color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 999, padding: '2px 8px' }}>Action needed</div>
         </>
@@ -763,17 +772,17 @@ function PortfolioHealthStrip({ ratingSplit, topIssue, topCat, atRisk, onSelectI
   const cardOrder = { 'Most At-Risk': 0, 'Top Issue - 7d': 1, 'Rating Split': 2, 'Top Category': 3 }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, padding: '14px 16px', background: 'linear-gradient(135deg, rgba(24,28,44,0.9), rgba(18,22,36,0.95))', border: '1px solid var(--border)', borderRadius: 14 }}>
+    <div className="dashboard-grid-4" style={{ gap: 10, padding: '14px 16px', background: 'linear-gradient(135deg, rgba(24,28,44,0.9), rgba(18,22,36,0.95))', border: '1px solid var(--border)', borderRadius: 14, minWidth: 0 }}>
       {[...cards].sort((a, b) => (cardOrder[a.label] ?? 99) - (cardOrder[b.label] ?? 99)).map(card => (
         <div
           key={card.label}
           onClick={card.onClick || undefined}
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', cursor: card.onClick ? 'pointer' : 'default', transition: 'border-color 0.15s, background 0.15s' }}
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', cursor: card.onClick ? 'pointer' : 'default', transition: 'border-color 0.15s, background 0.15s', minWidth: 0, overflow: 'hidden' }}
           onMouseEnter={e => { if (card.onClick) { e.currentTarget.style.background = card.hoverColor; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)' } }}
           onMouseLeave={e => { if (card.onClick) { e.currentTarget.style.background = 'var(--surface)'; e.currentTarget.style.borderColor = 'var(--border)' } }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-            <span>{card.label}</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', minWidth: 0 }}>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.label}</span>
             <span style={{ opacity: 0.5 }}>{card.icon}</span>
           </div>
           {card.content}
@@ -790,12 +799,12 @@ function AutoInsights({ insights }) {
       <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
         <span>*</span> Auto-detected signals
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+      <div className="dashboard-grid-3" style={{ gap: 10 }}>
         {insights.map((item, i) => (
-          <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+          <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: toneColor[item.tone] || 'var(--text-muted)', flexShrink: 0 }} />
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{item.title}</span>
+              <span className="product-name-one-line" style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{item.title}</span>
             </div>
             <p style={{ margin: 0, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>{item.body}</p>
           </div>
@@ -998,7 +1007,7 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0, maxWidth: '100%' }}>
       {portfolioHealth && (
         <PortfolioHealthStrip
           ratingSplit={portfolioHealth.ratingSplit}
@@ -1012,7 +1021,7 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
       {comparisonSlot}
       <AlertsBanner kpi={kpi} momentum={momentum} />
       <AutoInsights insights={autoInsights} />
-      <div style={{ display: 'grid', gridTemplateColumns: '300px minmax(280px, 360px) 1fr', gap: 16, alignItems: 'start' }}>
+      <div className="analysis-overview-grid">
         <OverviewCards kpi={kpi} ratingKpi={ratingKpi} productCount={scopedProducts.length || allProducts?.length || 0} periodLabel={periodLabel} />
         <Card title="Verified Purchase Split" sub="Purchase-backed mix and negative-rate gap for the current filter scope.">
           <PurchaseSplitPanel purchaseKpi={purchaseKpi} purchaseSentiment={purchaseSentiment} />

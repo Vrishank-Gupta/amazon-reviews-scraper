@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import ProductPerformanceScorecard from './ProductPerformanceScorecard'
 import ReviewsDrawer from './ReviewsDrawer'
 import { apiUrl, authHeaders } from '../api'
@@ -8,7 +8,7 @@ import {
   ReferenceLine
 } from 'recharts'
 
-// â”€â”€ CSV export (imported by App.jsx) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── CSV export (imported by App.jsx) ─────────────────────────────────────────
 export function downloadCSV(reviews) {
   const cols = ['review_id','reviewer_name','asin','product_name','rating','sentiment','primary_categories','sub_tags','review','review_url','scrape_date']
   const escape = v => {
@@ -24,7 +24,7 @@ export function downloadCSV(reviews) {
   a.click(); URL.revokeObjectURL(url)
 }
 
-// â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Constants ─────────────────────────────────────────────────────────────────
 const PAL = ['#ff4e1a','#ff8c42','#ffd166','#06d6a0','#60a5fa','#a855f7','#ec4899','#14b8a6','#f43f5e','#34d399','#fb923c','#c084fc']
 const PRODUCT_DISPLAY_LIMIT = 5
 
@@ -60,7 +60,7 @@ function asArray(value) {
   return value ? [value] : []
 }
 
-// â”€â”€ Info tooltip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Info tooltip ──────────────────────────────────────────────────────────────
 function InfoTip({ text }) {
   const [show, setShow] = useState(false)
   const ref = useRef(null)
@@ -95,7 +95,7 @@ function InfoTip({ text }) {
   )
 }
 
-// â”€â”€ Chart tooltip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Chart tooltip ─────────────────────────────────────────────────────────────
 function CT({ active, payload, label, fmt }) {
   if (!active || !payload?.length) return null
   return (
@@ -111,10 +111,10 @@ function CT({ active, payload, label, fmt }) {
   )
 }
 
-// â”€â”€ Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Card ─────────────────────────────────────────────────────────────────────
 function Card({ title, sub, tip, children, controls, accent }) {
   return (
-    <div style={{ background:'var(--surface)', border:`1px solid ${accent||'var(--border)'}`, borderRadius:12, padding:'18px 20px', display:'flex', flexDirection:'column', gap:14 }}>
+    <div style={{ background:'var(--surface)', border:`1px solid ${accent||'var(--border)'}`, borderRadius:12, padding:'18px 20px', display:'flex', flexDirection:'column', gap:14, minWidth:0, maxWidth:'100%' }}>
       {(title||controls) && (
         <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
           <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
@@ -132,7 +132,7 @@ function Card({ title, sub, tip, children, controls, accent }) {
   )
 }
 
-// â”€â”€ KPI tile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── KPI tile ──────────────────────────────────────────────────────────────────
 function KPI({ label, value, sub, color, delta, deltaInvert, tip }) {
   const deltaColor = delta == null ? null : (delta > 0) === !deltaInvert ? '#ef4444' : '#22c55e'
   return (
@@ -152,8 +152,8 @@ function KPI({ label, value, sub, color, delta, deltaInvert, tip }) {
   )
 }
 
-// â”€â”€ Momentum widget (full replacement) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// â”€â”€ Issue Watchlist â€” replaces useless momentum widget â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Momentum widget (full replacement) ───────────────────────────────────────
+// ── Issue Watchlist — replaces useless momentum widget ───────────────────────
 // Ranks issues by current-period volume, signals direction vs prior half
 function IssueWatchlist({ momentum, onRowClick }) {
   if (!momentum?.length) return (
@@ -177,9 +177,9 @@ function IssueWatchlist({ momentum, onRowClick }) {
   const maxTotal = ranked[0].first + ranked[0].second
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:6, minWidth:0 }}>
       {/* Column headers */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 48px 52px 60px', gap:8, padding:'0 2px 4px', borderBottom:'1px solid var(--border)' }}>
+      <div className="issue-watch-row issue-watch-row--head">
         <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)' }}>Issue</div>
         <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', textAlign:'right' }}>Total</div>
         <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--text-muted)', textAlign:'center' }}>Trend</div>
@@ -203,7 +203,7 @@ function IssueWatchlist({ momentum, onRowClick }) {
         const barW = Math.round((total / maxTotal) * 100)
         const barColor = rising || isNew ? '#ef4444' : falling || resolved ? '#22c55e' : '#60a5fa'
 
-        // Priority badge â€” top 3 get escalating urgency
+        // Priority badge — top 3 get escalating urgency
         const priority = i === 0 ? { label: 'P1', sub: 'Critical', color: '#ef4444' }
                         : i === 1 ? { label: 'P2', sub: 'High',     color: '#f97316' }
                         : i === 2 ? { label: 'P3', sub: 'Watch',    color: '#fbbf24' }
@@ -213,25 +213,25 @@ function IssueWatchlist({ momentum, onRowClick }) {
           <div key={m.category}
             onClick={() => onRowClick && onRowClick(m.category)}
             style={{
-              display:'grid', gridTemplateColumns:'1fr 48px 52px 60px', gap:8, alignItems:'center',
               padding:'8px 10px', borderRadius:8,
               background: i < 3 ? `${signal.color}06` : 'var(--surface2)',
               border: `1px solid ${i < 3 ? signal.color + '20' : 'transparent'}`,
               cursor: onRowClick ? 'pointer' : 'default',
               transition:'filter 0.12s',
             }}
+            className="issue-watch-row"
             onMouseEnter={e => onRowClick && (e.currentTarget.style.filter='brightness(1.3)')}
             onMouseLeave={e => (e.currentTarget.style.filter='brightness(1)')}
           >
             {/* Name + bar */}
             <div style={{ display:'flex', flexDirection:'column', gap:4, minWidth:0 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6, minWidth:0 }}>
                 {priority && (
                   <span style={{ display:'inline-flex', alignItems:'center', gap:2, fontSize:9, fontWeight:700, color:priority.color, flexShrink:0, background:`${priority.color}15`, border:`1px solid ${priority.color}30`, borderRadius:4, padding:'1px 5px', whiteSpace:'nowrap' }}>
                     {priority.label} <span style={{ opacity:0.65, fontWeight:400 }}>- {priority.sub}</span>
                   </span>
                 )}
-                    <span title={m.category} style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    <span title={m.category} style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', minWidth:0 }}>
                   {m.category}
                 </span>
               </div>
@@ -313,9 +313,9 @@ function EmergingIssues({ momentum, onSelect }) {
         const isNew = item.first === 0 && item.second > 0
         const signalColor = isNew ? '#f97316' : '#ef4444'
         return (
-          <button key={item.category} onClick={() => onSelect?.(item.category)} style={{ background:'rgba(255,255,255,0.03)', border:`1px solid ${signalColor}24`, borderRadius:10, padding:'10px 12px', display:'grid', gridTemplateColumns:'1fr auto auto', gap:10, alignItems:'center', cursor:'pointer', color:'inherit', textAlign:'left' }}>
+          <button key={item.category} onClick={() => onSelect?.(item.category)} style={{ background:'rgba(255,255,255,0.03)', border:`1px solid ${signalColor}24`, borderRadius:10, padding:'10px 12px', display:'grid', gridTemplateColumns:'minmax(0, 1fr) auto auto', gap:10, alignItems:'center', cursor:'pointer', color:'inherit', textAlign:'left', minWidth:0 }}>
             <div style={{ minWidth:0 }}>
-              <div style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{item.category}</div>
+              <div title={item.category} style={{ fontSize:12, fontWeight:700, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.category}</div>
               <div style={{ fontSize:11, color:'var(--text-muted)' }}>
                 {isNew ? 'New issue in the recent half of the period' : `Up from ${item.first} to ${item.second} mentions`}
               </div>
@@ -358,28 +358,28 @@ function ConsistencyWatch({ ratingDist, productSummary }) {
   if (!items.length) return <Empty />
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+    <div className="consistency-list">
       {items.map(item => {
         const verdict = item.polarity >= 18 ? 'Highly Polarized' : item.polarity >= 10 ? 'Mixed Experience' : 'More Consistent'
         const color = item.polarity >= 18 ? '#f97316' : item.polarity >= 10 ? '#eab308' : '#22c55e'
         return (
-          <div key={item.product} style={{ background:'rgba(255,255,255,0.03)', border:`1px solid ${color}24`, borderRadius:10, padding:'10px 12px', display:'flex', flexDirection:'column', gap:6 }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
-              <div style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{item.product}</div>
-              <div style={{ fontSize:10, fontWeight:700, color, textTransform:'uppercase', letterSpacing:'0.08em' }}>{verdict}</div>
+          <div key={item.product} className="consistency-card" style={{ borderColor:`${color}24` }}>
+            <div className="consistency-card__head">
+              <div title={item.product} className="consistency-card__product">{item.product}</div>
+              <div className="consistency-card__badge" style={{ color, borderColor:`${color}40`, background:`${color}12` }}>{verdict}</div>
             </div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
+            <div className="consistency-card__metrics">
               <div>
-                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>1-star Share</div>
-                <div style={{ fontSize:13, fontWeight:700, color:'#ef4444' }}>{item.onePct}%</div>
+                <div className="consistency-card__label">1-star</div>
+                <div className="consistency-card__value" style={{ color:'#ef4444' }}>{item.onePct}%</div>
               </div>
               <div>
-                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>5-star Share</div>
-                <div style={{ fontSize:13, fontWeight:700, color:'#22c55e' }}>{item.fivePct}%</div>
+                <div className="consistency-card__label">5-star</div>
+                <div className="consistency-card__value" style={{ color:'#22c55e' }}>{item.fivePct}%</div>
               </div>
               <div>
-                <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>Problem Rate</div>
-                <div style={{ fontSize:13, fontWeight:700, color:'var(--text)' }}>{item.summary?.neg_pct ?? 0}%</div>
+                <div className="consistency-card__label">Problem</div>
+                <div className="consistency-card__value" style={{ color:'var(--text)' }}>{item.summary?.neg_pct ?? 0}%</div>
               </div>
             </div>
           </div>
@@ -389,9 +389,9 @@ function ConsistencyWatch({ ratingDist, productSummary }) {
   )
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────────────────────
 export default function TrendsPage({ products: allProducts, filters }) {
   const [data, setData]   = useState(null)
   const [loading, setLoading] = useState(true)
@@ -432,7 +432,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
 
   const toggleCat = c => setHiddenCats(s => { const n=new Set(s); n.has(c)?n.delete(c):n.add(c); return n })
 
-  // Auto-hide low-volume categories when data loads â€” keep top 5 visible
+  // Auto-hide low-volume categories when data loads — keep top 5 visible
   useEffect(() => {
     if (!momentum.length || !allCats.length) return
     const top5 = new Set([...momentum].sort((a,b) => (b.first+b.second)-(a.first+a.second)).slice(0,5).map(m => m.category))
@@ -529,11 +529,11 @@ export default function TrendsPage({ products: allProducts, filters }) {
   ].filter(Boolean).join(' - ')
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:20, minWidth:0, maxWidth:'100%' }}>
 
       {/* Active filter pill */}
       {filterSummary && (
-        <div style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', background:'rgba(255,78,26,0.06)', border:'1px solid rgba(255,78,26,0.2)', borderRadius:8, fontSize:11, color:'var(--accent)', width:'fit-content' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', background:'rgba(255,78,26,0.06)', border:'1px solid rgba(255,78,26,0.2)', borderRadius:8, fontSize:11, color:'var(--accent)', width:'fit-content', maxWidth:'100%', minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
           <span style={{ opacity:0.6 }}>Filters active:</span> {filterSummary}
         </div>
       )}
@@ -546,7 +546,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
       <>
 
       {/* SECTION 1: EXECUTIVE SNAPSHOT */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
+      <div className="dashboard-grid-4">
         <KPI label="Feedback Volume" value={kpi.total?.toLocaleString()} color="#60a5fa"
           sub={`in selected period`}
           tip="Total number of reviews scraped from Amazon for the selected products and date range." />
@@ -597,12 +597,12 @@ export default function TrendsPage({ products: allProducts, filters }) {
         </div>
       )}
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+      <div className="trends-alert-grid">
         <Card
           title="Emerging Issues"
           tip="Issues absent or small in the first half of the period that are now growing."
           controls={
-          <select value={effectiveIssueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+          <select className="dashboard-select" value={effectiveIssueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
             <option value="">All Products</option>
             {allProds.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
@@ -621,7 +621,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
         </Card>
       </div>
 
-      {/* â”€â”€ SECTION 2: BRAND HEALTH SCORE â”€â”€ */}
+      {/* ── SECTION 2: BRAND HEALTH SCORE ── */}
       <Card
         title="Brand Health Score"
         tip="Composite score from 0-100. Formula: 100 minus the 7-day rolling negative rate. Below 60 is critical and requires immediate action. 60-75 is a watch zone. Above 75 is healthy. The rolling average smooths out day-to-day noise so you see the real trend."
@@ -670,7 +670,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
         )}
       </Card>
 
-      {/* â”€â”€ SECTION 4: PRODUCT SCORECARD â”€â”€ */}
+      {/* ── SECTION 4: PRODUCT SCORECARD ── */}
       <ProductPerformanceScorecard Card={Card} productSummary={productSummary} />
       {false && <Card
         title="Product Performance Scorecard"
@@ -722,12 +722,12 @@ export default function TrendsPage({ products: allProducts, filters }) {
         )}
       </Card>}
 
-      {/* â”€â”€ SECTION 5: PRODUCT HEAD-TO-HEAD â”€â”€ */}
+      {/* ── SECTION 5: PRODUCT HEAD-TO-HEAD ── */}
       <Card
         title="Problem Rate by Product Over Time"
         tip="Daily negative rate % per product. Red dashed line at 50% is critical threshold."
         controls={
-          <select value={effectiveSelectedProd || ''} onChange={e => setSelectedProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveSelectedProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+          <select className="dashboard-select" value={effectiveSelectedProd || ''} onChange={e => setSelectedProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveSelectedProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
             <option value="">All Products</option>
             {allProds.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
@@ -750,16 +750,16 @@ export default function TrendsPage({ products: allProducts, filters }) {
         )}
       </Card>
 
-      {/* â”€â”€ SECTION 6: ISSUE CATEGORY TRENDS + MOMENTUM â”€â”€ */}
-      <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:16 }}>
+      {/* ── SECTION 6: ISSUE CATEGORY TRENDS + MOMENTUM ── */}
+      <div className="trends-issue-grid">
 
         <Card
           title="Issue Pressure Over Time"
           tip="Daily count of negative reviews per issue category. Use Daily view to spot when a specific issue spiked. Use Totals view to rank categories by total volume across the period. Click category pills above the chart to isolate a specific issue."
           sub="Shows which problems are persistent versus episodic"
           controls={
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <select value={effectiveIssueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', minWidth:0 }}>
+              <select className="dashboard-select" value={effectiveIssueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none', maxWidth:'100%' }}>
                 <option value="">All Products</option>
                 {allProds.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
@@ -776,8 +776,10 @@ export default function TrendsPage({ products: allProducts, filters }) {
                 background: hiddenCats.has(c)?'transparent':`${PAL[i%PAL.length]}15`,
                 color: hiddenCats.has(c)?'var(--text-muted)':PAL[i%PAL.length],
                 opacity: hiddenCats.has(c)?0.4:1,
+                minWidth:0, maxWidth:220,
               }}>
-                <span style={{ width:6, height:6, borderRadius:'50%', background:PAL[i%PAL.length] }} />{c}
+                <span style={{ width:6, height:6, borderRadius:'50%', background:PAL[i%PAL.length], flexShrink:0 }} />
+                <span title={c} style={{ minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c}</span>
               </button>
             ))}
             {hiddenCats.size > 0 && (
@@ -818,7 +820,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
                     >
                       <div style={{ fontSize:11, color:'var(--text-muted)', width:14, textAlign:'right' }}>{i+1}</div>
                       <div title={row.category} style={{ fontSize:12, fontWeight:600, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{row.category}</div>
-                      <div style={{ width:80, height:5, background:'var(--border)', borderRadius:2 }}>
+                      <div style={{ width:80, maxWidth:'18vw', height:5, background:'var(--border)', borderRadius:2, flexShrink:0 }}>
                         <div style={{ height:'100%', width:`${(rowTotal/max)*100}%`, background:PAL[i%PAL.length], borderRadius:2 }} />
                       </div>
                       <div style={{ fontSize:12, fontWeight:700, color:PAL[i%PAL.length], width:28, textAlign:'right' }}>{rowTotal}</div>
@@ -835,7 +837,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
           title="Issues That Need Attention"
           tip="Top negative issues ranked by total volume. RISING = escalate now, NEW = fresh problem, FALLING = fix working, STABLE = chronic."
           controls={
-            <select value={effectiveIssueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+            <select className="dashboard-select" value={effectiveIssueProd || ''} onChange={e => setIssueProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: effectiveIssueProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
               <option value="">All Products</option>
               {allProds.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
@@ -846,13 +848,13 @@ export default function TrendsPage({ products: allProducts, filters }) {
         </Card>
       </div>
 
-      {/* â”€â”€ SECTION 8: RATING DISTRIBUTION â”€â”€ */}
+      {/* ── SECTION 8: RATING DISTRIBUTION ── */}
       <Card
         title="Rating Distribution by Product"
         tip="Horizontal bar breakdown of 1-star through 5-star reviews per product. A healthy product is top-heavy - most reviews at 4-star and 5-star. A bimodal distribution (both 1-star and 5-star are high) means polarised opinions, often a sign of a quality consistency issue."
         sub='Healthy = top-heavy (4-star + 5-star). Bimodal = quality consistency issue.'
         controls={
-          <select value={ratingDistProd || ''} onChange={e => setRatingDistProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: ratingDistProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
+          <select className="dashboard-select" value={ratingDistProd || ''} onChange={e => setRatingDistProd(e.target.value || null)} style={{ padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', color: ratingDistProd ? 'var(--accent)' : 'var(--text-muted)', fontSize:11, fontFamily:'DM Sans', cursor:'pointer', outline:'none' }}>
             <option value="">All Products</option>
             {allProds.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
@@ -864,7 +866,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
               const total = [1,2,3,4,5].reduce((s,n)=>s+(row[n]||0),0)
               return (
                 <div key={row.product} style={{ display:'flex', flexDirection:'column', gap:5 }}>
-                  <div style={{ fontSize:12, fontWeight:700 }}>{row.product}</div>
+                  <div title={row.product} className="product-name-clamp">{row.product}</div>
                   {[5,4,3,2,1].map(star => {
                     const cnt = row[star]||0
                     const pct = total>0?(cnt/total*100).toFixed(1):0
@@ -887,7 +889,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
         )}
       </Card>
 
-      {/* â”€â”€ SECTION 9: RATING TRENDS â”€â”€ */}
+      {/* ── SECTION 9: RATING TRENDS ── */}
       {false && <Card
         title="Rating Trends"
         tip="Three views of rating health over time. Top: Amazon's displayed product-page rating, sourced from listing snapshots and forward-filled between scrape dates. This can be shared across variation families. The scorecards use only scraped reviews inside the selected period. Middle: daily average of scraped reviews. Bottom: total number of ratings on Amazon."

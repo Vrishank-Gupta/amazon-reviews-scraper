@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Search,
 } from 'lucide-react'
+import { productDisplayName } from './shared'
 
 const PAGE_SIZE = 20
 
@@ -186,7 +187,7 @@ export default function ReviewsTable({ data }) {
     if (normalizedQuery) {
       result = result.filter(row => {
         const haystack = [
-          row.product_name,
+          productDisplayName(row),
           row.category,
           row.reviewer_name,
           row.review,
@@ -218,8 +219,8 @@ export default function ReviewsTable({ data }) {
         av = a.scrape_date || ''
         bv = b.scrape_date || ''
       } else {
-        av = (a[sortKey] || '').toString().toLowerCase()
-        bv = (b[sortKey] || '').toString().toLowerCase()
+        av = (sortKey === 'product_name' ? productDisplayName(a) : a[sortKey] || '').toString().toLowerCase()
+        bv = (sortKey === 'product_name' ? productDisplayName(b) : b[sortKey] || '').toString().toLowerCase()
       }
 
       if (av < bv) return sortDir === 'asc' ? -1 : 1
@@ -271,7 +272,7 @@ export default function ReviewsTable({ data }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 10 }}>
+      <div className="reviews-stat-grid">
         {[
           { label: 'Total Reviews', value: stats.total, color: 'var(--accent)' },
           { label: 'Verified', value: stats.verified, color: '#22c55e' },
@@ -319,7 +320,7 @@ export default function ReviewsTable({ data }) {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', minWidth: 280, flex: 1 }}>
+        <div style={{ position: 'relative', minWidth: 220, flex: 1 }}>
           <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-muted)' }} />
           <input
             value={query}
@@ -352,7 +353,7 @@ export default function ReviewsTable({ data }) {
 
       {pageRows.length ? (
         <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 12, background: 'rgba(255,255,255,0.02)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table className="reviews-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={thStyle}>Category</th>
@@ -368,7 +369,9 @@ export default function ReviewsTable({ data }) {
               </tr>
             </thead>
             <tbody>
-              {pageRows.map((row, index) => (
+              {pageRows.map((row, index) => {
+                const displayName = productDisplayName(row) || 'Unknown Product'
+                return (
                 <tr
                   key={row.review_id || `${row.product_name}-${index}`}
                   style={{ background: 'transparent', transition: 'background 0.15s' }}
@@ -378,8 +381,10 @@ export default function ReviewsTable({ data }) {
                   <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
                     {row.category || 'Other'}
                   </td>
-                  <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }}>
-                    {row.product_name || row.asin || 'Unknown Product'}
+                  <td title={displayName} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600, maxWidth: 300 }}>
+                    <span style={{ minWidth: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.35 }}>
+                    {displayName}
+                    </span>
                   </td>
                   <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, whiteSpace: 'nowrap' }}>
                     <HighlightText text={row.reviewer_name || '—'} query={normalizedQuery} />
@@ -434,7 +439,7 @@ export default function ReviewsTable({ data }) {
                     ) : '—'}
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>

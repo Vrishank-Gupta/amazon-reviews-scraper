@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 
+export function productDisplayName(rowOrName) {
+  if (!rowOrName) return ''
+  if (typeof rowOrName === 'string') return rowOrName
+  return rowOrName.display_product_name || rowOrName.product_name || rowOrName.asin || ''
+}
+
 export function InfoTip({ text }) {
   const [show, setShow] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0 })
@@ -145,6 +151,8 @@ export function Card({ title, sub, tip, children, controls, accent, style: extra
         display: 'flex',
         flexDirection: 'column',
         gap: 14,
+        minWidth: 0,
+        maxWidth: '100%',
         ...extraStyle,
       }}
     >

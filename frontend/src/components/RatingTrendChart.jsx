@@ -92,9 +92,9 @@ function SeriesLegend({ products, colorMap }) {
   return (
     <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 4 }}>
       {products.map(product => (
-        <span key={product} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+        <span key={product} title={product} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', minWidth: 0, maxWidth: 260 }}>
           <span style={{ width: 20, height: 2.5, borderRadius: 2, background: colorMap[product], display: 'inline-block' }} />
-          {product}
+          <span className="product-name-one-line">{product}</span>
         </span>
       ))}
     </div>
@@ -165,12 +165,12 @@ function CategoryProductSelect({ value, onChange, products = [], tree = {}, styl
   }
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button title={value || 'All Products In Scope'} onClick={() => setOpen(o => !o)} style={{ ...style, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {value || 'All Products In Scope'}
+    <div ref={ref} style={{ position: 'relative', minWidth: 0, maxWidth: '100%' }}>
+      <button title={value || 'All Products In Scope'} onClick={() => setOpen(o => !o)} style={{ ...style, maxWidth: 'min(300px, 100%)', minWidth: 0 }}>
+        <span className="product-name-one-line">{value || 'All Products In Scope'}</span>
       </button>
       {open && (
-        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', width: 360, maxHeight: 360, overflowY: 'auto', zIndex: 300, background: '#14141e', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 14px 30px rgba(0,0,0,0.55)', padding: 6 }}>
+        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', width: 'min(360px, calc(100vw - 28px))', maxWidth: 'calc(100vw - 28px)', maxHeight: 360, overflowY: 'auto', zIndex: 300, background: '#14141e', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 14px 30px rgba(0,0,0,0.55)', padding: 6 }}>
           <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search category or product" style={{ width: '100%', marginBottom: 6, padding: '7px 9px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 11, outline: 'none', fontFamily: 'DM Sans' }} />
           <button onClick={() => choose(null)} style={{ width: '100%', padding: '7px 9px', textAlign: 'left', border: 'none', borderRadius: 6, background: !value ? 'rgba(255,78,26,0.1)' : 'transparent', color: !value ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
             All Products In Scope
@@ -186,8 +186,8 @@ function CategoryProductSelect({ value, onChange, products = [], tree = {}, styl
             </div>
           ))}
           {otherProducts.length > 0 && otherProducts.map(product => (
-            <button key={product} title={product} onClick={() => choose(product)} style={{ width: '100%', padding: '6px 9px', textAlign: 'left', border: 'none', borderRadius: 6, background: value === product ? 'rgba(255,78,26,0.1)' : 'transparent', color: value === product ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11 }}>
-              {product}
+            <button key={product} title={product} onClick={() => choose(product)} style={{ width: '100%', padding: '6px 9px', textAlign: 'left', border: 'none', borderRadius: 6, background: value === product ? 'rgba(255,78,26,0.1)' : 'transparent', color: value === product ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 11, minWidth: 0 }}>
+              <span className="product-name-one-line">{product}</span>
             </button>
           ))}
         </div>
@@ -236,7 +236,7 @@ function SnapshotTable({ rows }) {
 
   return (
     <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 12 }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table className="dashboard-table" style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <thead>
           <tr>
             {['Category', 'Product', 'Amazon Listing Rating', 'Amazon Listing Rating Count'].map(label => (
@@ -264,7 +264,9 @@ function SnapshotTable({ rows }) {
           {rows.map((row, index) => (
             <tr key={`${row.category}-${row.product}-${index}`} style={{ background: index % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)' }}>
               <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{row.category}</td>
-              <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700 }}>{row.product}</td>
+              <td title={row.product} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700 }}>
+                <span className="product-name-clamp">{row.product}</span>
+              </td>
               <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700, color: ratingColor(row.overall) }}>
                 {row.overall != null ? `${Number(row.overall).toFixed(1)} ${renderStars(row.overall)}` : '-'}
               </td>

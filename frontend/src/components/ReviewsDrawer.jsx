@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ExternalLink } from 'lucide-react'
 import { apiUrl, authHeaders } from '../api'
+import { productDisplayName } from './shared'
 
 function asArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean)
@@ -49,6 +50,7 @@ function ReviewCard({ r }) {
   const [open, setOpen] = useState(false)
   const date = r.review_date?.replace('Reviewed in India on ', '') || ''
   const tags = Array.isArray(r.sub_tags) ? r.sub_tags : []
+  const displayName = productDisplayName(r)
 
   return (
     <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
@@ -56,12 +58,13 @@ function ReviewCard({ r }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
         <SentBadge s={r.sentiment} />
         <StarLabel rating={r.rating} />
-        {r.product_name && (
+        {displayName && (
           <span
-            title={r.product_name}
-            style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--surface2)', padding: '1px 7px', borderRadius: 4, border: '1px solid var(--border)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}
+            title={displayName}
+            className="product-name-one-line"
+            style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--surface2)', padding: '1px 7px', borderRadius: 4, border: '1px solid var(--border)', maxWidth: 220, display: 'inline-block' }}
           >
-            {r.product_name}
+            {displayName}
           </span>
         )}
         <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>{date}</span>
@@ -179,8 +182,8 @@ export default function ReviewsDrawer({
       <div
         style={{
           position: 'fixed', right: 0, top: 0,
-          width: 480,
-          maxWidth: '95vw',
+          width: 'min(520px, calc(100vw - 18px))',
+          maxWidth: 'calc(100vw - 18px)',
           height: '100vh',
           background: 'var(--surface)',
           borderLeft: '1px solid var(--border)',
@@ -219,7 +222,7 @@ export default function ReviewsDrawer({
           {/* Row 2: tags + counts */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
             {productName && (
-              <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--surface)', padding: '1px 7px', borderRadius: 4, border: '1px solid var(--border)' }}>
+              <span title={productName} className="product-name-one-line" style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--surface)', padding: '1px 7px', borderRadius: 4, border: '1px solid var(--border)', maxWidth: 320 }}>
                 {productName}
               </span>
             )}
