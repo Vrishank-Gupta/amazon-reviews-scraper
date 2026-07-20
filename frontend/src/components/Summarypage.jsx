@@ -116,7 +116,7 @@ function buildWordRows(words, tone) {
     .sort((left, right) => right.count - left.count)
 }
 
-function ProductDrillDown({ row, filters, ratingDistribution }) {
+function ProductDrillDown({ row, filters }) {
   const [analysis, setAnalysis] = useState(null)
   const [loading, setLoading] = useState(true)
   const [wcData, setWcData] = useState([])
@@ -127,20 +127,20 @@ function ProductDrillDown({ row, filters, ratingDistribution }) {
 
   useEffect(() => {
     setLoading(true)
-    fetchAnalysis({ product: [row.product_name], rating: filters.rating, verified_purchase: filters.verified_purchase, date_from: filters.date_from, date_to: filters.date_to })
+    fetchAnalysis({ asin: row.asin, rating: filters.rating, verified_purchase: filters.verified_purchase, date_from: filters.date_from, date_to: filters.date_to })
       .then(setAnalysis)
       .catch(() => setAnalysis(null))
       .finally(() => setLoading(false))
-  }, [row.product_name, JSON.stringify(filters.rating), JSON.stringify(filters.verified_purchase || []), filters.date_from, filters.date_to])
+  }, [row.asin, JSON.stringify(filters.rating), JSON.stringify(filters.verified_purchase || []), filters.date_from, filters.date_to])
 
   useEffect(() => {
     setWcLoading(true)
     setActiveWord(null)
-    fetchWordCloud({ product: [row.product_name], rating: filters.rating, verified_purchase: filters.verified_purchase, date_from: filters.date_from, date_to: filters.date_to })
+    fetchWordCloud({ asin: row.asin, rating: filters.rating, verified_purchase: filters.verified_purchase, date_from: filters.date_from, date_to: filters.date_to })
       .then(payload => setWcData(payload || []))
       .catch(() => setWcData([]))
       .finally(() => setWcLoading(false))
-  }, [row.product_name, JSON.stringify(filters.rating), JSON.stringify(filters.verified_purchase || []), filters.date_from, filters.date_to])
+  }, [row.asin, JSON.stringify(filters.rating), JSON.stringify(filters.verified_purchase || []), filters.date_from, filters.date_to])
 
   const issueRows = analysis?.neg_pie || []
   const positiveRows = analysis?.pos_pie || []
@@ -175,7 +175,7 @@ function ProductDrillDown({ row, filters, ratingDistribution }) {
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Rating Distribution</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Moved here from the overview layer so the split is visible in product drill-down.</div>
           </div>
-          <RatingDistribution row={ratingDistribution} />
+          <RatingDistribution row={analysis?.rating_kpi} />
         </div>
       </div>
 
@@ -229,6 +229,7 @@ function ProductDrillDown({ row, filters, ratingDistribution }) {
           productName={row.product_name}
           sentiment={drawerSentiment}
           filters={filters}
+          asin={row.asin}
           onClose={() => setActiveWord(null)}
         />
       </div>

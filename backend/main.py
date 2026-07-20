@@ -29,6 +29,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from shared.env import load_project_env
+from shared.product_names import amazon_display_product_name
 
 load_project_env()
 
@@ -250,6 +251,11 @@ def _load_asin_map():
 
 ASIN_MAP, CAT_MAP, ALL_PRODS = _load_asin_map()
 
+CATEGORY_FILTER_INCLUDES = {
+    "Locks": ["Locks", "Lock & VDB Pro combo"],
+    "VDB": ["VDB", "Lock & VDB Pro combo"],
+}
+
 
 def _refresh_asin_globals():
     global ASIN_MAP, CAT_MAP, ALL_PRODS
@@ -291,9 +297,33 @@ def _save_categories(categories):
         json.dump(cleaned, f, ensure_ascii=True, indent=2)
 
 
+def expand_filter_categories(categories):
+    expanded = []
+    for category in categories:
+        for item in CATEGORY_FILTER_INCLUDES.get(category, [category]):
+            if item not in expanded:
+                expanded.append(item)
+    return expanded
+
+
+def is_lock_vdb_bundle_name(product_name):
+    text = (product_name or "").lower()
+    return any(token in text for token in ("doorbell", "vdb", "video call"))
+
+
+def tree_categories_for(raw_category, product_name=""):
+    categories = [raw_category] if raw_category else []
+    for display_category, included_categories in CATEGORY_FILTER_INCLUDES.items():
+        if raw_category in included_categories and display_category not in categories:
+            categories.append(display_category)
+    if raw_category == "Locks" and is_lock_vdb_bundle_name(product_name) and "VDB" not in categories:
+        categories.append("VDB")
+    return categories
+
+
 def resolve_products(product: Optional[str], category: Optional[str]) -> Optional[list]:
     """
-    Resolve the product filter to a flat list of product_names.
+    Resolve dashboard product/category filters into SQL-filter tokens.
     Priority: explicit product list > category > None (= all products)
     Returns None if no filter should be applied (all products).
     """
@@ -304,19 +334,39 @@ def resolve_products(product: Optional[str], category: Optional[str]) -> Optiona
         selected = []
         for cat in [c.strip() for c in category.split("|||") if c.strip()]:
             canonical = category_lookup.get(cat.lower(), cat)
-            selected.extend(CAT_MAP.get(canonical, []))
+            selected.append(canonical)
         seen = set()
-        prods = [p for p in selected if not (p in seen or seen.add(p))]
-        return prods if prods else ["__NO_MATCH__"]
+        categories = [c for c in selected if not (c in seen or seen.add(c))]
+        expanded_categories = expand_filter_categories(categories)
+        return [f"__CATEGORY__:{c}" for c in expanded_categories] if expanded_categories else ["__NO_MATCH__"]
     return None
 
 
 def product_filter_sql(products: Optional[list], table_alias: str = "r") -> tuple:
-    """Returns (sql_fragment, params_list) for product_name IN (...)"""
+    """Returns (sql_fragment, params_list) for product_name or category filters."""
     if not products:
         return "", []
+    categories = [p.split(":", 1)[1] for p in products if isinstance(p, str) and p.startswith("__CATEGORY__:")]
+    if categories and len(categories) == len(products):
+        placeholders = ",".join(["%s"] * len(categories))
+        if "VDB" in categories:
+            return (
+                f" AND ({table_alias}.category IN ({placeholders})"
+                f" OR ({table_alias}.category = %s AND ("
+                f"LOWER({table_alias}.product_name) LIKE %s OR "
+                f"LOWER({table_alias}.product_name) LIKE %s OR "
+                f"LOWER({table_alias}.product_name) LIKE %s)))"
+            ), [*categories, "Locks", "%doorbell%", "%vdb%", "%video call%"]
+        return f" AND {table_alias}.category IN ({placeholders})", categories
     placeholders = ",".join(["%s"] * len(products))
     return f" AND {table_alias}.product_name IN ({placeholders})", list(products)
+
+
+def effective_asin_filter_sql(asin: Optional[str], table_alias: str = "r") -> tuple:
+    """Filter a variant-aware dashboard row by the same key used by /api/summary."""
+    if not asin:
+        return "", []
+    return f" AND COALESCE({table_alias}.variant_asin, {table_alias}.asin) = %s", [asin]
 
 
 def rating_filter_sql(rating: Optional[str], table_alias: str = "r") -> tuple:
@@ -745,7 +795,8 @@ def get_reviews(
 
             query = """
                 SELECT
-                    r.review_id, r.reviewer_name, r.asin, r.product_name, r.category,
+                    r.review_id, r.reviewer_name, r.asin, r.scrape_asin, r.variant_asin,
+                    r.variant_label, r.variant_dimension, r.product_name, r.category,
                     r.rating, r.review, r.title, r.review_date,
                     r.verified_purchase, r.review_url, r.scrape_date,
                     t.sentiment, t.primary_categories, t.sub_tags
@@ -788,6 +839,10 @@ def get_reviews(
             row["sub_tags"] = json.loads(row["sub_tags"] or "[]")
             row["verified_purchase"] = (
                 None if row.get("verified_purchase") is None else bool(row.get("verified_purchase"))
+            )
+            row["display_product_name"] = amazon_display_product_name(
+                row.get("product_name"),
+                row.get("variant_label"),
             )
             result.append(row)
 
@@ -865,8 +920,12 @@ def export_raw_reviews_excel(
         for row in db_rows:
             posting_date = row.get("posting_date")
             scrape_date = row.get("scrape_date")
+            display_product_name = amazon_display_product_name(
+                row.get("product_name"),
+                row.get("variant_label"),
+            )
             rows.append({
-                "product_name": row.get("product_name") or "",
+                "product_name": display_product_name,
                 "category": row.get("category") or "",
                 "set_name": row.get("variant_label") or row.get("product_name") or "",
                 "variant_label": row.get("variant_label") or "",
@@ -945,8 +1004,10 @@ def get_filters():
         for row in product_rows:
             product_name = row.get("product_name")
             cat = (row.get("category") or "").strip()
-            if product_name and cat and product_name not in tree.get(cat, []):
-                tree.setdefault(cat, []).append(product_name)
+            if product_name and cat:
+                for tree_cat in tree_categories_for(cat, product_name):
+                    if product_name not in tree.get(tree_cat, []):
+                        tree.setdefault(tree_cat, []).append(product_name)
 
         # Products with no category go into an "Other" bucket
         categorised = {p for prods in CAT_MAP.values() for p in prods}
@@ -974,15 +1035,46 @@ def get_filters():
 
 @app.get("/api/asins")
 def get_asins():
-    """Returns ASINs from data/asins.csv"""
+    """Returns managed ASINs, preferring Amazon names from scraped DB rows."""
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     asins_path = os.path.join(project_root, "data", "asins.csv")
     try:
         with open(asins_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            return [{"asin": r["asin"], "product_name": r.get("product_name", ""), "category": r.get("category", "")} for r in reader]
+            rows = [{"asin": r["asin"], "product_name": r.get("product_name", ""), "category": r.get("category", "")} for r in reader]
     except FileNotFoundError:
         return []
+
+    if not rows:
+        return []
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                placeholders = ",".join(["%s"] * len(rows))
+                cur.execute(
+                    f"""
+                    SELECT COALESCE(variant_asin, asin) AS asin, MAX(product_name) AS product_name
+                    FROM raw_reviews
+                    WHERE COALESCE(variant_asin, asin) IN ({placeholders})
+                       OR scrape_asin IN ({placeholders})
+                       OR asin IN ({placeholders})
+                    GROUP BY COALESCE(variant_asin, asin)
+                    """,
+                    [*[row["asin"] for row in rows], *[row["asin"] for row in rows], *[row["asin"] for row in rows]],
+                )
+                db_names = {row["asin"]: row["product_name"] for row in cur.fetchall() if row.get("product_name")}
+    except Exception:
+        db_names = {}
+
+    return [
+        {
+            **row,
+            "product_name": db_names.get(row["asin"]) or row.get("product_name", ""),
+            "csv_product_name": row.get("product_name", ""),
+        }
+        for row in rows
+    ]
 
 
 class AsinUpsertRequest(BaseModel):
@@ -1211,7 +1303,7 @@ def get_pipeline_status():
             db = db_lookup.get(item["asin"])
             merged.append({
                 "asin": item["asin"],
-                "product_name": item["product_name"],
+                "product_name": db["product_name"] if db and db.get("product_name") else item["product_name"],
                 "last_scrape": str(db["last_scrape"]) if db and db["last_scrape"] else None,
                 "total_reviews": db["total_reviews"] if db else 0,
                 "recent_reviews": db["recent_reviews"] if db else 0,
@@ -2002,6 +2094,7 @@ def get_cxo_trends(
 @app.get("/api/wordcloud")
 def get_wordcloud(
     product: Optional[str] = None,
+    asin: Optional[str] = None,
     product_category: Optional[str] = None,   # product group filter (Camera/Dashcam)
     rating: Optional[str] = None,
     verified_purchase: Optional[str] = None,
@@ -2014,6 +2107,8 @@ def get_wordcloud(
         with conn.cursor() as cur:
             products = resolve_products(product, product_category)
             pf_sql, base_params = product_filter_sql(products)
+            asin_sql, asin_params = effective_asin_filter_sql(asin)
+            base_params.extend(asin_params)
 
             _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             date_filter = ""
@@ -2033,7 +2128,7 @@ def get_wordcloud(
                     SELECT t.sub_tags, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter}
+                    WHERE 1=1 {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter}
                     AND JSON_CONTAINS(t.primary_categories, %s)
                 """, list(base_params) + [json.dumps(category)])
                 rows = cur.fetchall()
@@ -2043,7 +2138,7 @@ def get_wordcloud(
                     SELECT t.sub_tags, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter}
+                    WHERE 1=1 {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter}
                 """, list(base_params))
                 rows = cur.fetchall()
 
@@ -2051,7 +2146,7 @@ def get_wordcloud(
                     SELECT t.primary_categories, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter}
+                    WHERE 1=1 {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter}
                 """, list(base_params))
                 cat_rows = cur.fetchall()
 
@@ -2100,6 +2195,7 @@ def get_wordcloud(
 def get_reviews_by_keyword(
     keyword: str,
     product: Optional[str] = None,
+    asin: Optional[str] = None,
     product_category: Optional[str] = None,
     rating: Optional[str] = None,
     verified_purchase: Optional[str] = None,
@@ -2116,7 +2212,8 @@ def get_reviews_by_keyword(
         with conn.cursor() as cur:
             products = resolve_products(product, product_category)
             pf_sql, prod_params = product_filter_sql(products)
-            base_params = [f'%"{keyword}"%', f'%"{keyword}"%'] + prod_params
+            asin_sql, asin_params = effective_asin_filter_sql(asin)
+            base_params = [f'%"{keyword}"%', f'%"{keyword}"%'] + prod_params + asin_params
 
             _rd = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             date_filter = ""
@@ -2144,13 +2241,14 @@ def get_reviews_by_keyword(
 
             cur.execute(f"""
                 SELECT
-                    r.review_id, r.reviewer_name, r.asin, r.product_name, r.category, r.rating,
+                    r.review_id, r.reviewer_name, r.asin, r.scrape_asin, r.variant_asin,
+                    r.variant_label, r.variant_dimension, r.product_name, r.category, r.rating,
                     r.title, r.review, r.review_date, r.verified_purchase, r.review_url, r.scrape_date,
                     t.sentiment, t.primary_categories, t.sub_tags
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE (t.sub_tags LIKE %s OR t.primary_categories LIKE %s)
-                {pf_sql} {date_filter} {rating_filter} {vp_filter} {category_filter} {sentiment_filter}
+                {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter} {category_filter} {sentiment_filter}
                 ORDER BY {_rd} DESC
                 LIMIT 500
             """, base_params)
@@ -2164,6 +2262,10 @@ def get_reviews_by_keyword(
                 seen.add(row["review_id"])
                 result.append({
                     **row,
+                    "display_product_name": amazon_display_product_name(
+                        row.get("product_name"),
+                        row.get("variant_label"),
+                    ),
                     "verified_purchase": (
                         None if row.get("verified_purchase") is None else bool(row.get("verified_purchase"))
                     ),
@@ -2179,6 +2281,7 @@ def get_reviews_by_keyword(
 @app.get("/api/analysis")
 def get_analysis(
     product: Optional[str] = None,
+    asin: Optional[str] = None,
     category: Optional[str] = None,
     rating: Optional[str] = None,
     verified_purchase: Optional[str] = None,
@@ -2190,6 +2293,8 @@ def get_analysis(
         with conn.cursor() as cur:
             products = resolve_products(product, category)
             pf_sql, base_params = product_filter_sql(products)
+            asin_sql, asin_params = effective_asin_filter_sql(asin)
+            base_params.extend(asin_params)
             rating_filter, rating_params = rating_filter_sql(rating)
             vp_filter, vp_params = verified_purchase_filter_sql(verified_purchase)
 
@@ -2213,7 +2318,7 @@ def get_analysis(
                 SELECT t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql}
+                WHERE 1=1 {pf_sql} {asin_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                   {rating_filter}
@@ -2237,7 +2342,7 @@ def get_analysis(
                     SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 4 THEN 1 ELSE 0 END) as star_4,
                     SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 5 THEN 1 ELSE 0 END) as star_5
                 FROM raw_reviews r
-                WHERE 1=1 {pf_sql}
+                WHERE 1=1 {pf_sql} {asin_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                   {rating_filter}
@@ -2267,7 +2372,7 @@ def get_analysis(
                     COUNT(*) AS count
                 FROM raw_reviews r
                 LEFT JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql}
+                WHERE 1=1 {pf_sql} {asin_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                   {rating_filter}
@@ -2323,7 +2428,7 @@ def get_analysis(
                     COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql}
+                WHERE 1=1 {pf_sql} {asin_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                   {rating_filter}
@@ -2353,7 +2458,7 @@ def get_analysis(
                 SELECT t.primary_categories, t.sentiment, r.verified_purchase
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql}
+                WHERE 1=1 {pf_sql} {asin_sql}
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                   {rating_filter}
@@ -2374,7 +2479,7 @@ def get_analysis(
                 for c in cats:
                     if row["sentiment"] == "Negative":
                         neg_cat[c] += 1
-                    else:
+                    elif row["sentiment"] == "Positive":
                         pos_cat[c] += 1
                     breakdown[c][row["sentiment"]] += 1
                     breakdown[c][purchase_key] += 1
@@ -2480,6 +2585,7 @@ def get_summary(
                     SELECT
                         COALESCE(r.variant_asin, r.asin) as asin,
                         MAX(r.product_name) as product_name,
+                        MAX(r.variant_label) as variant_label,
                         MAX(r.category) as category,
                         ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 1) as avg_rating,
                         COUNT(*) as review_count,
@@ -2554,9 +2660,13 @@ def get_summary(
                 curr_neg_pct = float(round((curr_neg / curr_count * 100), 1)) if curr_count else 0.0
                 prev_neg_pct = float(round((prev_neg / prev_count * 100), 1)) if prev_count else 0.0
                 ai = ai_rows.get(asin, {})
+                canonical_name = ASIN_MAP.get(asin, {}).get("product_name")
                 result.append({
                     "asin": asin,
                     "product_name": row["product_name"],
+                    "display_product_name": canonical_name or amazon_display_product_name(
+                        row.get("product_name"), row.get("variant_label")
+                    ),
                     "category": row.get("category"),
                     "avg_rating": curr_rating,
                     "review_avg_rating": curr_rating,

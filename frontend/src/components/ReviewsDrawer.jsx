@@ -112,6 +112,7 @@ export default function ReviewsDrawer({
   filters,
   onClose,
   productName = null,
+  asin = null,
   sentiment = null,
   taxonomyCategory = null,
 }) {
@@ -124,7 +125,8 @@ export default function ReviewsDrawer({
     setLoading(true)
     const params = new URLSearchParams({ keyword: category })
     const productCategories = asArray(filters?.product_category)
-    if (productName) params.set('product', productName)
+    if (asin) params.set('asin', asin)
+    else if (productName) params.set('product', productName)
     else if (filters?.product?.length) params.set('product', filters.product.join('|||'))
     else if (productCategories.length) params.set('product_category', productCategories.join('|||'))
     if (filters?.date_from) params.set('date_from', filters.date_from)
@@ -142,6 +144,7 @@ export default function ReviewsDrawer({
   }, [
     category,
     productName,
+    asin,
     sentiment,
     taxonomyCategory,
     filters?.product?.join(','),

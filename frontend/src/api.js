@@ -39,6 +39,7 @@ function buildParams(filters = {}) {
   // Product-group filter — server resolves to ASINs
   if (productCategories.length) p.set('category', productCategories.join('|||'))
   if (filters.product?.length)   p.set('product', filters.product.join('|||'))
+  if (filters.asin)              p.set('asin', filters.asin)
   if (filters.date_from)         p.set('date_from', filters.date_from)
   if (filters.date_to)           p.set('date_to', filters.date_to)
   if (filters.rating?.length)    p.set('rating', filters.rating.join(','))
