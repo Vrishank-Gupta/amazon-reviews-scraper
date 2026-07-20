@@ -58,7 +58,7 @@ function ListingRating({ row }) {
   const hasListingRating = row.listing_rating !== null && row.listing_rating !== undefined
   if (!hasListingRating) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
         <StarLabel rating={row.avg_rating} />
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>review avg only</span>
       </div>
@@ -66,7 +66,7 @@ function ListingRating({ row }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
       <StarLabel rating={row.listing_rating} />
       <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
         {row.listing_total_ratings ? `${row.listing_total_ratings.toLocaleString()} Amazon ratings` : 'Amazon snapshot'}
@@ -240,10 +240,10 @@ function riskScore(r) {
   return (r.neg_pct || 0) * Math.log2((r.review_count || 0) + 2) + Math.max(0, -(r.delta_rating || 0)) * 5
 }
 
-function TH({ children, tip, onClick, sortDir }) {
+function TH({ children, tip, onClick, sortDir, align = 'left' }) {
   return (
-    <th onClick={onClick} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', background: 'var(--surface2)', cursor: onClick ? 'pointer' : 'default', userSelect: 'none' }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+    <th onClick={onClick} style={{ padding: '10px 12px', textAlign: align, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', background: 'var(--surface2)', cursor: onClick ? 'pointer' : 'default', userSelect: 'none' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : 'flex-start', gap: 5, width: '100%' }}>
         {children}
         {onClick && <span style={{ opacity: 0.5, fontSize: 9 }}>{sortDir != null ? (sortDir > 0 ? '^' : 'v') : '<>'}</span>}
         {tip && <InfoTip text={tip} />}
@@ -430,24 +430,24 @@ export default function SummaryPage({ filters, allProducts }) {
         <div style={{ overflowX: 'auto' }}>
           <table className="dashboard-table" style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <colgroup>
-              <col style={{ width: '24%' }} />
-              <col style={{ width: '16%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '12%' }} />
+              <col style={{ width: '31%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '11%' }} />
               <col style={{ width: '8%' }} />
               <col style={{ width: '10%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '13%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '9%' }} />
             </colgroup>
             <thead>
               <tr>
                 <TH onClick={() => handleSort('product_name')} sortDir={sortKey === 'product_name' ? sortDir : null} tip="Product name with health status pill">Product</TH>
-                <TH onClick={() => handleSort('listing_rating')} sortDir={sortKey === 'listing_rating' ? sortDir : null} tip="Latest Amazon product-page rating snapshot from product_ratings_snapshot. This is the number expected to match Amazon, subject to the last scrape date.">Amazon Rating</TH>
-                <TH tip="Amazon listing rating change versus the prior comparison period when a prior snapshot exists.">Delta Rating</TH>
-                <TH onClick={() => handleSort('avg_rating')} sortDir={sortKey === 'avg_rating' ? sortDir : null} tip="Average star rating from scraped review rows in the selected period only. It can differ sharply from Amazon's all-time product-page rating.">Review Avg</TH>
-                <TH onClick={() => handleSort('review_count')} sortDir={sortKey === 'review_count' ? sortDir : null} tip="Total reviews in current period">Reviews</TH>
-                <TH tip="Review count change vs prior period">Delta Reviews</TH>
-                <TH onClick={() => handleSort('neg_pct')} sortDir={sortKey === 'neg_pct' ? sortDir : null} tip="% of reviews tagged Negative">Neg %</TH>
+                <TH align="right" onClick={() => handleSort('listing_rating')} sortDir={sortKey === 'listing_rating' ? sortDir : null} tip="Latest Amazon product-page rating snapshot from product_ratings_snapshot. This is the number expected to match Amazon, subject to the last scrape date.">Amazon Rating</TH>
+                <TH align="right" tip="Amazon listing rating change versus the prior comparison period when a prior snapshot exists.">Delta Rating</TH>
+                <TH align="right" onClick={() => handleSort('avg_rating')} sortDir={sortKey === 'avg_rating' ? sortDir : null} tip="Average star rating from scraped review rows in the selected period only. It can differ sharply from Amazon's all-time product-page rating.">Review Avg</TH>
+                <TH align="right" onClick={() => handleSort('review_count')} sortDir={sortKey === 'review_count' ? sortDir : null} tip="Total reviews in current period">Reviews</TH>
+                <TH align="right" tip="Review count change vs prior period">Delta Reviews</TH>
+                <TH align="right" onClick={() => handleSort('neg_pct')} sortDir={sortKey === 'neg_pct' ? sortDir : null} tip="% of reviews tagged Negative">Neg %</TH>
                 <TH />
               </tr>
             </thead>
@@ -498,29 +498,27 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
   return (
     <>
       {showCategory && (
-        <tr>
-          <td
-            colSpan={8}
-            onClick={onToggleCategory}
-            style={{ padding: '10px 14px', background: 'rgba(255,78,26,0.07)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <tr onClick={onToggleCategory} style={{ background: 'rgba(255,78,26,0.07)', cursor: 'pointer', userSelect: 'none' }}>
+          <td style={{ padding: '10px 14px', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <span style={{ fontSize: 9, color: 'var(--text-muted)', display: 'inline-block', transition: 'transform 0.15s', transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}>▶</span>
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--accent)' }}>{category}</span>
               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>· {itemCount} product{itemCount !== 1 ? 's' : ''}</span>
-              {rollup && (
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16, fontSize: 11, flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
-                  <span style={{ color: 'var(--text-muted)' }}>{rollup.totalReviews.toLocaleString()} reviews</span>
-                  <span style={{ color: rollup.weightedAvg >= 4 ? '#22c55e' : rollup.weightedAvg >= 3 ? '#eab308' : '#ef4444', fontWeight: 700 }}>
-                    {rollup.weightedAvg.toFixed(2)}★
-                  </span>
-                  <span style={{ color: rollup.weightedNeg > 30 ? '#ef4444' : rollup.weightedNeg > 20 ? '#eab308' : '#22c55e', fontWeight: 700 }}>
-                    {rollup.weightedNeg.toFixed(0)}% neg
-                  </span>
-                </div>
-              )}
             </div>
           </td>
+          <td style={{ padding: '10px 12px', textAlign: 'right', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', color: rollup?.weightedAvg >= 4 ? '#22c55e' : rollup?.weightedAvg >= 3 ? '#eab308' : '#ef4444', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            {rollup ? `${rollup.weightedAvg.toFixed(2)}★` : '—'}
+          </td>
+          <td style={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }} />
+          <td style={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }} />
+          <td style={{ padding: '10px 12px', textAlign: 'right', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>
+            {rollup ? rollup.totalReviews.toLocaleString() : '—'}
+          </td>
+          <td style={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }} />
+          <td style={{ padding: '10px 12px', textAlign: 'right', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', color: rollup?.weightedNeg > 30 ? '#ef4444' : rollup?.weightedNeg > 20 ? '#eab308' : '#22c55e', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            {rollup ? `${rollup.weightedNeg.toFixed(0)}%` : '—'}
+          </td>
+          <td style={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }} />
         </tr>
       )}
       {!isCollapsed && (
@@ -537,16 +535,16 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
                 <HealthPill negPct={row.neg_pct} />
               </div>
             </td>
-            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
+            <td style={{ padding: '12px', textAlign: 'right', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
               <ListingRating row={row} />
             </td>
-            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_listing_rating} /></td>
-            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
+            <td style={{ padding: '12px', textAlign: 'right', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_listing_rating} /></td>
+            <td style={{ padding: '12px', textAlign: 'right', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
               <StarLabel rating={row.avg_rating} />
             </td>
-            <td style={{ padding: '12px 14px', fontSize: 13, fontWeight: 700, borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>{row.review_count?.toLocaleString()}</td>
-            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_reviews} /></td>
-            <td style={{ padding: '12px 14px', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
+            <td style={{ padding: '12px', textAlign: 'right', fontSize: 13, fontWeight: 700, borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>{row.review_count?.toLocaleString()}</td>
+            <td style={{ padding: '12px', textAlign: 'right', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}><Delta val={row.delta_reviews} /></td>
+            <td style={{ padding: '12px', textAlign: 'right', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
               <span style={{ color: row.neg_pct > 50 ? '#ef4444' : row.neg_pct > 30 ? '#eab308' : '#22c55e', fontWeight: 700 }}>{row.neg_pct}%</span>
             </td>
             <td style={{ padding: '12px 14px', color: 'var(--accent)', fontSize: 12, borderBottom: isDrill ? 'none' : '1px solid var(--border)', fontWeight: 700, whiteSpace: 'normal' }}>
