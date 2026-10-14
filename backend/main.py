@@ -3160,7 +3160,9 @@ def admin_access_log(request: Request, limit: int = 200):
         out = dict(row)
         for key in ("login_at", "last_login_at", "session_expires_at"):
             if key in out and hasattr(out[key], "isoformat"):
-                out[key] = out[key].isoformat()
+                # Stored as naive UTC (MySQL server time_zone is UTC) - append "Z" so
+                # the frontend Date parsing treats it as UTC instead of local time.
+                out[key] = out[key].isoformat() + "Z"
         return out
 
     return {
