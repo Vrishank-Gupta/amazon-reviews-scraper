@@ -16,6 +16,8 @@ const DEFAULT_FILTERS = {
   sentiment: [],
   rating: [],
   verified_purchase: [],
+  model_number: [],
+  mfr_part_number: [],
   date_from: null,
   date_to: null,
 }
@@ -331,7 +333,7 @@ function Dashboard({ authedEmail, onLogout }) {
   const [tab, setTab] = useState('analysis')
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
   const [reviews, setReviews] = useState([])
-  const [options, setOptions] = useState({ tree: {}, products: [], ratings: [] })
+  const [options, setOptions] = useState({ tree: {}, products: [], ratings: [], model_numbers: [], mfr_part_numbers: [] })
   const [scrapeStatus, setScrapeStatus] = useState(null)
   const [initialLoading, setInitialLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)

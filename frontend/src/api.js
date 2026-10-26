@@ -47,16 +47,22 @@ function buildParams(filters = {}) {
   return p
 }
 
+function addReviewOnlyParams(p, filters) {
+  if (filters.sentiment?.length) p.set('sentiment', filters.sentiment.join(','))
+  if (filters.model_number?.length) p.set('model_number', filters.model_number.join(','))
+  if (filters.mfr_part_number?.length) p.set('mfr_part_number', filters.mfr_part_number.join(','))
+}
+
 export async function fetchReviews(filters = {}) {
   const p = buildParams(filters)
-  if (filters.sentiment?.length) p.set('sentiment', filters.sentiment.join(','))
+  addReviewOnlyParams(p, filters)
   const res = await apiFetch(apiUrl(`/api/reviews?${p}`))
   return res.json()
 }
 
 export async function exportRawReviewsExcel(filters = {}) {
   const p = buildParams(filters)
-  if (filters.sentiment?.length) p.set('sentiment', filters.sentiment.join(','))
+  addReviewOnlyParams(p, filters)
 
   const res = await apiFetch(apiUrl(`/api/reviews/export/raw.xlsx?${p}`))
   if (!res.ok) {

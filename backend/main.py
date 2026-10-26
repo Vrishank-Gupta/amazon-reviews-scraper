@@ -399,12 +399,31 @@ def verified_purchase_filter_sql(verified_purchase: Optional[str], table_alias: 
     return f" AND ({' OR '.join(parts)})", params
 
 
+def _in_list_filter_sql(column: str, raw_value: Optional[str], table_alias: str = "r") -> tuple:
+    """Returns (sql_fragment, params_list) for a simple multi-select column filter."""
+    values = [v.strip() for v in (raw_value or "").split(",") if v.strip()]
+    if not values:
+        return "", []
+    placeholders = ",".join(["%s"] * len(values))
+    return f" AND {table_alias}.{column} IN ({placeholders})", values
+
+
+def model_number_filter_sql(model_number: Optional[str], table_alias: str = "r") -> tuple:
+    return _in_list_filter_sql("model_number", model_number, table_alias)
+
+
+def mfr_part_number_filter_sql(mfr_part_number: Optional[str], table_alias: str = "r") -> tuple:
+    return _in_list_filter_sql("mfr_part_number", mfr_part_number, table_alias)
+
+
 RAW_REVIEW_EXPORT_HEADERS = [
     ("product_name", "Product Name"),
     ("category", "Category"),
     ("set_name", "Set Name"),
     ("variant_label", "Variant Label"),
     ("variant_dimension", "Variant Dimension"),
+    ("model_number", "Model Number"),
+    ("mfr_part_number", "Mfr Part Number"),
     ("asin", "ASIN"),
     ("scrape_asin", "Scrape ASIN"),
     ("variant_asin", "Variant ASIN"),
@@ -786,6 +805,8 @@ def get_reviews(
     product: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    model_number: Optional[str] = None,
+    mfr_part_number: Optional[str] = None,
 ):
     conn = get_conn()
     try:
@@ -796,7 +817,8 @@ def get_reviews(
             query = """
                 SELECT
                     r.review_id, r.reviewer_name, r.asin, r.scrape_asin, r.variant_asin,
-                    r.variant_label, r.variant_dimension, r.product_name, r.category,
+                    r.variant_label, r.variant_dimension, r.model_number, r.mfr_part_number,
+                    r.product_name, r.category,
                     r.rating, r.review, r.title, r.review_date,
                     r.verified_purchase, r.review_url, r.scrape_date,
                     t.sentiment, t.primary_categories, t.sub_tags
@@ -823,6 +845,14 @@ def get_reviews(
             vp_sql, vp_params = verified_purchase_filter_sql(verified_purchase)
             query += vp_sql
             params.extend(vp_params)
+
+            mn_sql, mn_params = model_number_filter_sql(model_number)
+            query += mn_sql
+            params.extend(mn_params)
+
+            mpn_sql, mpn_params = mfr_part_number_filter_sql(mfr_part_number)
+            query += mpn_sql
+            params.extend(mpn_params)
 
             date_parse = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             if date_from:
@@ -862,6 +892,8 @@ def export_raw_reviews_excel(
     product: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    model_number: Optional[str] = None,
+    mfr_part_number: Optional[str] = None,
 ):
     conn = get_conn()
     try:
@@ -873,7 +905,8 @@ def export_raw_reviews_excel(
             query = f"""
                 SELECT
                     r.review_id, r.reviewer_name, r.asin, r.scrape_asin, r.variant_asin,
-                    r.variant_label, r.variant_dimension, r.product_name,
+                    r.variant_label, r.variant_dimension, r.model_number, r.mfr_part_number,
+                    r.product_name,
                     r.category, r.rating, r.title, r.review, r.review_date,
                     r.verified_purchase, r.review_url, r.scrape_date, {date_parse} as posting_date
                 FROM raw_reviews r
@@ -905,6 +938,14 @@ def export_raw_reviews_excel(
             query += vp_sql
             params.extend(vp_params)
 
+            mn_sql, mn_params = model_number_filter_sql(model_number)
+            query += mn_sql
+            params.extend(mn_params)
+
+            mpn_sql, mpn_params = mfr_part_number_filter_sql(mfr_part_number)
+            query += mpn_sql
+            params.extend(mpn_params)
+
             if date_from:
                 query += f" AND {date_parse} >= %s"
                 params.append(date_from)
@@ -930,6 +971,8 @@ def export_raw_reviews_excel(
                 "set_name": row.get("variant_label") or row.get("product_name") or "",
                 "variant_label": row.get("variant_label") or "",
                 "variant_dimension": row.get("variant_dimension") or "",
+                "model_number": row.get("model_number") or "",
+                "mfr_part_number": row.get("mfr_part_number") or "",
                 "asin": row.get("asin") or "",
                 "scrape_asin": row.get("scrape_asin") or "",
                 "variant_asin": row.get("variant_asin") or "",
@@ -978,6 +1021,20 @@ def get_filters():
             ratings = [r["rating"] for r in cur.fetchall()]
 
             cur.execute("""
+                SELECT DISTINCT model_number FROM raw_reviews
+                WHERE model_number IS NOT NULL AND model_number != ''
+                ORDER BY model_number
+            """)
+            model_numbers = [r["model_number"] for r in cur.fetchall()]
+
+            cur.execute("""
+                SELECT DISTINCT mfr_part_number FROM raw_reviews
+                WHERE mfr_part_number IS NOT NULL AND mfr_part_number != ''
+                ORDER BY mfr_part_number
+            """)
+            mfr_part_numbers = [r["mfr_part_number"] for r in cur.fetchall()]
+
+            cur.execute("""
                 SELECT
                     SUM(CASE WHEN verified_purchase = 1 THEN 1 ELSE 0 END) AS verified,
                     SUM(CASE WHEN verified_purchase = 0 THEN 1 ELSE 0 END) AS unverified,
@@ -1020,6 +1077,8 @@ def get_filters():
         return {
             "products": products,
             "ratings":  ratings,
+            "model_numbers": model_numbers,
+            "mfr_part_numbers": mfr_part_numbers,
             "verified_purchase": [
                 {"value": "verified", "label": "Verified Purchase", "count": int(verified_counts.get("verified") or 0)},
                 {"value": "unverified", "label": "Unverified", "count": int(verified_counts.get("unverified") or 0)},
@@ -2587,6 +2646,8 @@ def get_summary(
                         MAX(r.product_name) as product_name,
                         MAX(r.variant_label) as variant_label,
                         MAX(r.category) as category,
+                        MAX(r.model_number) as model_number,
+                        MAX(r.mfr_part_number) as mfr_part_number,
                         ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 1) as avg_rating,
                         COUNT(*) as review_count,
                         SUM(CASE WHEN t.sentiment = 'Negative' THEN 1 ELSE 0 END) as neg_count
@@ -2668,6 +2729,8 @@ def get_summary(
                         row.get("product_name"), row.get("variant_label")
                     ),
                     "category": row.get("category"),
+                    "model_number": row.get("model_number"),
+                    "mfr_part_number": row.get("mfr_part_number"),
                     "avg_rating": curr_rating,
                     "review_avg_rating": curr_rating,
                     "listing_rating": listing_rating,

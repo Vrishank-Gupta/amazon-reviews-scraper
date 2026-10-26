@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BadgeCheck, Calendar, ChevronDown, Package, SlidersHorizontal, Star, X } from 'lucide-react'
+import { BadgeCheck, Calendar, ChevronDown, Package, SlidersHorizontal, Star, Tag, X } from 'lucide-react'
 
 const SC = { Positive: '#22c55e', Neutral: '#eab308', Negative: '#ef4444' }
 const DATE_PRESETS = [
@@ -544,6 +544,57 @@ function VerifiedPurchaseDropdown({ filters, options, onChange }) {
   )
 }
 
+function TagListDropdown({ label, icon, filters, filterKey, options, onChange }) {
+  const selected = filters[filterKey] || []
+  const all = options || []
+  const [query, setQuery] = useState('')
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredAll = normalizedQuery ? all.filter(v => v.toLowerCase().includes(normalizedQuery)) : all
+  const chipLabel = selected.length === 0
+    ? `All ${label}`
+    : selected.length <= 2
+      ? selected.join(' · ')
+      : `${selected.slice(0, 2).join(' · ')} +${selected.length - 2} more`
+  const toggle = value => onChange({
+    [filterKey]: selected.includes(value) ? selected.filter(x => x !== value) : [...selected, value],
+  })
+
+  if (!all.length) return null
+
+  return (
+    <Dropdown trigger={() => <PillBtn label={chipLabel} active={selected.length > 0} icon={icon} />} minWidth={260}>
+      {close => (
+        <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+          <div style={{ padding: 10, borderBottom: '1px solid var(--border)', background: '#14141e', position: 'sticky', top: 0, zIndex: 1 }}>
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder={`Search ${label.toLowerCase()}`}
+              style={{ width: '100%', padding: '7px 10px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 12, outline: 'none', fontFamily: 'DM Sans' }}
+            />
+          </div>
+          {selected.length > 0 && (
+            <button onClick={() => { onChange({ [filterKey]: [] }); close() }} style={{ width: '100%', padding: '9px 14px', textAlign: 'left', background: 'rgba(255,78,26,0.08)', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--accent)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+              All {label}
+            </button>
+          )}
+          {filteredAll.map(value => {
+            const sel = selected.includes(value)
+            return (
+              <button key={value} title={value} onClick={() => toggle(value)} style={{ width: '100%', padding: '7px 14px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 7, background: sel ? 'rgba(255,78,26,0.06)' : 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: sel ? 'var(--text)' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
+                <Check sel={sel} /> <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+              </button>
+            )
+          })}
+          {filteredAll.length === 0 && (
+            <div style={{ padding: '12px 14px', color: 'var(--text-muted)', fontSize: 12 }}>No matches</div>
+          )}
+        </div>
+      )}
+    </Dropdown>
+  )
+}
+
 export default function FilterBar({ filters, options, onChange, tab }) {
   const showReviewFilters = tab === 'reviews'
   const selectedCategories = asArray(filters.product_category)
@@ -553,7 +604,9 @@ export default function FilterBar({ filters, options, onChange, tab }) {
   const hasSent = (filters.sentiment || []).length > 0
   const hasRating = (filters.rating || []).length > 0
   const hasVerified = (filters.verified_purchase || []).length > 0
-  const hasAny = isFiltered || hasDate || hasSent || hasRating || hasVerified
+  const hasModelNumber = (filters.model_number || []).length > 0
+  const hasMfrPartNumber = (filters.mfr_part_number || []).length > 0
+  const hasAny = isFiltered || hasDate || hasSent || hasRating || hasVerified || hasModelNumber || hasMfrPartNumber
 
   const activePreset = (() => {
     if (!filters.date_from && !filters.date_to) return 'All'
@@ -583,6 +636,8 @@ export default function FilterBar({ filters, options, onChange, tab }) {
     sentiment: [],
     rating: [],
     verified_purchase: [],
+    model_number: [],
+    mfr_part_number: [],
   })
 
   const productChipLabel = (() => {
@@ -618,6 +673,8 @@ export default function FilterBar({ filters, options, onChange, tab }) {
           <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
           <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Reviews only:</span>
           <SentimentDropdown filters={filters} onChange={onChange} />
+          <TagListDropdown label="Model Numbers" icon={<Tag size={12} />} filters={filters} filterKey="model_number" options={options.model_numbers} onChange={onChange} />
+          <TagListDropdown label="Mfr Part Numbers" icon={<Tag size={12} />} filters={filters} filterKey="mfr_part_number" options={options.mfr_part_numbers} onChange={onChange} />
         </>
       )}
 
@@ -641,6 +698,12 @@ export default function FilterBar({ filters, options, onChange, tab }) {
                 <ActiveChip key={value} label={item?.label || value} color={value === 'verified' ? '#22c55e' : value === 'unverified' ? '#eab308' : 'var(--text-muted)'} onRemove={() => onChange({ verified_purchase: (filters.verified_purchase || []).filter(x => x !== value) })} />
               )
             })}
+            {(filters.model_number || []).map(value => (
+              <ActiveChip key={`mn-${value}`} label={`Model: ${value}`} onRemove={() => onChange({ model_number: (filters.model_number || []).filter(x => x !== value) })} />
+            ))}
+            {(filters.mfr_part_number || []).map(value => (
+              <ActiveChip key={`mpn-${value}`} label={`Mfr Part: ${value}`} onRemove={() => onChange({ mfr_part_number: (filters.mfr_part_number || []).filter(x => x !== value) })} />
+            ))}
           </div>
         </>
       )}

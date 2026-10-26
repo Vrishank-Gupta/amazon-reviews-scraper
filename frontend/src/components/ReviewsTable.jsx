@@ -189,6 +189,8 @@ export default function ReviewsTable({ data }) {
         const haystack = [
           productDisplayName(row),
           row.category,
+          row.model_number,
+          row.mfr_part_number,
           row.reviewer_name,
           row.review,
           row.title,
@@ -328,7 +330,7 @@ export default function ReviewsTable({ data }) {
               setQuery(event.target.value)
               setPage(0)
             }}
-            placeholder="Search reviewer, product, category, review text, or tags"
+            placeholder="Search reviewer, product, model number, category, review text, or tags"
             style={{
               width: '100%',
               background: 'rgba(255,255,255,0.02)',
@@ -347,6 +349,8 @@ export default function ReviewsTable({ data }) {
           <SortButton label="Date" active={sortKey === 'scrape_date'} dir={sortDir} onClick={() => setSort('scrape_date')} />
           <SortButton label="Category" active={sortKey === 'category'} dir={sortDir} onClick={() => setSort('category')} />
           <SortButton label="Product" active={sortKey === 'product_name'} dir={sortDir} onClick={() => setSort('product_name')} />
+          <SortButton label="Model Number" active={sortKey === 'model_number'} dir={sortDir} onClick={() => setSort('model_number')} />
+          <SortButton label="Mfr Part Number" active={sortKey === 'mfr_part_number'} dir={sortDir} onClick={() => setSort('mfr_part_number')} />
           <SortButton label="Rating" active={sortKey === 'rating'} dir={sortDir} onClick={() => setSort('rating')} />
         </div>
       </div>
@@ -358,6 +362,8 @@ export default function ReviewsTable({ data }) {
               <tr>
                 <th style={thStyle}>Category</th>
                 <th style={thStyle}>Product</th>
+                <th style={thStyle}>Model Number</th>
+                <th style={thStyle}>Mfr Part Number</th>
                 <th style={thStyle}>Reviewer</th>
                 <th style={thStyle}>Rating</th>
                 <th style={thStyle}>Purchase</th>
@@ -385,6 +391,12 @@ export default function ReviewsTable({ data }) {
                     <span style={{ minWidth: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.35 }}>
                     {displayName}
                     </span>
+                  </td>
+                  <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                    {row.model_number || '—'}
+                  </td>
+                  <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                    {row.mfr_part_number || '—'}
                   </td>
                   <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, whiteSpace: 'nowrap' }}>
                     <HighlightText text={row.reviewer_name || '—'} query={normalizedQuery} />

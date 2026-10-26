@@ -132,6 +132,8 @@ def ensure_review_variant_columns(conn):
         "variant_asin": "ALTER TABLE raw_reviews ADD COLUMN variant_asin VARCHAR(20) NULL AFTER scrape_asin",
         "variant_label": "ALTER TABLE raw_reviews ADD COLUMN variant_label VARCHAR(255) NULL AFTER variant_asin",
         "variant_dimension": "ALTER TABLE raw_reviews ADD COLUMN variant_dimension VARCHAR(64) NULL AFTER variant_label",
+        "model_number": "ALTER TABLE raw_reviews ADD COLUMN model_number VARCHAR(255) NULL AFTER variant_dimension",
+        "mfr_part_number": "ALTER TABLE raw_reviews ADD COLUMN mfr_part_number VARCHAR(255) NULL AFTER model_number",
         "reviewer_name": "ALTER TABLE raw_reviews ADD COLUMN reviewer_name VARCHAR(255) NULL AFTER review_id",
         "verified_purchase": "ALTER TABLE raw_reviews ADD COLUMN verified_purchase TINYINT(1) NULL AFTER review_date",
     }
@@ -140,6 +142,8 @@ def ensure_review_variant_columns(conn):
         "idx_raw_reviews_variant_asin": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_variant_asin (variant_asin)",
         "idx_raw_reviews_variant_label": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_variant_label (variant_label)",
         "idx_raw_reviews_verified_purchase": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_verified_purchase (verified_purchase)",
+        "idx_raw_reviews_model_number": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_model_number (model_number)",
+        "idx_raw_reviews_mfr_part_number": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_mfr_part_number (mfr_part_number)",
     }
 
     cur = conn.cursor()

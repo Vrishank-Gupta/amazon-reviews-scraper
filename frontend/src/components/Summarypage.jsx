@@ -319,7 +319,10 @@ export default function SummaryPage({ filters, allProducts }) {
     sorted.forEach(row => {
       const category = row.category || 'Other'
       if (tableCatFilter && category !== tableCatFilter) return
-      if (q && !productDisplayName(row).toLowerCase().includes(q)) return
+      if (q) {
+        const haystack = `${productDisplayName(row)} ${row.model_number || ''} ${row.mfr_part_number || ''}`.toLowerCase()
+        if (!haystack.includes(q)) return
+      }
       if (!groups[category]) groups[category] = []
       groups[category].push(row)
     })
@@ -406,7 +409,7 @@ export default function SummaryPage({ filters, allProducts }) {
           <input
             value={tableSearch}
             onChange={e => setTableSearch(e.target.value)}
-            placeholder="Search product..."
+            placeholder="Search product, model number..."
             style={{ padding: '5px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 11, outline: 'none', fontFamily: 'DM Sans', width: 150 }}
           />
           {tableCategories.map(cat => (
@@ -431,18 +434,22 @@ export default function SummaryPage({ filters, allProducts }) {
         <div style={{ overflowX: 'auto' }}>
           <table className="dashboard-table" style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <colgroup>
-              <col style={{ width: '31%' }} />
-              <col style={{ width: '14%' }} />
+              <col style={{ width: '24%' }} />
               <col style={{ width: '10%' }} />
-              <col style={{ width: '11%' }} />
-              <col style={{ width: '8%' }} />
               <col style={{ width: '10%' }} />
+              <col style={{ width: '12%' }} />
               <col style={{ width: '7%' }} />
               <col style={{ width: '9%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '7%' }} />
             </colgroup>
             <thead>
               <tr>
                 <TH onClick={() => handleSort('product_name')} sortDir={sortKey === 'product_name' ? sortDir : null} tip="Product name with health status pill">Product</TH>
+                <TH onClick={() => handleSort('model_number')} sortDir={sortKey === 'model_number' ? sortDir : null} tip="Amazon listing field: Model Number">Model Number</TH>
+                <TH onClick={() => handleSort('mfr_part_number')} sortDir={sortKey === 'mfr_part_number' ? sortDir : null} tip="Amazon listing field: Mfr Part Number">Mfr Part Number</TH>
                 <TH align="right" onClick={() => handleSort('listing_rating')} sortDir={sortKey === 'listing_rating' ? sortDir : null} tip="Latest Amazon product-page rating snapshot from product_ratings_snapshot. This is the number expected to match Amazon, subject to the last scrape date.">Amazon Rating</TH>
                 <TH align="right" tip="Amazon listing rating change versus the prior comparison period when a prior snapshot exists.">Delta Rating</TH>
                 <TH align="right" onClick={() => handleSort('avg_rating')} sortDir={sortKey === 'avg_rating' ? sortDir : null} tip="Average star rating from scraped review rows in the selected period only. It can differ sharply from Amazon's all-time product-page rating.">Review Avg</TH>
@@ -507,6 +514,8 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>· {itemCount} product{itemCount !== 1 ? 's' : ''}</span>
             </div>
           </td>
+          <td style={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }} />
+          <td style={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }} />
           <td style={{ padding: '10px 12px', textAlign: 'right', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', color: rollup?.weightedAvg >= 4 ? '#22c55e' : rollup?.weightedAvg >= 3 ? '#eab308' : '#ef4444', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
             {rollup ? `${rollup.weightedAvg.toFixed(2)}★` : '—'}
           </td>
@@ -536,6 +545,12 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
                 <HealthPill negPct={row.neg_pct} />
               </div>
             </td>
+            <td title={row.model_number || ''} style={{ padding: '12px', fontSize: 12, color: 'var(--text)', borderBottom: isDrill ? 'none' : '1px solid var(--border)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {row.model_number || '—'}
+            </td>
+            <td title={row.mfr_part_number || ''} style={{ padding: '12px', fontSize: 12, color: 'var(--text)', borderBottom: isDrill ? 'none' : '1px solid var(--border)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {row.mfr_part_number || '—'}
+            </td>
             <td style={{ padding: '12px', textAlign: 'right', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
               <ListingRating row={row} />
             </td>
@@ -554,7 +569,7 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
           </tr>
           {isDrill && (
             <tr>
-              <td colSpan={8} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
+              <td colSpan={10} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
                 <ProductDrillDown row={row} filters={filters} ratingDistribution={ratingDistribution} />
               </td>
             </tr>
