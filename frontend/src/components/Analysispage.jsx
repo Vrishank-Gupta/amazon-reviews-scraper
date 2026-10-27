@@ -288,14 +288,42 @@ function EmptyState({ text = 'No data for selected filters.' }) {
 
 // Wraps a chart so it can grow wider than its card (one column per data point)
 // and scrolls horizontally instead of squeezing points together. Defaults the
-// scroll position to the rightmost (most recent) data on mount/data changes.
+// scroll position to the rightmost (most recent) data on mount/data changes,
+// and keeps it pinned there through later layout shifts (async content above
+// it reflowing, font swap, window resize) until the user scrolls manually.
 function ScrollableChart({ height, pointCount, pxPerPoint, children }) {
   const scrollRef = useRef(null)
+  const userScrolledRef = useRef(false)
+
+  useEffect(() => {
+    userScrolledRef.current = false
+  }, [pointCount, pxPerPoint])
 
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    el.scrollLeft = el.scrollWidth
+
+    const pinRight = () => {
+      if (!userScrolledRef.current) el.scrollLeft = el.scrollWidth
+    }
+    pinRight()
+    const raf = requestAnimationFrame(pinRight)
+
+    const markUserScrolled = () => { userScrolledRef.current = true }
+    el.addEventListener('wheel', markUserScrolled, { passive: true })
+    el.addEventListener('touchstart', markUserScrolled, { passive: true })
+    el.addEventListener('pointerdown', markUserScrolled)
+
+    const ro = new ResizeObserver(pinRight)
+    ro.observe(el)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      el.removeEventListener('wheel', markUserScrolled)
+      el.removeEventListener('touchstart', markUserScrolled)
+      el.removeEventListener('pointerdown', markUserScrolled)
+      ro.disconnect()
+    }
   }, [pointCount, pxPerPoint])
 
   return (
