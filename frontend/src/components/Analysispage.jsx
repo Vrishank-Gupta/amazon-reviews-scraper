@@ -286,6 +286,27 @@ function EmptyState({ text = 'No data for selected filters.' }) {
   return <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{text}</div>
 }
 
+// Wraps a chart so it can grow wider than its card (one column per data point)
+// and scrolls horizontally instead of squeezing points together. Defaults the
+// scroll position to the rightmost (most recent) data on mount/data changes.
+function ScrollableChart({ height, pointCount, pxPerPoint, children }) {
+  const scrollRef = useRef(null)
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollLeft = el.scrollWidth
+  }, [pointCount, pxPerPoint])
+
+  return (
+    <div ref={scrollRef} style={{ overflowX: 'auto', overflowY: 'hidden' }}>
+      <div style={{ width: '100%', minWidth: pointCount * pxPerPoint, height }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 function getPeriodLabel(filters) {
   if (!filters.date_from && !filters.date_to) return 'All time'
   if (!filters.date_from) return `Up to ${new Date(filters.date_to).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
@@ -999,6 +1020,7 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
   const rateMin = rateVals.length ? Math.max(0, Math.floor(Math.min(...rateVals) / 5) * 5 - 5) : 0
   const rateMax = rateVals.length ? Math.min(100, Math.ceil(Math.max(...rateVals) / 5) * 5 + 10) : 100
   const sentimentColors = { Positive: '#22c55e', Negative: '#ef4444', Neutral: '#eab308' }
+  const trendPxPerPoint = trendGranularity === 'day' ? 16 : trendGranularity === 'week' ? 46 : 70
 
   if (loading && !hasData) {
     return (
@@ -1071,49 +1093,54 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
         {signalRows.length === 0 ? (
           <EmptyState text="No trend data - review dates may not be parsed correctly yet." />
         ) : trendMode === 'rate' ? (
-          <ResponsiveContainer width="100%" height={200}>
-            <ComposedChart data={trendWithRolling} margin={{ top: 8, right: 40, bottom: 0, left: -10 }}>
-              <defs>
-                <linearGradient id="negGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(value, index) => signalRows[index]?.period_label || fmtDay(value)} />
-              <YAxis domain={[rateMin, rateMax]} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={value => `${value}%`} width={36} />
-              <Tooltip content={<RateTip />} />
-              {rateMax >= 30 && <ReferenceLine y={30} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value: '30%', fill: '#eab308', fontSize: 10, position: 'insideRight' }} />}
-              {rateMax >= 50 && <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value: '50%', fill: '#ef4444', fontSize: 10, position: 'insideRight' }} />}
-              <Bar dataKey="neg_rate" fill="#ef4444" opacity={0.12} name="Daily Neg %" radius={[2, 2, 0, 0]} barSize={6} />
-              <Area type="monotone" dataKey="rolling_neg" stroke="#ff4e1a" strokeWidth={2.5} fill="url(#negGrad)" dot={false} activeDot={{ r: 5, fill: '#ff4e1a', stroke: '#fff', strokeWidth: 2 }} name="7d Rolling" />
-            </ComposedChart>
-          </ResponsiveContainer>
-        ) : trendMode === 'sentiment' ? (
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={signalRows} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
-              <defs>
-                {Object.entries(sentimentColors).map(([sentiment, color]) => (
-                  <linearGradient key={sentiment} id={`ov-${sentiment}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={color} stopOpacity={0.35} />
-                    <stop offset="95%" stopColor={color} stopOpacity={0} />
+          <ScrollableChart height={200} pointCount={trendWithRolling.length} pxPerPoint={trendPxPerPoint}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={trendWithRolling} margin={{ top: 8, right: 40, bottom: 0, left: -10 }}>
+                <defs>
+                  <linearGradient id="negGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
                   </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(value, index) => signalRows[index]?.period_label || fmtDay(value)} />
+                <YAxis domain={[rateMin, rateMax]} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={value => `${value}%`} width={36} />
+                <Tooltip content={<RateTip />} />
+                {rateMax >= 30 && <ReferenceLine y={30} stroke="#eab308" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value: '30%', fill: '#eab308', fontSize: 10, position: 'insideRight' }} />}
+                {rateMax >= 50 && <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value: '50%', fill: '#ef4444', fontSize: 10, position: 'insideRight' }} />}
+                <Bar dataKey="neg_rate" fill="#ef4444" opacity={0.12} name="Daily Neg %" radius={[2, 2, 0, 0]} barSize={6} />
+                <Area type="monotone" dataKey="rolling_neg" stroke="#ff4e1a" strokeWidth={2.5} fill="url(#negGrad)" dot={false} activeDot={{ r: 5, fill: '#ff4e1a', stroke: '#fff', strokeWidth: 2 }} name="7d Rolling" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </ScrollableChart>
+        ) : trendMode === 'sentiment' ? (
+          <ScrollableChart height={200} pointCount={signalRows.length} pxPerPoint={trendPxPerPoint}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={signalRows} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
+                <defs>
+                  {Object.entries(sentimentColors).map(([sentiment, color]) => (
+                    <linearGradient key={sentiment} id={`ov-${sentiment}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={color} stopOpacity={0.35} />
+                      <stop offset="95%" stopColor={color} stopOpacity={0} />
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(value, index) => signalRows[index]?.period_label || fmtDay(value)} />
+                <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
+                <Tooltip content={<VolumeTip />} />
+                {['Negative', 'Positive', 'Neutral'].map(sentiment => (
+                  <Area key={sentiment} type="monotone" dataKey={sentiment} stroke={sentimentColors[sentiment]} strokeWidth={2} fill={`url(#ov-${sentiment})`} dot={false} activeDot={{ r: 4, stroke: '#fff', strokeWidth: 1.5 }} />
                 ))}
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(value, index) => signalRows[index]?.period_label || fmtDay(value)} />
-              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
-              <Tooltip content={<VolumeTip />} />
-              {['Negative', 'Positive', 'Neutral'].map(sentiment => (
-                <Area key={sentiment} type="monotone" dataKey={sentiment} stroke={sentimentColors[sentiment]} strokeWidth={2} fill={`url(#ov-${sentiment})`} dot={false} activeDot={{ r: 4, stroke: '#fff', strokeWidth: 1.5 }} />
-              ))}
-            </AreaChart>
-          </ResponsiveContainer>
+              </AreaChart>
+            </ResponsiveContainer>
+          </ScrollableChart>
         ) : !signalRows.length ? (
           <EmptyState text="No daily review volume available for the selected filters." />
         ) : (
           <>
-            <ResponsiveContainer width="100%" height={220}>
+            <ScrollableChart height={220} pointCount={signalRows.length} pxPerPoint={trendPxPerPoint}>
+            <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={signalRows} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                 <XAxis dataKey="day" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(value, index) => signalRows[index]?.period_label || fmtDay(value)} />
@@ -1156,6 +1183,7 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
                 <Bar dataKey="star_5" stackId="stars" fill="#22c55e" name="5 star" />
               </ComposedChart>
             </ResponsiveContainer>
+            </ScrollableChart>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
               {[
                 ['1 star', '#ef4444'],
