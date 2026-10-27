@@ -136,7 +136,7 @@ function ProductDrillDown({ row, filters }) {
   useEffect(() => {
     setWcLoading(true)
     setActiveWord(null)
-    fetchWordCloud({ asin: row.asin, rating: filters.rating, verified_purchase: filters.verified_purchase, date_from: filters.date_from, date_to: filters.date_to })
+    fetchWordCloud({ asin: row.asin, rating: filters.rating, verified_purchase: filters.verified_purchase, model_number: filters.model_number, mfr_part_number: filters.mfr_part_number, date_from: filters.date_from, date_to: filters.date_to })
       .then(payload => setWcData(payload || []))
       .catch(() => setWcData([]))
       .finally(() => setWcLoading(false))
@@ -271,6 +271,8 @@ export default function SummaryPage({ filters, allProducts }) {
     product: filters.product?.length ? filters.product : [],
     rating: filters.rating?.length ? filters.rating : [],
     verified_purchase: filters.verified_purchase?.length ? filters.verified_purchase : [],
+    model_number: filters.model_number?.length ? filters.model_number : [],
+    mfr_part_number: filters.mfr_part_number?.length ? filters.mfr_part_number : [],
     date_from: filters.date_from,
     date_to: filters.date_to,
   }

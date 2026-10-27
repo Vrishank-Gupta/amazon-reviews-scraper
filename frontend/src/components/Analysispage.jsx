@@ -847,6 +847,8 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
     product: filters.product?.length ? filters.product : [],
     rating: filters.rating?.length ? filters.rating : [],
     verified_purchase: filters.verified_purchase?.length ? filters.verified_purchase : [],
+    model_number: filters.model_number?.length ? filters.model_number : [],
+    mfr_part_number: filters.mfr_part_number?.length ? filters.mfr_part_number : [],
     date_from: filters.date_from,
     date_to: filters.date_to,
   }
@@ -876,10 +878,10 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
       return
     }
     const scoped = scopeToApi(issueFilter, tree)
-    fetchAnalysis({ ...scoped, rating: apiParams.rating, verified_purchase: apiParams.verified_purchase, date_from: apiParams.date_from, date_to: apiParams.date_to })
+    fetchAnalysis({ ...scoped, rating: apiParams.rating, verified_purchase: apiParams.verified_purchase, model_number: apiParams.model_number, mfr_part_number: apiParams.mfr_part_number, date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(setLocalIssueData)
       .catch(() => setLocalIssueData(null))
-  }, [JSON.stringify(issueFilter), tree, JSON.stringify(apiParams.rating), JSON.stringify(apiParams.verified_purchase), apiParams.date_from, apiParams.date_to])
+  }, [JSON.stringify(issueFilter), tree, JSON.stringify(apiParams.rating), JSON.stringify(apiParams.verified_purchase), JSON.stringify(apiParams.model_number), JSON.stringify(apiParams.mfr_part_number), apiParams.date_from, apiParams.date_to])
 
   useEffect(() => {
     if (emptyScope(signalProd)) {
@@ -887,10 +889,10 @@ export default function AnalysisPage({ filters, allProducts, tree, comparisonSlo
       return
     }
     const scoped = scopeToApi(signalProd, tree)
-    fetchCxoTrends({ ...scoped, rating: apiParams.rating, verified_purchase: apiParams.verified_purchase, date_from: apiParams.date_from, date_to: apiParams.date_to })
+    fetchCxoTrends({ ...scoped, rating: apiParams.rating, verified_purchase: apiParams.verified_purchase, model_number: apiParams.model_number, mfr_part_number: apiParams.mfr_part_number, date_from: apiParams.date_from, date_to: apiParams.date_to })
       .then(payload => setLocalTrendData(payload || null))
       .catch(() => setLocalTrendData(null))
-  }, [JSON.stringify(signalProd), tree, JSON.stringify(apiParams.rating), JSON.stringify(apiParams.verified_purchase), apiParams.date_from, apiParams.date_to])
+  }, [JSON.stringify(signalProd), tree, JSON.stringify(apiParams.rating), JSON.stringify(apiParams.verified_purchase), JSON.stringify(apiParams.model_number), JSON.stringify(apiParams.mfr_part_number), apiParams.date_from, apiParams.date_to])
 
   const kpi = data?.kpi || {}
   const trend = data?.daily_trend || []

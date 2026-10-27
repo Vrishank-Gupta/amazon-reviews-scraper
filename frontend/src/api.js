@@ -44,13 +44,13 @@ function buildParams(filters = {}) {
   if (filters.date_to)           p.set('date_to', filters.date_to)
   if (filters.rating?.length)    p.set('rating', filters.rating.join(','))
   if (filters.verified_purchase?.length) p.set('verified_purchase', filters.verified_purchase.join(','))
+  if (filters.model_number?.length) p.set('model_number', filters.model_number.join(','))
+  if (filters.mfr_part_number?.length) p.set('mfr_part_number', filters.mfr_part_number.join(','))
   return p
 }
 
 function addReviewOnlyParams(p, filters) {
   if (filters.sentiment?.length) p.set('sentiment', filters.sentiment.join(','))
-  if (filters.model_number?.length) p.set('model_number', filters.model_number.join(','))
-  if (filters.mfr_part_number?.length) p.set('mfr_part_number', filters.mfr_part_number.join(','))
 }
 
 export async function fetchReviews(filters = {}) {
@@ -84,8 +84,9 @@ export async function exportRawReviewsExcel(filters = {}) {
   URL.revokeObjectURL(url)
 }
 
-export async function fetchFilters() {
-  const res = await apiFetch(apiUrl('/api/filters'))
+export async function fetchFilters(filters = {}) {
+  const p = buildParams(filters)
+  const res = await apiFetch(apiUrl(`/api/filters?${p}`))
   return res.json()
 }
 

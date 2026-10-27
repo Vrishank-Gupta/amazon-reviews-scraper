@@ -667,14 +667,14 @@ export default function FilterBar({ filters, options, onChange, tab }) {
       <ProductDropdown filters={filters} options={options} onChange={onChange} />
       <RatingDropdown filters={filters} options={options} onChange={onChange} />
       <VerifiedPurchaseDropdown filters={filters} options={options} onChange={onChange} />
+      <TagListDropdown label="Model Numbers" icon={<Tag size={12} />} filters={filters} filterKey="model_number" options={options.model_numbers} onChange={onChange} />
+      <TagListDropdown label="Mfr Part Numbers" icon={<Tag size={12} />} filters={filters} filterKey="mfr_part_number" options={options.mfr_part_numbers} onChange={onChange} />
 
       {showReviewFilters && (
         <>
           <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
           <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Reviews only:</span>
           <SentimentDropdown filters={filters} onChange={onChange} />
-          <TagListDropdown label="Model Numbers" icon={<Tag size={12} />} filters={filters} filterKey="model_number" options={options.model_numbers} onChange={onChange} />
-          <TagListDropdown label="Mfr Part Numbers" icon={<Tag size={12} />} filters={filters} filterKey="mfr_part_number" options={options.mfr_part_numbers} onChange={onChange} />
         </>
       )}
 

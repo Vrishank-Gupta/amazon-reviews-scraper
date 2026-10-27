@@ -349,6 +349,23 @@ function Dashboard({ authedEmail, onLogout }) {
     fetchPipelineStatus().then(setScrapeStatus).catch(() => {})
   }, [])
 
+  // Model Number / Mfr Part Number dropdown options narrow down to whatever
+  // category, product, rating, verified-purchase, or date filter is currently
+  // selected elsewhere, so they only ever offer values that actually exist
+  // within the current selection.
+  useEffect(() => {
+    fetchFilters(filters).then(o => {
+      setOptions(prev => ({ ...prev, model_numbers: o.model_numbers, mfr_part_numbers: o.mfr_part_numbers }))
+    }).catch(() => {})
+  }, [
+    JSON.stringify(filters.product_category),
+    JSON.stringify(filters.product),
+    JSON.stringify(filters.rating),
+    JSON.stringify(filters.verified_purchase),
+    filters.date_from,
+    filters.date_to,
+  ])
+
   const loadReviews = useCallback(async f => {
     setRefreshing(true)
     try {
