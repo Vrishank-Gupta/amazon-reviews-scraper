@@ -1187,6 +1187,10 @@ def get_filters(
         if uncategorised:
             tree["Other"] = uncategorised
 
+        # Push EOL (end-of-life) categories to the bottom of the filter list;
+        # everything else keeps its existing order.
+        tree = dict(sorted(tree.items(), key=lambda item: item[0].upper().startswith("EOL")))
+
         return {
             "products": products,
             "ratings":  ratings,
