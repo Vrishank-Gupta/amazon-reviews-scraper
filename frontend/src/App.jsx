@@ -21,6 +21,71 @@ const DEFAULT_FILTERS = {
   date_to: null,
 }
 
+// Filters (and the active tab) persist across reloads and round-trip through
+// the URL, so a link copied from the address bar reopens the exact same
+// view for someone else. Array fields use the same separators as api.js's
+// buildParams for consistency, since both encode the same filter shapes.
+const ARRAY_FILTER_SEPARATORS = {
+  product_category: '|||',
+  product: '|||',
+  sentiment: ',',
+  rating: ',',
+  verified_purchase: ',',
+  sku_code: ',',
+}
+const FILTERS_STORAGE_KEY = 'dashboard_filters_v1'
+const TAB_STORAGE_KEY = 'dashboard_tab_v1'
+
+function filtersToSearchParams(filters, tab) {
+  const p = new URLSearchParams()
+  if (tab) p.set('tab', tab)
+  Object.keys(DEFAULT_FILTERS).forEach(key => {
+    const value = filters[key]
+    const sep = ARRAY_FILTER_SEPARATORS[key]
+    if (sep) {
+      if (value?.length) p.set(key, value.join(sep))
+    } else if (value) {
+      p.set(key, value)
+    }
+  })
+  return p
+}
+
+function parseFiltersFromSearchParams(params) {
+  const result = { ...DEFAULT_FILTERS }
+  Object.keys(DEFAULT_FILTERS).forEach(key => {
+    if (!params.has(key)) return
+    const raw = params.get(key)
+    const sep = ARRAY_FILTER_SEPARATORS[key]
+    result[key] = sep ? (raw ? raw.split(sep).filter(Boolean) : []) : (raw || null)
+  })
+  return result
+}
+
+// A URL carrying any filter/tab param means someone opened a shared link, so
+// it wins over whatever this browser last had saved. A bare reload (no
+// params) falls back to localStorage, then finally the defaults.
+function loadInitialDashboardState() {
+  const params = new URLSearchParams(window.location.search)
+  const hasUrlState = params.has('tab') || Object.keys(DEFAULT_FILTERS).some(key => params.has(key))
+  if (hasUrlState) {
+    return {
+      filters: parseFiltersFromSearchParams(params),
+      tab: params.get('tab') || 'analysis',
+    }
+  }
+  try {
+    const savedFilters = localStorage.getItem(FILTERS_STORAGE_KEY)
+    const savedTab = localStorage.getItem(TAB_STORAGE_KEY)
+    return {
+      filters: savedFilters ? { ...DEFAULT_FILTERS, ...JSON.parse(savedFilters) } : DEFAULT_FILTERS,
+      tab: savedTab || 'analysis',
+    }
+  } catch {
+    return { filters: DEFAULT_FILTERS, tab: 'analysis' }
+  }
+}
+
 const TAB_META = {
   analysis: {
     label: 'Overview',
@@ -329,9 +394,10 @@ function AdminPanel({ authedEmail, onLogout }) {
 }
 
 function Dashboard({ authedEmail, onLogout }) {
+  const [initialDashboardState] = useState(loadInitialDashboardState)
   const [draftQuota, setDraftQuota] = useState(null)
-  const [tab, setTab] = useState('analysis')
-  const [filters, setFilters] = useState(DEFAULT_FILTERS)
+  const [tab, setTab] = useState(initialDashboardState.tab)
+  const [filters, setFilters] = useState(initialDashboardState.filters)
   const [reviews, setReviews] = useState([])
   const [options, setOptions] = useState({ tree: {}, products: [], ratings: [], sku_codes: [] })
   const [scrapeStatus, setScrapeStatus] = useState(null)
@@ -340,10 +406,33 @@ function Dashboard({ authedEmail, onLogout }) {
   const [exportingRaw, setExportingRaw] = useState(false)
   const [scrapeMenuOpen, setScrapeMenuOpen] = useState(false)
 
+  // Persist filters + tab to localStorage and reflect them in the URL (via
+  // replaceState, so every filter tweak doesn't pile up browser-back
+  // history) -- this is what makes the current view both restorable on
+  // reload and shareable as a link.
+  useEffect(() => {
+    try { localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters)) } catch {}
+    try { localStorage.setItem(TAB_STORAGE_KEY, tab) } catch {}
+    const params = filtersToSearchParams(filters, tab)
+    const query = params.toString()
+    const newUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+    window.history.replaceState(null, '', newUrl)
+  }, [filters, tab])
+
   useEffect(() => {
     fetchFilters().then(o => {
       setOptions(o)
-      setFilters(f => ({ ...f, product: [], product_category: [] }))
+      // Drop any restored category/product selections that no longer exist
+      // (e.g. the mapping sheet changed since this was saved) instead of
+      // wiping the whole selection on every load.
+      setFilters(f => {
+        const validCats = (f.product_category || []).filter(c => Object.prototype.hasOwnProperty.call(o.tree || {}, c))
+        const validProds = (f.product || []).filter(p => (o.products || []).includes(p))
+        if (validCats.length === (f.product_category || []).length && validProds.length === (f.product || []).length) {
+          return f
+        }
+        return { ...f, product_category: validCats, product: validProds }
+      })
     })
     fetchStats()
     fetchPipelineStatus().then(setScrapeStatus).catch(() => {})
