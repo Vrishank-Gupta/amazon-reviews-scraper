@@ -1148,6 +1148,12 @@ def get_filters(
                 ORDER BY sku_code
             """, scope_params)
             sku_codes = [r["sku_code"] for r in cur.fetchall()]
+            # Push SKU codes whose product is in an EOL category to the bottom,
+            # same as the category dropdown; alphabetical order is preserved
+            # within each group since this is a stable sort over an already
+            # alphabetically-sorted list.
+            sku_to_category = {meta["sku_code"]: meta["category"] for meta in ASIN_MAP.values() if meta.get("sku_code")}
+            sku_codes.sort(key=lambda s: sku_to_category.get(s, "").upper().startswith("EOL"))
 
             cur.execute("""
                 SELECT
