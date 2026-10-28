@@ -294,7 +294,12 @@ function ProductDropdown({ filters, options, onChange }) {
     if (!catProducts.length) return
 
     if (activeProds.length === 0) {
-      const currentCats = new Set(activeCats)
+      // When nothing is explicitly selected, every category is implicitly
+      // selected (that's how "All Categories" is shown). Toggling one off
+      // from that implicit full set must leave "everything except this
+      // one" selected, not just this one category.
+      const effectiveCats = activeCats.length > 0 ? activeCats : categories
+      const currentCats = new Set(effectiveCats)
       if (currentCats.has(cat)) currentCats.delete(cat)
       else currentCats.add(cat)
       onChange({ product_category: [...currentCats], product: [] })
