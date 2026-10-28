@@ -230,11 +230,16 @@ function ProductDropdown({ filters, options, onChange }) {
     () => [...new Set([...all, ...Object.values(tree).flat()])],
     [all, tree],
   )
+  // Standard multi-select-with-search semantics: nothing checked by default
+  // (meaning "no filter", not "everything implicitly selected"), and
+  // checking an item narrows the filter to what's checked. This is what
+  // lets searching for one item and clicking it just select that item,
+  // instead of needing to see and deselect everything else first.
   const selectedProducts = useMemo(() => {
     if (activeProds.length > 0) return activeProds
     if (activeCats.length > 0) return [...new Set(activeCats.flatMap(cat => tree[cat] || []))]
-    return normalizedAll
-  }, [activeCats, activeProds, normalizedAll, tree])
+    return []
+  }, [activeCats, activeProds, tree])
 
   const filteredCategories = useMemo(() => {
     if (!normalizedQuery) return categories
@@ -292,19 +297,6 @@ function ProductDropdown({ filters, options, onChange }) {
   const toggleCategory = cat => {
     const catProducts = tree[cat] || []
     if (!catProducts.length) return
-
-    if (activeProds.length === 0) {
-      // When nothing is explicitly selected, every category is implicitly
-      // selected (that's how "All Categories" is shown). Toggling one off
-      // from that implicit full set must leave "everything except this
-      // one" selected, not just this one category.
-      const effectiveCats = activeCats.length > 0 ? activeCats : categories
-      const currentCats = new Set(effectiveCats)
-      if (currentCats.has(cat)) currentCats.delete(cat)
-      else currentCats.add(cat)
-      onChange({ product_category: [...currentCats], product: [] })
-      return
-    }
 
     const current = new Set(selectedProducts)
     const fullySelected = catProducts.every(prod => current.has(prod))
