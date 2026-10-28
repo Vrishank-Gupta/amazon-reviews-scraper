@@ -515,6 +515,29 @@ def scrape_asin(row: dict, driver, db_conn) -> dict:
             "UPDATE raw_reviews SET product_name=%s, category=%s, sku_code=%s WHERE asin=%s",
             (product_name, category, sku_code, asin),
         )
+
+        # Amazon shares reviews across variant siblings (color/model options)
+        # on one product page, so a single scrape can surface reviews for a
+        # sibling ASIN we don't track. Drop those rather than let an
+        # unmapped, stale-identity ASIN accumulate in the dataset.
+        pin_cur.execute(
+            "SELECT DISTINCT asin FROM raw_reviews WHERE scrape_asin=%s AND asin<>%s",
+            (asin, asin),
+        )
+        stray_asins = [row[0] for row in pin_cur.fetchall() if row[0] not in ASIN_NAME_MAP]
+        if stray_asins:
+            placeholders = ",".join(["%s"] * len(stray_asins))
+            pin_cur.execute(
+                f"DELETE t FROM review_tags t JOIN raw_reviews r ON r.review_id = t.review_id "
+                f"WHERE r.scrape_asin=%s AND r.asin IN ({placeholders})",
+                [asin, *stray_asins],
+            )
+            pin_cur.execute(
+                f"DELETE FROM raw_reviews WHERE scrape_asin=%s AND asin IN ({placeholders})",
+                [asin, *stray_asins],
+            )
+            print(f"  -> Dropped {pin_cur.rowcount} row(s) for unmapped sibling ASIN(s): {stray_asins}")
+
         db_conn.commit()
         pin_cur.close()
 
