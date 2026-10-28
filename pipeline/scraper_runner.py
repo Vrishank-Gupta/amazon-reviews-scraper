@@ -194,10 +194,10 @@ def insert_reviews(reviews: list, conn) -> int:
             "asin": r.get("variant_asin") or r.get("asin"),
             "scrape_asin": r.get("scrape_asin") or r.get("asin"),
             "variant_asin": r.get("variant_asin") or r.get("asin"),
-            "variant_label": r.get("variant_label") or r.get("product_name"),
+            "variant_label": (r.get("variant_label") or r.get("product_name") or "")[:255],
             "variant_dimension": r.get("variant_dimension") or "Set name",
-            "product_name": r.get("product_name") or r.get("variant_label") or r.get("asin"),
-            "category": r.get("category", ""),
+            "product_name": (r.get("product_name") or r.get("variant_label") or r.get("asin") or "")[:255],
+            "category": (r.get("category") or "")[:255],
             "rating": r["rating"],
             "title": r["title"],
             "review": r["review"],
@@ -206,70 +206,77 @@ def insert_reviews(reviews: list, conn) -> int:
             "review_url": r["review_url"],
             "scrape_date": r["scrape_date"],
         }
-        cur.execute(
-            """
-            UPDATE raw_reviews
-            SET reviewer_name=COALESCE(NULLIF(%s, ''), reviewer_name),
-                asin=%s,
-                scrape_asin=%s,
-                variant_asin=%s,
-                variant_label=%s,
-                variant_dimension=%s,
-                product_name=%s,
-                category=%s,
-                rating=%s,
-                title=%s,
-                review=%s,
-                review_date=%s,
-                verified_purchase=%s,
-                review_url=%s,
-                scrape_date=%s
-            WHERE review_id=%s
-            """,
-            (
-                values["reviewer_name"],
-                values["asin"],
-                values["scrape_asin"],
-                values["variant_asin"],
-                values["variant_label"],
-                values["variant_dimension"],
-                values["product_name"],
-                values["category"],
-                values["rating"],
-                values["title"],
-                values["review"],
-                values["review_date"],
-                values["verified_purchase"],
-                values["review_url"],
-                values["scrape_date"],
-                values["review_id"],
-            ),
-        )
-        if cur.rowcount:
-            continue
-        cur.execute(
-            """
-            INSERT IGNORE INTO raw_reviews
-                (review_id, reviewer_name, asin, scrape_asin, variant_asin, variant_label, variant_dimension,
-                 product_name, category, rating, title,
-                 review, review_date, verified_purchase, review_url, scrape_date)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """,
-            (
-                values["review_id"],
-                values["reviewer_name"],
-                values["asin"],
-                values["scrape_asin"],
-                values["variant_asin"],
-                values["variant_label"],
-                values["variant_dimension"],
-                values["product_name"],
-                values["category"],
-                values["rating"], values["title"], values["review"],
-                values["review_date"], values["verified_purchase"], values["review_url"], values["scrape_date"],
-            ),
-        )
-        inserted += cur.rowcount
+        try:
+            cur.execute(
+                """
+                UPDATE raw_reviews
+                SET reviewer_name=COALESCE(NULLIF(%s, ''), reviewer_name),
+                    asin=%s,
+                    scrape_asin=%s,
+                    variant_asin=%s,
+                    variant_label=%s,
+                    variant_dimension=%s,
+                    product_name=%s,
+                    category=%s,
+                    rating=%s,
+                    title=%s,
+                    review=%s,
+                    review_date=%s,
+                    verified_purchase=%s,
+                    review_url=%s,
+                    scrape_date=%s
+                WHERE review_id=%s
+                """,
+                (
+                    values["reviewer_name"],
+                    values["asin"],
+                    values["scrape_asin"],
+                    values["variant_asin"],
+                    values["variant_label"],
+                    values["variant_dimension"],
+                    values["product_name"],
+                    values["category"],
+                    values["rating"],
+                    values["title"],
+                    values["review"],
+                    values["review_date"],
+                    values["verified_purchase"],
+                    values["review_url"],
+                    values["scrape_date"],
+                    values["review_id"],
+                ),
+            )
+            if cur.rowcount:
+                continue
+            cur.execute(
+                """
+                INSERT IGNORE INTO raw_reviews
+                    (review_id, reviewer_name, asin, scrape_asin, variant_asin, variant_label, variant_dimension,
+                     product_name, category, rating, title,
+                     review, review_date, verified_purchase, review_url, scrape_date)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    values["review_id"],
+                    values["reviewer_name"],
+                    values["asin"],
+                    values["scrape_asin"],
+                    values["variant_asin"],
+                    values["variant_label"],
+                    values["variant_dimension"],
+                    values["product_name"],
+                    values["category"],
+                    values["rating"], values["title"], values["review"],
+                    values["review_date"], values["verified_purchase"], values["review_url"], values["scrape_date"],
+                ),
+            )
+            inserted += cur.rowcount
+        except Exception as e:
+            # One malformed row (e.g. an oversized field) shouldn't sink the
+            # whole batch -- log it and keep going with the rest. A plain
+            # data-validation error like this doesn't poison the rest of the
+            # pending (uncommitted) transaction in MySQL, so no rollback here.
+            print(f"  ⚠️  Skipped review {values['review_id']}: {e}")
     conn.commit()
     cur.close()
     return inserted
