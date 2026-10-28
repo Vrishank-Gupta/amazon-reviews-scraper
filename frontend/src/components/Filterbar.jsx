@@ -604,9 +604,8 @@ export default function FilterBar({ filters, options, onChange, tab }) {
   const hasSent = (filters.sentiment || []).length > 0
   const hasRating = (filters.rating || []).length > 0
   const hasVerified = (filters.verified_purchase || []).length > 0
-  const hasModelNumber = (filters.model_number || []).length > 0
-  const hasMfrPartNumber = (filters.mfr_part_number || []).length > 0
-  const hasAny = isFiltered || hasDate || hasSent || hasRating || hasVerified || hasModelNumber || hasMfrPartNumber
+  const hasSkuCode = (filters.sku_code || []).length > 0
+  const hasAny = isFiltered || hasDate || hasSent || hasRating || hasVerified || hasSkuCode
 
   const activePreset = (() => {
     if (!filters.date_from && !filters.date_to) return 'All'
@@ -636,8 +635,7 @@ export default function FilterBar({ filters, options, onChange, tab }) {
     sentiment: [],
     rating: [],
     verified_purchase: [],
-    model_number: [],
-    mfr_part_number: [],
+    sku_code: [],
   })
 
   const productChipLabel = (() => {
@@ -667,8 +665,7 @@ export default function FilterBar({ filters, options, onChange, tab }) {
       <ProductDropdown filters={filters} options={options} onChange={onChange} />
       <RatingDropdown filters={filters} options={options} onChange={onChange} />
       <VerifiedPurchaseDropdown filters={filters} options={options} onChange={onChange} />
-      <TagListDropdown label="Model Numbers" icon={<Tag size={12} />} filters={filters} filterKey="model_number" options={options.model_numbers} onChange={onChange} />
-      <TagListDropdown label="Mfr Part Numbers" icon={<Tag size={12} />} filters={filters} filterKey="mfr_part_number" options={options.mfr_part_numbers} onChange={onChange} />
+      <TagListDropdown label="SKU Codes" icon={<Tag size={12} />} filters={filters} filterKey="sku_code" options={options.sku_codes} onChange={onChange} />
 
       {showReviewFilters && (
         <>
@@ -698,11 +695,8 @@ export default function FilterBar({ filters, options, onChange, tab }) {
                 <ActiveChip key={value} label={item?.label || value} color={value === 'verified' ? '#22c55e' : value === 'unverified' ? '#eab308' : 'var(--text-muted)'} onRemove={() => onChange({ verified_purchase: (filters.verified_purchase || []).filter(x => x !== value) })} />
               )
             })}
-            {(filters.model_number || []).map(value => (
-              <ActiveChip key={`mn-${value}`} label={`Model: ${value}`} onRemove={() => onChange({ model_number: (filters.model_number || []).filter(x => x !== value) })} />
-            ))}
-            {(filters.mfr_part_number || []).map(value => (
-              <ActiveChip key={`mpn-${value}`} label={`Mfr Part: ${value}`} onRemove={() => onChange({ mfr_part_number: (filters.mfr_part_number || []).filter(x => x !== value) })} />
+            {(filters.sku_code || []).map(value => (
+              <ActiveChip key={`sku-${value}`} label={`SKU: ${value}`} onRemove={() => onChange({ sku_code: (filters.sku_code || []).filter(x => x !== value) })} />
             ))}
           </div>
         </>

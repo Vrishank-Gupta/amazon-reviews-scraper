@@ -136,7 +136,7 @@ function ProductDrillDown({ row, filters }) {
   useEffect(() => {
     setWcLoading(true)
     setActiveWord(null)
-    fetchWordCloud({ asin: row.asin, rating: filters.rating, verified_purchase: filters.verified_purchase, model_number: filters.model_number, mfr_part_number: filters.mfr_part_number, date_from: filters.date_from, date_to: filters.date_to })
+    fetchWordCloud({ asin: row.asin, rating: filters.rating, verified_purchase: filters.verified_purchase, sku_code: filters.sku_code, date_from: filters.date_from, date_to: filters.date_to })
       .then(payload => setWcData(payload || []))
       .catch(() => setWcData([]))
       .finally(() => setWcLoading(false))
@@ -271,8 +271,7 @@ export default function SummaryPage({ filters, allProducts }) {
     product: filters.product?.length ? filters.product : [],
     rating: filters.rating?.length ? filters.rating : [],
     verified_purchase: filters.verified_purchase?.length ? filters.verified_purchase : [],
-    model_number: filters.model_number?.length ? filters.model_number : [],
-    mfr_part_number: filters.mfr_part_number?.length ? filters.mfr_part_number : [],
+    sku_code: filters.sku_code?.length ? filters.sku_code : [],
     date_from: filters.date_from,
     date_to: filters.date_to,
   }
@@ -322,7 +321,7 @@ export default function SummaryPage({ filters, allProducts }) {
       const category = row.category || 'Other'
       if (tableCatFilter && category !== tableCatFilter) return
       if (q) {
-        const haystack = `${productDisplayName(row)} ${row.model_number || ''} ${row.mfr_part_number || ''}`.toLowerCase()
+        const haystack = `${productDisplayName(row)} ${row.sku_code || ''}`.toLowerCase()
         if (!haystack.includes(q)) return
       }
       if (!groups[category]) groups[category] = []
@@ -438,7 +437,6 @@ export default function SummaryPage({ filters, allProducts }) {
             <colgroup>
               <col style={{ width: '24%' }} />
               <col style={{ width: '10%' }} />
-              <col style={{ width: '10%' }} />
               <col style={{ width: '12%' }} />
               <col style={{ width: '7%' }} />
               <col style={{ width: '9%' }} />
@@ -450,8 +448,7 @@ export default function SummaryPage({ filters, allProducts }) {
             <thead>
               <tr>
                 <TH onClick={() => handleSort('product_name')} sortDir={sortKey === 'product_name' ? sortDir : null} tip="Product name with health status pill">Product</TH>
-                <TH onClick={() => handleSort('model_number')} sortDir={sortKey === 'model_number' ? sortDir : null} tip="Amazon listing field: Model Number">Model Number</TH>
-                <TH onClick={() => handleSort('mfr_part_number')} sortDir={sortKey === 'mfr_part_number' ? sortDir : null} tip="Amazon listing field: Mfr Part Number">Mfr Part Number</TH>
+                <TH onClick={() => handleSort('sku_code')} sortDir={sortKey === 'sku_code' ? sortDir : null} tip="Internal SKU code from the product mapping sheet">SKU Code</TH>
                 <TH align="right" onClick={() => handleSort('listing_rating')} sortDir={sortKey === 'listing_rating' ? sortDir : null} tip="Latest Amazon product-page rating snapshot from product_ratings_snapshot. This is the number expected to match Amazon, subject to the last scrape date.">Amazon Rating</TH>
                 <TH align="right" tip="Amazon listing rating change versus the prior comparison period when a prior snapshot exists.">Delta Rating</TH>
                 <TH align="right" onClick={() => handleSort('avg_rating')} sortDir={sortKey === 'avg_rating' ? sortDir : null} tip="Average star rating from scraped review rows in the selected period only. It can differ sharply from Amazon's all-time product-page rating.">Review Avg</TH>
@@ -547,11 +544,8 @@ function FragmentRow({ showCategory, category, row, rowBg, isDrill, onToggle, ra
                 <HealthPill negPct={row.neg_pct} />
               </div>
             </td>
-            <td title={row.model_number || ''} style={{ padding: '12px', fontSize: 12, color: 'var(--text)', borderBottom: isDrill ? 'none' : '1px solid var(--border)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {row.model_number || '—'}
-            </td>
-            <td title={row.mfr_part_number || ''} style={{ padding: '12px', fontSize: 12, color: 'var(--text)', borderBottom: isDrill ? 'none' : '1px solid var(--border)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {row.mfr_part_number || '—'}
+            <td title={row.sku_code || ''} style={{ padding: '12px', fontSize: 12, color: 'var(--text)', borderBottom: isDrill ? 'none' : '1px solid var(--border)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {row.sku_code || '—'}
             </td>
             <td style={{ padding: '12px', textAlign: 'right', borderBottom: isDrill ? 'none' : '1px solid var(--border)' }}>
               <ListingRating row={row} />

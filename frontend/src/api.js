@@ -44,8 +44,7 @@ function buildParams(filters = {}) {
   if (filters.date_to)           p.set('date_to', filters.date_to)
   if (filters.rating?.length)    p.set('rating', filters.rating.join(','))
   if (filters.verified_purchase?.length) p.set('verified_purchase', filters.verified_purchase.join(','))
-  if (filters.model_number?.length) p.set('model_number', filters.model_number.join(','))
-  if (filters.mfr_part_number?.length) p.set('mfr_part_number', filters.mfr_part_number.join(','))
+  if (filters.sku_code?.length) p.set('sku_code', filters.sku_code.join(','))
   return p
 }
 
@@ -94,6 +93,13 @@ export async function fetchAdminAccessLog(limit = 200) {
   const res = await apiFetch(apiUrl(`/api/admin/access-log?limit=${limit}`))
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.detail || 'Failed to fetch admin access log')
+  return data
+}
+
+export async function fetchEmailDraftQuota() {
+  const res = await apiFetch(apiUrl('/api/email-drafts/quota'))
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || 'Failed to fetch email draft quota')
   return data
 }
 

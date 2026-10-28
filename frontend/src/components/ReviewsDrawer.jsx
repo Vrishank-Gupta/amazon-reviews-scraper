@@ -133,8 +133,7 @@ export default function ReviewsDrawer({
     if (filters?.date_to) params.set('date_to', filters.date_to)
     if (filters?.rating?.length) params.set('rating', filters.rating.join(','))
     if (filters?.verified_purchase?.length) params.set('verified_purchase', filters.verified_purchase.join(','))
-    if (filters?.model_number?.length) params.set('model_number', filters.model_number.join(','))
-    if (filters?.mfr_part_number?.length) params.set('mfr_part_number', filters.mfr_part_number.join(','))
+    if (filters?.sku_code?.length) params.set('sku_code', filters.sku_code.join(','))
     if (sentiment) params.set('sentiment', sentiment)
     if (taxonomyCategory) params.set('category', taxonomyCategory)
 
@@ -153,8 +152,7 @@ export default function ReviewsDrawer({
     JSON.stringify(filters?.product_category || []),
     JSON.stringify(filters?.rating || []),
     JSON.stringify(filters?.verified_purchase || []),
-    JSON.stringify(filters?.model_number || []),
-    JSON.stringify(filters?.mfr_part_number || []),
+    JSON.stringify(filters?.sku_code || []),
     filters?.date_from,
     filters?.date_to,
   ])

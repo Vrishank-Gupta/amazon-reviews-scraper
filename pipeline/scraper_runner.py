@@ -13,10 +13,9 @@ from datetime import date, timedelta
 
 import pymysql
 from selenium import webdriver
+from selenium.common.exceptions import SessionNotCreatedException, WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-
-from scraper import scrape_product_rating, scrape_product_variations, scrape_reviews_for_asin
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -24,6 +23,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from shared.env import load_project_env
+from scraper import scrape_product_rating, scrape_product_variations, scrape_reviews_for_asin
 
 load_project_env()
 
@@ -35,6 +35,7 @@ ASINS_CSV           = os.path.join(project_root, "data", "asins.csv")
 _DEFAULT_CHROME_PROFILE = os.path.join(project_root, "chrome-profile")
 os.makedirs(_DEFAULT_CHROME_PROFILE, exist_ok=True)
 PAUSE_BETWEEN_ASINS = float(os.getenv("SCRAPER_PAUSE", "8"))
+SCRAPE_FORCE_FULL = os.getenv("SCRAPE_FORCE_FULL", "").strip().lower() in {"1", "true", "yes", "on"}
 
 _asin_filter_raw = os.getenv("SCRAPE_ASINS", "").strip()
 BACKFILL_VERIFIED_PURCHASE_DAYS = int(os.getenv("BACKFILL_VERIFIED_PURCHASE_DAYS", "0") or "0")
@@ -69,10 +70,6 @@ def load_asin_names():
 
 
 ASIN_NAME_MAP = load_asin_names()
-
-
-def canonical_product_name(asin, fallback=""):
-    return ASIN_NAME_MAP.get((asin or "").strip()) or fallback
 
 
 # ── DB ─────────────────────────────────────────────────────────────────────────
@@ -134,6 +131,7 @@ def ensure_review_variant_columns(conn):
         "variant_dimension": "ALTER TABLE raw_reviews ADD COLUMN variant_dimension VARCHAR(64) NULL AFTER variant_label",
         "model_number": "ALTER TABLE raw_reviews ADD COLUMN model_number VARCHAR(255) NULL AFTER variant_dimension",
         "mfr_part_number": "ALTER TABLE raw_reviews ADD COLUMN mfr_part_number VARCHAR(255) NULL AFTER model_number",
+        "sku_code": "ALTER TABLE raw_reviews ADD COLUMN sku_code VARCHAR(100) NULL AFTER mfr_part_number",
         "reviewer_name": "ALTER TABLE raw_reviews ADD COLUMN reviewer_name VARCHAR(255) NULL AFTER review_id",
         "verified_purchase": "ALTER TABLE raw_reviews ADD COLUMN verified_purchase TINYINT(1) NULL AFTER review_date",
     }
@@ -144,6 +142,7 @@ def ensure_review_variant_columns(conn):
         "idx_raw_reviews_verified_purchase": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_verified_purchase (verified_purchase)",
         "idx_raw_reviews_model_number": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_model_number (model_number)",
         "idx_raw_reviews_mfr_part_number": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_mfr_part_number (mfr_part_number)",
+        "idx_raw_reviews_sku_code": "ALTER TABLE raw_reviews ADD INDEX idx_raw_reviews_sku_code (sku_code)",
     }
 
     cur = conn.cursor()
@@ -197,7 +196,7 @@ def insert_reviews(reviews: list, conn) -> int:
             "variant_asin": r.get("variant_asin") or r.get("asin"),
             "variant_label": r.get("variant_label") or r.get("product_name"),
             "variant_dimension": r.get("variant_dimension") or "Set name",
-            "product_name": canonical_product_name(r.get("variant_asin") or r.get("asin"), r["product_name"]),
+            "product_name": r.get("product_name") or r.get("variant_label") or r.get("asin"),
             "category": r.get("category", ""),
             "rating": r["rating"],
             "title": r["title"],
@@ -322,7 +321,15 @@ def make_driver() -> webdriver.Chrome:
     print(f"  Using profile: {chrome_profile}")
 
     if CHROMEDRIVER_PATH:
-        driver = webdriver.Chrome(service=Service(CHROMEDRIVER_PATH), options=options)
+        try:
+            driver = webdriver.Chrome(service=Service(CHROMEDRIVER_PATH), options=options)
+        except (SessionNotCreatedException, WebDriverException) as exc:
+            message = str(exc)
+            if "only supports Chrome version" not in message and "Current browser version" not in message:
+                raise
+            print("  Configured ChromeDriver is not compatible with installed Chrome.")
+            print("  Retrying with Selenium Manager to locate a matching driver...")
+            driver = webdriver.Chrome(options=options)
     else:
         driver = webdriver.Chrome(options=options)
 
@@ -458,18 +465,24 @@ def scrape_asin(row: dict, driver, db_conn) -> dict:
     asin         = row["asin"]
     csv_product_name = row.get("product_name", "")
     category     = row.get("category", "")
+    sku_code     = row.get("sku_code", "")
 
     try:
+        # Product identity (name/category/SKU) always comes from the master
+        # mapping (data/asins.csv), never from the scraped listing title —
+        # that's what used to drift into inconsistent names.
+        product_name = csv_product_name or asin
         print(f"  Reading product variation map...")
         variant_metadata = scrape_product_variations(driver, asin)
-        product_name = csv_product_name or variant_metadata.get("selected_label") or asin
 
         # Wait until reviews page is ready (handles login automatically)
         wait_until_reviews_ready(driver, asin)
 
         # Use latest DB date as cutoff so we only fetch genuinely new reviews
         cutoff = None
-        if BACKFILL_VERIFIED_PURCHASE_DAYS > 0:
+        if SCRAPE_FORCE_FULL:
+            print(f"  Force full scrape: fetching last {os.getenv('SCRAPE_DAYS_BACK', 30)} days")
+        elif BACKFILL_VERIFIED_PURCHASE_DAYS > 0:
             cutoff = date.today() - timedelta(days=BACKFILL_VERIFIED_PURCHASE_DAYS)
             print(f"  Verified-purchase backfill: fetching reviews since {cutoff}")
         else:
@@ -493,6 +506,17 @@ def scrape_asin(row: dict, driver, db_conn) -> dict:
         print(f"  Got {len(reviews)} reviews — saving...")
         inserted = insert_reviews(reviews, db_conn)
         print(f"  ✓ {inserted} new rows inserted")
+
+        # Re-pin identity fields to the master mapping for every row under this
+        # ASIN — a self-healing step so scraped/updated rows always match the
+        # sheet even if this ASIN's mapping changes later.
+        pin_cur = db_conn.cursor()
+        pin_cur.execute(
+            "UPDATE raw_reviews SET product_name=%s, category=%s, sku_code=%s WHERE asin=%s",
+            (product_name, category, sku_code, asin),
+        )
+        db_conn.commit()
+        pin_cur.close()
 
         print(f"  Scraping overall rating...")
         snapshot = scrape_product_rating(driver, asin)

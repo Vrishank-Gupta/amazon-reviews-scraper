@@ -14,7 +14,6 @@ import os
 import sys
 import smtplib
 import secrets
-import random
 import zipfile
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -29,7 +28,6 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from shared.env import load_project_env
-from shared.product_names import amazon_display_product_name
 
 load_project_env()
 
@@ -61,7 +59,16 @@ ADMIN_EMAILS = {
     if email.strip()
 }
 OTP_EXPIRY_MINUTES = 10
-SESSION_EXPIRY_DAYS = 7
+OTP_MAX_REQUESTS = int(os.getenv("OTP_MAX_REQUESTS", "5"))
+OTP_REQUEST_WINDOW_MINUTES = int(os.getenv("OTP_REQUEST_WINDOW_MINUTES", "15"))
+OTP_MAX_VERIFY_ATTEMPTS = int(os.getenv("OTP_MAX_VERIFY_ATTEMPTS", "5"))
+SESSION_EXPIRY_DAYS = int(os.getenv("SESSION_EXPIRY_DAYS", "90"))
+DRAFT_LIMIT = int(os.getenv("DRAFT_LIMIT", "8"))
+DRAFT_WINDOW_HOURS = int(os.getenv("DRAFT_WINDOW_HOURS", "12"))
+DRAFT_DAILY_BUDGET_USD = float(os.getenv("DRAFT_DAILY_BUDGET_USD", "0.50"))
+DRAFT_RESERVATION_USD = float(
+    os.getenv("DRAFT_RESERVATION_USD", str(DRAFT_DAILY_BUDGET_USD / max(DRAFT_LIMIT, 1)))
+)
 
 _AUTH_PUBLIC_PATHS = {
     "/health",
@@ -78,6 +85,7 @@ CREATE TABLE IF NOT EXISTS auth_otps (
   otp CHAR(6) NOT NULL,
   expires_at DATETIME NOT NULL,
   used TINYINT(1) NOT NULL DEFAULT 0,
+  attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_auth_otps_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -108,16 +116,156 @@ CREATE TABLE IF NOT EXISTS auth_login_events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 """
 
+AI_DRAFT_USAGE_SQL = """
+CREATE TABLE IF NOT EXISTS ai_draft_usage (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  status ENUM('reserved', 'completed', 'failed') NOT NULL DEFAULT 'reserved',
+  input_tokens INT UNSIGNED NOT NULL DEFAULT 0,
+  output_tokens INT UNSIGNED NOT NULL DEFAULT 0,
+  estimated_cost_usd DECIMAL(10,6) NOT NULL DEFAULT 0,
+  actual_cost_usd DECIMAL(10,6) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME NULL,
+  reservation_expires_at DATETIME NULL,
+  INDEX idx_draft_usage_email_created (email, created_at),
+  INDEX idx_draft_usage_status_expiry (status, reservation_expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+"""
+
 
 def ensure_auth_tables(conn):
+    with conn.cursor() as cur:
+        cur.execute(AUTH_TABLE_OTP_SQL)
+        cur.execute(AUTH_TABLE_SESSION_SQL)
+        cur.execute(AUTH_TABLE_LOGIN_EVENT_SQL)
+        # Upgrade databases created by the earlier OTP implementation.
+        cur.execute("SHOW COLUMNS FROM auth_otps LIKE 'attempts'")
+        if not cur.fetchone():
+            cur.execute(
+                "ALTER TABLE auth_otps ADD COLUMN attempts "
+                "TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER used"
+            )
+    conn.commit()
+
+
+def ensure_draft_usage_table(conn):
+    with conn.cursor() as cur:
+        cur.execute(AI_DRAFT_USAGE_SQL)
+    conn.commit()
+
+
+def _draft_quota_status(conn, email: str) -> dict:
+    ensure_draft_usage_table(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+              COALESCE(SUM(CASE WHEN created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s HOUR)
+                AND (status='completed' OR (status='reserved' AND reservation_expires_at > UTC_TIMESTAMP()))
+                THEN 1 ELSE 0 END), 0) AS window_count,
+              COALESCE(SUM(CASE WHEN created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
+                AND status IN ('completed', 'failed') THEN COALESCE(actual_cost_usd, estimated_cost_usd)
+                WHEN created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
+                AND status='reserved' AND reservation_expires_at > UTC_TIMESTAMP()
+                THEN estimated_cost_usd ELSE 0 END), 0) AS daily_cost
+            FROM ai_draft_usage WHERE email=%s
+            """,
+            (DRAFT_WINDOW_HOURS, email),
+        )
+        row = cur.fetchone() or {}
+        cur.execute(
+            """
+            SELECT MIN(created_at) AS oldest_window_usage
+            FROM ai_draft_usage
+            WHERE email=%s AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s HOUR)
+              AND (status='completed' OR (status='reserved' AND reservation_expires_at > UTC_TIMESTAMP()))
+            """,
+            (email, DRAFT_WINDOW_HOURS),
+        )
+        oldest = (cur.fetchone() or {}).get("oldest_window_usage")
+
+    used = int(row.get("window_count") or 0)
+    spent = float(row.get("daily_cost") or 0)
+    reset_at = oldest + timedelta(hours=DRAFT_WINDOW_HOURS) if oldest and used >= DRAFT_LIMIT else None
+    return {
+        "draft_limit": DRAFT_LIMIT,
+        "drafts_used": used,
+        "drafts_remaining": max(0, DRAFT_LIMIT - used),
+        "window_hours": DRAFT_WINDOW_HOURS,
+        "daily_budget_usd": round(DRAFT_DAILY_BUDGET_USD, 2),
+        "daily_spend_usd": round(spent, 4),
+        "daily_budget_remaining_usd": round(max(0, DRAFT_DAILY_BUDGET_USD - spent), 4),
+        "allowed": used < DRAFT_LIMIT and spent + DRAFT_RESERVATION_USD <= DRAFT_DAILY_BUDGET_USD,
+        "draft_window_reset_at": reset_at.isoformat() if reset_at else None,
+    }
+
+
+def reserve_draft_quota(email: str) -> int:
+    """Call immediately before an email-draft model request."""
+    conn = get_conn()
+    lock_name = f"draft-quota:{email}"[:64]
     try:
         with conn.cursor() as cur:
-            cur.execute(AUTH_TABLE_OTP_SQL)
-            cur.execute(AUTH_TABLE_SESSION_SQL)
-            cur.execute(AUTH_TABLE_LOGIN_EVENT_SQL)
+            cur.execute("SELECT GET_LOCK(%s, 5) AS acquired", (lock_name,))
+            if not (cur.fetchone() or {}).get("acquired"):
+                raise HTTPException(status_code=503, detail="Quota check is busy. Please retry.")
+        status = _draft_quota_status(conn, email)
+        if not status["allowed"]:
+            raise HTTPException(status_code=429, detail={"message": "Draft quota exhausted", "quota": status})
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ai_draft_usage (email, estimated_cost_usd, reservation_expires_at)
+                VALUES (%s, %s, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 10 MINUTE))
+                """,
+                (email, DRAFT_RESERVATION_USD),
+            )
+            usage_id = cur.lastrowid
         conn.commit()
-    except Exception:
-        conn.rollback()
+        return usage_id
+    finally:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+        finally:
+            conn.close()
+
+
+def complete_draft_quota(usage_id: int, input_tokens: int, output_tokens: int, cost_usd: float):
+    """Record provider-reported tokens/cost after a successful draft."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE ai_draft_usage SET status='completed', input_tokens=%s, output_tokens=%s,
+                  actual_cost_usd=%s, completed_at=UTC_TIMESTAMP()
+                WHERE id=%s AND status='reserved'
+                """,
+                (max(0, input_tokens), max(0, output_tokens), max(0, cost_usd), usage_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def fail_draft_quota(usage_id: int, input_tokens: int = 0, output_tokens: int = 0, cost_usd: float = 0):
+    """Release a failed draft count while retaining any provider-billed cost."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE ai_draft_usage SET status='failed', input_tokens=%s, output_tokens=%s,
+                  actual_cost_usd=%s, completed_at=UTC_TIMESTAMP()
+                WHERE id=%s AND status='reserved'
+                """,
+                (max(0, input_tokens), max(0, output_tokens), max(0, cost_usd), usage_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def send_otp_email(to_email: str, otp: str):
@@ -212,6 +360,12 @@ async def auth_middleware(request: Request, call_next):
                 (token,),
             )
             valid = cur.fetchone() is not None
+            if valid:
+                cur.execute(
+                    "UPDATE auth_sessions SET expires_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s DAY) WHERE token=%s",
+                    (SESSION_EXPIRY_DAYS, token),
+                )
+                conn.commit()
     except pymysql.err.ProgrammingError as exc:
         if exc.args and exc.args[0] == 1146:
             valid = False
@@ -227,7 +381,7 @@ async def auth_middleware(request: Request, call_next):
 
 
 # ── ASIN map — loaded once at startup from asins.csv ─────────────────────────
-# ASIN_MAP  : { asin: { product_name, category } }
+# ASIN_MAP  : { asin: { product_name, category, sku_code } }
 # CAT_MAP   : { category: [product_name, ...] }
 # ALL_PRODS : [product_name, ...]
 
@@ -240,7 +394,8 @@ def _load_asin_map():
                 asin = row["asin"].strip()
                 name = row["product_name"].strip()
                 cat  = row.get("category", "").strip()
-                asin_map[asin] = {"product_name": name, "category": cat}
+                sku  = (row.get("sku_code") or "").strip()
+                asin_map[asin] = {"product_name": name, "category": cat, "sku_code": sku}
                 if name not in all_prods:
                     all_prods.append(name)
                 if cat and name not in cat_map[cat]:
@@ -250,11 +405,6 @@ def _load_asin_map():
     return asin_map, dict(cat_map), all_prods
 
 ASIN_MAP, CAT_MAP, ALL_PRODS = _load_asin_map()
-
-CATEGORY_FILTER_INCLUDES = {
-    "Locks": ["Locks", "Lock & VDB Pro combo"],
-    "VDB": ["VDB", "Lock & VDB Pro combo"],
-}
 
 
 def _refresh_asin_globals():
@@ -297,30 +447,6 @@ def _save_categories(categories):
         json.dump(cleaned, f, ensure_ascii=True, indent=2)
 
 
-def expand_filter_categories(categories):
-    expanded = []
-    for category in categories:
-        for item in CATEGORY_FILTER_INCLUDES.get(category, [category]):
-            if item not in expanded:
-                expanded.append(item)
-    return expanded
-
-
-def is_lock_vdb_bundle_name(product_name):
-    text = (product_name or "").lower()
-    return any(token in text for token in ("doorbell", "vdb", "video call"))
-
-
-def tree_categories_for(raw_category, product_name=""):
-    categories = [raw_category] if raw_category else []
-    for display_category, included_categories in CATEGORY_FILTER_INCLUDES.items():
-        if raw_category in included_categories and display_category not in categories:
-            categories.append(display_category)
-    if raw_category == "Locks" and is_lock_vdb_bundle_name(product_name) and "VDB" not in categories:
-        categories.append("VDB")
-    return categories
-
-
 def resolve_products(product: Optional[str], category: Optional[str]) -> Optional[list]:
     """
     Resolve dashboard product/category filters into SQL-filter tokens.
@@ -337,8 +463,7 @@ def resolve_products(product: Optional[str], category: Optional[str]) -> Optiona
             selected.append(canonical)
         seen = set()
         categories = [c for c in selected if not (c in seen or seen.add(c))]
-        expanded_categories = expand_filter_categories(categories)
-        return [f"__CATEGORY__:{c}" for c in expanded_categories] if expanded_categories else ["__NO_MATCH__"]
+        return [f"__CATEGORY__:{c}" for c in categories] if categories else ["__NO_MATCH__"]
     return None
 
 
@@ -349,24 +474,16 @@ def product_filter_sql(products: Optional[list], table_alias: str = "r") -> tupl
     categories = [p.split(":", 1)[1] for p in products if isinstance(p, str) and p.startswith("__CATEGORY__:")]
     if categories and len(categories) == len(products):
         placeholders = ",".join(["%s"] * len(categories))
-        if "VDB" in categories:
-            return (
-                f" AND ({table_alias}.category IN ({placeholders})"
-                f" OR ({table_alias}.category = %s AND ("
-                f"LOWER({table_alias}.product_name) LIKE %s OR "
-                f"LOWER({table_alias}.product_name) LIKE %s OR "
-                f"LOWER({table_alias}.product_name) LIKE %s)))"
-            ), [*categories, "Locks", "%doorbell%", "%vdb%", "%video call%"]
         return f" AND {table_alias}.category IN ({placeholders})", categories
     placeholders = ",".join(["%s"] * len(products))
     return f" AND {table_alias}.product_name IN ({placeholders})", list(products)
 
 
 def effective_asin_filter_sql(asin: Optional[str], table_alias: str = "r") -> tuple:
-    """Filter a variant-aware dashboard row by the same key used by /api/summary."""
+    """Filter rows down to one exact ASIN (no set/variant collapsing)."""
     if not asin:
         return "", []
-    return f" AND COALESCE({table_alias}.variant_asin, {table_alias}.asin) = %s", [asin]
+    return f" AND {table_alias}.asin = %s", [asin]
 
 
 def rating_filter_sql(rating: Optional[str], table_alias: str = "r") -> tuple:
@@ -408,12 +525,8 @@ def _in_list_filter_sql(column: str, raw_value: Optional[str], table_alias: str 
     return f" AND {table_alias}.{column} IN ({placeholders})", values
 
 
-def model_number_filter_sql(model_number: Optional[str], table_alias: str = "r") -> tuple:
-    return _in_list_filter_sql("model_number", model_number, table_alias)
-
-
-def mfr_part_number_filter_sql(mfr_part_number: Optional[str], table_alias: str = "r") -> tuple:
-    return _in_list_filter_sql("mfr_part_number", mfr_part_number, table_alias)
+def sku_code_filter_sql(sku_code: Optional[str], table_alias: str = "r") -> tuple:
+    return _in_list_filter_sql("sku_code", sku_code, table_alias)
 
 
 RAW_REVIEW_EXPORT_HEADERS = [
@@ -422,8 +535,7 @@ RAW_REVIEW_EXPORT_HEADERS = [
     ("set_name", "Set Name"),
     ("variant_label", "Variant Label"),
     ("variant_dimension", "Variant Dimension"),
-    ("model_number", "Model Number"),
-    ("mfr_part_number", "Mfr Part Number"),
+    ("sku_code", "SKU Code"),
     ("asin", "ASIN"),
     ("scrape_asin", "Scrape ASIN"),
     ("variant_asin", "Variant ASIN"),
@@ -805,8 +917,7 @@ def get_reviews(
     product: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    model_number: Optional[str] = None,
-    mfr_part_number: Optional[str] = None,
+    sku_code: Optional[str] = None,
 ):
     conn = get_conn()
     try:
@@ -817,7 +928,7 @@ def get_reviews(
             query = """
                 SELECT
                     r.review_id, r.reviewer_name, r.asin, r.scrape_asin, r.variant_asin,
-                    r.variant_label, r.variant_dimension, r.model_number, r.mfr_part_number,
+                    r.variant_label, r.variant_dimension, r.sku_code,
                     r.product_name, r.category,
                     r.rating, r.review, r.title, r.review_date,
                     r.verified_purchase, r.review_url, r.scrape_date,
@@ -846,13 +957,9 @@ def get_reviews(
             query += vp_sql
             params.extend(vp_params)
 
-            mn_sql, mn_params = model_number_filter_sql(model_number)
-            query += mn_sql
-            params.extend(mn_params)
-
-            mpn_sql, mpn_params = mfr_part_number_filter_sql(mfr_part_number)
-            query += mpn_sql
-            params.extend(mpn_params)
+            sku_sql, sku_params = sku_code_filter_sql(sku_code)
+            query += sku_sql
+            params.extend(sku_params)
 
             date_parse = "STR_TO_DATE(REGEXP_REPLACE(r.review_date, 'Reviewed in India on ', ''), '%%d %%M %%Y')"
             if date_from:
@@ -870,10 +977,7 @@ def get_reviews(
             row["verified_purchase"] = (
                 None if row.get("verified_purchase") is None else bool(row.get("verified_purchase"))
             )
-            row["display_product_name"] = amazon_display_product_name(
-                row.get("product_name"),
-                row.get("variant_label"),
-            )
+            row["display_product_name"] = ASIN_MAP.get(row.get("asin"), {}).get("product_name") or row.get("product_name") or row.get("asin")
             result.append(row)
 
         return result
@@ -892,8 +996,7 @@ def export_raw_reviews_excel(
     product: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    model_number: Optional[str] = None,
-    mfr_part_number: Optional[str] = None,
+    sku_code: Optional[str] = None,
 ):
     conn = get_conn()
     try:
@@ -905,7 +1008,7 @@ def export_raw_reviews_excel(
             query = f"""
                 SELECT
                     r.review_id, r.reviewer_name, r.asin, r.scrape_asin, r.variant_asin,
-                    r.variant_label, r.variant_dimension, r.model_number, r.mfr_part_number,
+                    r.variant_label, r.variant_dimension, r.sku_code,
                     r.product_name,
                     r.category, r.rating, r.title, r.review, r.review_date,
                     r.verified_purchase, r.review_url, r.scrape_date, {date_parse} as posting_date
@@ -938,13 +1041,9 @@ def export_raw_reviews_excel(
             query += vp_sql
             params.extend(vp_params)
 
-            mn_sql, mn_params = model_number_filter_sql(model_number)
-            query += mn_sql
-            params.extend(mn_params)
-
-            mpn_sql, mpn_params = mfr_part_number_filter_sql(mfr_part_number)
-            query += mpn_sql
-            params.extend(mpn_params)
+            sku_sql, sku_params = sku_code_filter_sql(sku_code)
+            query += sku_sql
+            params.extend(sku_params)
 
             if date_from:
                 query += f" AND {date_parse} >= %s"
@@ -961,18 +1060,14 @@ def export_raw_reviews_excel(
         for row in db_rows:
             posting_date = row.get("posting_date")
             scrape_date = row.get("scrape_date")
-            display_product_name = amazon_display_product_name(
-                row.get("product_name"),
-                row.get("variant_label"),
-            )
+            display_product_name = ASIN_MAP.get(row.get("asin"), {}).get("product_name") or row.get("product_name") or row.get("asin")
             rows.append({
                 "product_name": display_product_name,
                 "category": row.get("category") or "",
                 "set_name": row.get("variant_label") or row.get("product_name") or "",
                 "variant_label": row.get("variant_label") or "",
                 "variant_dimension": row.get("variant_dimension") or "",
-                "model_number": row.get("model_number") or "",
-                "mfr_part_number": row.get("mfr_part_number") or "",
+                "sku_code": row.get("sku_code") or "",
                 "asin": row.get("asin") or "",
                 "scrape_asin": row.get("scrape_asin") or "",
                 "variant_asin": row.get("variant_asin") or "",
@@ -1027,10 +1122,10 @@ def get_filters(
             cur.execute("SELECT DISTINCT rating FROM raw_reviews WHERE rating IS NOT NULL ORDER BY rating")
             ratings = [r["rating"] for r in cur.fetchall()]
 
-            # Model Number / Mfr Part Number options narrow down to whatever
-            # other filters (category, product, rating, verified purchase,
-            # date range) are currently selected, so the dropdown only offers
-            # values that actually exist within the current selection.
+            # SKU Code options narrow down to whatever other filters (category,
+            # product, rating, verified purchase, date range) are currently
+            # selected, so the dropdown only offers values that actually exist
+            # within the current selection.
             scoped_products = resolve_products(product, category)
             scope_sql, scope_params = product_filter_sql(scoped_products)
             rating_scope_sql, rating_scope_params = rating_filter_sql(rating)
@@ -1048,18 +1143,11 @@ def get_filters(
                 scope_params.append(date_to)
 
             cur.execute(f"""
-                SELECT DISTINCT model_number FROM raw_reviews r
-                WHERE model_number IS NOT NULL AND model_number != '' {scope_sql}
-                ORDER BY model_number
+                SELECT DISTINCT sku_code FROM raw_reviews r
+                WHERE sku_code IS NOT NULL AND sku_code != '' {scope_sql}
+                ORDER BY sku_code
             """, scope_params)
-            model_numbers = [r["model_number"] for r in cur.fetchall()]
-
-            cur.execute(f"""
-                SELECT DISTINCT mfr_part_number FROM raw_reviews r
-                WHERE mfr_part_number IS NOT NULL AND mfr_part_number != '' {scope_sql}
-                ORDER BY mfr_part_number
-            """, scope_params)
-            mfr_part_numbers = [r["mfr_part_number"] for r in cur.fetchall()]
+            sku_codes = [r["sku_code"] for r in cur.fetchall()]
 
             cur.execute("""
                 SELECT
@@ -1088,10 +1176,8 @@ def get_filters(
         for row in product_rows:
             product_name = row.get("product_name")
             cat = (row.get("category") or "").strip()
-            if product_name and cat:
-                for tree_cat in tree_categories_for(cat, product_name):
-                    if product_name not in tree.get(tree_cat, []):
-                        tree.setdefault(tree_cat, []).append(product_name)
+            if product_name and cat and product_name not in tree.get(cat, []):
+                tree.setdefault(cat, []).append(product_name)
 
         # Products with no category go into an "Other" bucket
         categorised = {p for prods in CAT_MAP.values() for p in prods}
@@ -1104,8 +1190,7 @@ def get_filters(
         return {
             "products": products,
             "ratings":  ratings,
-            "model_numbers": model_numbers,
-            "mfr_part_numbers": mfr_part_numbers,
+            "sku_codes": sku_codes,
             "verified_purchase": [
                 {"value": "verified", "label": "Verified Purchase", "count": int(verified_counts.get("verified") or 0)},
                 {"value": "unverified", "label": "Unverified", "count": int(verified_counts.get("unverified") or 0)},
@@ -1121,46 +1206,26 @@ def get_filters(
 
 @app.get("/api/asins")
 def get_asins():
-    """Returns managed ASINs, preferring Amazon names from scraped DB rows."""
+    """Returns managed ASINs from the master mapping (data/asins.csv) — the sheet is
+    authoritative, so no DB-name override or variant/set lookup is needed."""
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     asins_path = os.path.join(project_root, "data", "asins.csv")
     try:
         with open(asins_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            rows = [{"asin": r["asin"], "product_name": r.get("product_name", ""), "category": r.get("category", "")} for r in reader]
+            rows = [
+                {
+                    "asin": r["asin"],
+                    "product_name": r.get("product_name", ""),
+                    "category": r.get("category", ""),
+                    "sku_code": r.get("sku_code", ""),
+                }
+                for r in reader
+            ]
     except FileNotFoundError:
         return []
 
-    if not rows:
-        return []
-
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                placeholders = ",".join(["%s"] * len(rows))
-                cur.execute(
-                    f"""
-                    SELECT COALESCE(variant_asin, asin) AS asin, MAX(product_name) AS product_name
-                    FROM raw_reviews
-                    WHERE COALESCE(variant_asin, asin) IN ({placeholders})
-                       OR scrape_asin IN ({placeholders})
-                       OR asin IN ({placeholders})
-                    GROUP BY COALESCE(variant_asin, asin)
-                    """,
-                    [*[row["asin"] for row in rows], *[row["asin"] for row in rows], *[row["asin"] for row in rows]],
-                )
-                db_names = {row["asin"]: row["product_name"] for row in cur.fetchall() if row.get("product_name")}
-    except Exception:
-        db_names = {}
-
-    return [
-        {
-            **row,
-            "product_name": db_names.get(row["asin"]) or row.get("product_name", ""),
-            "csv_product_name": row.get("product_name", ""),
-        }
-        for row in rows
-    ]
+    return rows
 
 
 class AsinUpsertRequest(BaseModel):
@@ -1808,8 +1873,7 @@ def get_cxo_trends(
     category: Optional[str] = None,
     rating: Optional[str] = None,
     verified_purchase: Optional[str] = None,
-    model_number: Optional[str] = None,
-    mfr_part_number: Optional[str] = None,
+    sku_code: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
@@ -1831,17 +1895,15 @@ def get_cxo_trends(
             base_params.extend(rating_params)
             vp_filter, vp_params = verified_purchase_filter_sql(verified_purchase)
             base_params.extend(vp_params)
-            mn_filter, mn_params = model_number_filter_sql(model_number)
-            base_params.extend(mn_params)
-            mpn_filter, mpn_params = mfr_part_number_filter_sql(mfr_part_number)
-            base_params.extend(mpn_params)
+            sku_filter, sku_params = sku_code_filter_sql(sku_code)
+            base_params.extend(sku_params)
 
             # 1. Daily sentiment counts
             cur.execute(f"""
                 SELECT DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day, t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY day, t.sentiment
                 ORDER BY day
@@ -1859,7 +1921,7 @@ def get_cxo_trends(
                     SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 4 THEN 1 ELSE 0 END) as star_4,
                     SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 5 THEN 1 ELSE 0 END) as star_5
                 FROM raw_reviews r
-                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY day ORDER BY day
             """, list(base_params))
@@ -1871,7 +1933,7 @@ def get_cxo_trends(
                     t.sentiment, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY day, r.product_name, t.sentiment
                 ORDER BY day
@@ -1883,7 +1945,7 @@ def get_cxo_trends(
                 SELECT DATE_FORMAT({_rd}, '%%Y-%%m-%%d') as day, t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                   AND t.sentiment = 'Negative'
                   AND {_rd} IS NOT NULL
                 GROUP BY day, t.primary_categories
@@ -1897,7 +1959,7 @@ def get_cxo_trends(
                     ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) as rating,
                     COUNT(*) as count
                 FROM raw_reviews r
-                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                 GROUP BY r.product_name, rating
                 ORDER BY r.product_name, r.rating
             """, list(base_params))
@@ -1914,7 +1976,7 @@ def get_cxo_trends(
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE {_rd} >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-                  {pf_sql} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                  {pf_sql} {rating_filter} {vp_filter} {sku_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY yw, t.sentiment
                 ORDER BY yw
@@ -1935,7 +1997,7 @@ def get_cxo_trends(
                     t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                   AND t.sentiment = 'Negative'
                   AND {_rd} IS NOT NULL
                 GROUP BY half, t.primary_categories
@@ -1952,7 +2014,7 @@ def get_cxo_trends(
                     SUM(CASE WHEN t.sentiment='Neutral' THEN 1 ELSE 0 END) as neutral
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                 GROUP BY r.product_name
             """, list(base_params))
             product_rows = cur.fetchall()
@@ -1962,7 +2024,7 @@ def get_cxo_trends(
                 SELECT r.product_name, t.primary_categories, COUNT(*) as count
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
-                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                   AND t.sentiment = 'Negative'
                 GROUP BY r.product_name, t.primary_categories
             """, list(base_params))
@@ -2190,8 +2252,7 @@ def get_wordcloud(
     product_category: Optional[str] = None,   # product group filter (Camera/Dashcam)
     rating: Optional[str] = None,
     verified_purchase: Optional[str] = None,
-    model_number: Optional[str] = None,
-    mfr_part_number: Optional[str] = None,
+    sku_code: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     category: Optional[str] = None,           # taxonomy category drill-down
@@ -2216,17 +2277,15 @@ def get_wordcloud(
             base_params.extend(rating_params)
             vp_filter, vp_params = verified_purchase_filter_sql(verified_purchase)
             base_params.extend(vp_params)
-            mn_filter, mn_params = model_number_filter_sql(model_number)
-            base_params.extend(mn_params)
-            mpn_filter, mpn_params = mfr_part_number_filter_sql(mfr_part_number)
-            base_params.extend(mpn_params)
+            sku_filter, sku_params = sku_code_filter_sql(sku_code)
+            base_params.extend(sku_params)
 
             if category:
                 cur.execute(f"""
                     SELECT t.sub_tags, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                    WHERE 1=1 {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                     AND JSON_CONTAINS(t.primary_categories, %s)
                 """, list(base_params) + [json.dumps(category)])
                 rows = cur.fetchall()
@@ -2236,7 +2295,7 @@ def get_wordcloud(
                     SELECT t.sub_tags, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                    WHERE 1=1 {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                 """, list(base_params))
                 rows = cur.fetchall()
 
@@ -2244,7 +2303,7 @@ def get_wordcloud(
                     SELECT t.primary_categories, t.sentiment
                     FROM raw_reviews r
                     JOIN review_tags t ON r.review_id = t.review_id
-                    WHERE 1=1 {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                    WHERE 1=1 {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                 """, list(base_params))
                 cat_rows = cur.fetchall()
 
@@ -2297,8 +2356,7 @@ def get_reviews_by_keyword(
     product_category: Optional[str] = None,
     rating: Optional[str] = None,
     verified_purchase: Optional[str] = None,
-    model_number: Optional[str] = None,
-    mfr_part_number: Optional[str] = None,
+    sku_code: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     category: Optional[str] = None,
@@ -2328,10 +2386,8 @@ def get_reviews_by_keyword(
             base_params.extend(rating_params)
             vp_filter, vp_params = verified_purchase_filter_sql(verified_purchase)
             base_params.extend(vp_params)
-            mn_filter, mn_params = model_number_filter_sql(model_number)
-            base_params.extend(mn_params)
-            mpn_filter, mpn_params = mfr_part_number_filter_sql(mfr_part_number)
-            base_params.extend(mpn_params)
+            sku_filter, sku_params = sku_code_filter_sql(sku_code)
+            base_params.extend(sku_params)
 
             category_filter = ""
             if category:
@@ -2352,7 +2408,7 @@ def get_reviews_by_keyword(
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE (t.sub_tags LIKE %s OR t.primary_categories LIKE %s)
-                {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter} {category_filter} {sentiment_filter}
+                {pf_sql} {asin_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter} {category_filter} {sentiment_filter}
                 ORDER BY {_rd} DESC
                 LIMIT 500
             """, base_params)
@@ -2366,10 +2422,7 @@ def get_reviews_by_keyword(
                 seen.add(row["review_id"])
                 result.append({
                     **row,
-                    "display_product_name": amazon_display_product_name(
-                        row.get("product_name"),
-                        row.get("variant_label"),
-                    ),
+                    "display_product_name": ASIN_MAP.get(row.get("asin"), {}).get("product_name") or row.get("product_name") or row.get("asin"),
                     "verified_purchase": (
                         None if row.get("verified_purchase") is None else bool(row.get("verified_purchase"))
                     ),
@@ -2389,8 +2442,7 @@ def get_analysis(
     category: Optional[str] = None,
     rating: Optional[str] = None,
     verified_purchase: Optional[str] = None,
-    model_number: Optional[str] = None,
-    mfr_part_number: Optional[str] = None,
+    sku_code: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
@@ -2403,8 +2455,7 @@ def get_analysis(
             base_params.extend(asin_params)
             rating_filter, rating_params = rating_filter_sql(rating)
             vp_filter, vp_params = verified_purchase_filter_sql(verified_purchase)
-            mn_filter, mn_params = model_number_filter_sql(model_number)
-            mpn_filter, mpn_params = mfr_part_number_filter_sql(mfr_part_number)
+            sku_filter, sku_params = sku_code_filter_sql(sku_code)
 
             date_filter = ""
             if date_from:
@@ -2421,8 +2472,7 @@ def get_analysis(
             if date_to: kpi_params.append(date_to)
             kpi_params.extend(rating_params)
             kpi_params.extend(vp_params)
-            kpi_params.extend(mn_params)
-            kpi_params.extend(mpn_params)
+            kpi_params.extend(sku_params)
 
             cur.execute(f"""
                 SELECT t.sentiment, COUNT(*) as count
@@ -2432,7 +2482,7 @@ def get_analysis(
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                   {rating_filter}
-                  {vp_filter} {mn_filter} {mpn_filter}
+                  {vp_filter} {sku_filter}
                 GROUP BY t.sentiment
             """, kpi_params)
             sentiment_kpi = {row["sentiment"]: row["count"] for row in cur.fetchall()}
@@ -2442,8 +2492,7 @@ def get_analysis(
             if date_to: rating_params.append(date_to)
             rating_params.extend(rating_filter_sql(rating)[1])
             rating_params.extend(vp_params)
-            rating_params.extend(mn_params)
-            rating_params.extend(mpn_params)
+            rating_params.extend(sku_params)
 
             cur.execute(f"""
                 SELECT
@@ -2458,7 +2507,7 @@ def get_analysis(
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                   {rating_filter}
-                  {vp_filter} {mn_filter} {mpn_filter}
+                  {vp_filter} {sku_filter}
             """, rating_params)
             rating_row = cur.fetchone() or {}
             star_1 = int(rating_row.get("star_1") or 0)
@@ -2472,8 +2521,7 @@ def get_analysis(
             if date_to: purchase_params.append(date_to)
             purchase_params.extend(rating_filter_sql(rating)[1])
             purchase_params.extend(vp_params)
-            purchase_params.extend(mn_params)
-            purchase_params.extend(mpn_params)
+            purchase_params.extend(sku_params)
 
             cur.execute(f"""
                 SELECT
@@ -2490,7 +2538,7 @@ def get_analysis(
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                   {rating_filter}
-                  {vp_filter} {mn_filter} {mpn_filter}
+                  {vp_filter} {sku_filter}
                 GROUP BY purchase_type, sentiment
             """, purchase_params)
             purchase_rows = cur.fetchall()
@@ -2534,8 +2582,7 @@ def get_analysis(
             if date_to: trend_params.append(date_to)
             trend_params.extend(rating_filter_sql(rating)[1])
             trend_params.extend(vp_params)
-            trend_params.extend(mn_params)
-            trend_params.extend(mpn_params)
+            trend_params.extend(sku_params)
 
             cur.execute(f"""
                 SELECT
@@ -2548,7 +2595,7 @@ def get_analysis(
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                   {rating_filter}
-                  {vp_filter} {mn_filter} {mpn_filter}
+                  {vp_filter} {sku_filter}
                 GROUP BY day, t.sentiment
                 ORDER BY day
             """, trend_params)
@@ -2569,8 +2616,7 @@ def get_analysis(
             if date_to: pie_params.append(date_to)
             pie_params.extend(rating_filter_sql(rating)[1])
             pie_params.extend(vp_params)
-            pie_params.extend(mn_params)
-            pie_params.extend(mpn_params)
+            pie_params.extend(sku_params)
 
             cur.execute(f"""
                 SELECT t.primary_categories, t.sentiment, r.verified_purchase
@@ -2580,7 +2626,7 @@ def get_analysis(
                   AND {date_parse} IS NOT NULL
                   {date_filter.replace('parsed_date', date_parse)}
                   {rating_filter}
-                  {vp_filter} {mn_filter} {mpn_filter}
+                  {vp_filter} {sku_filter}
             """, pie_params)
             pie_rows = cur.fetchall()
 
@@ -2659,8 +2705,7 @@ def get_summary(
     category: Optional[str] = None,
     rating: Optional[str] = None,
     verified_purchase: Optional[str] = None,
-    model_number: Optional[str] = None,
-    mfr_part_number: Optional[str] = None,
+    sku_code: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
@@ -2673,8 +2718,7 @@ def get_summary(
             pf_sql, base_params = product_filter_sql(products)
             rating_filter, rating_params = rating_filter_sql(rating)
             vp_filter, vp_params = verified_purchase_filter_sql(verified_purchase)
-            mn_filter, mn_params = model_number_filter_sql(model_number)
-            mpn_filter, mpn_params = mfr_part_number_filter_sql(mfr_part_number)
+            sku_filter, sku_params = sku_code_filter_sql(sku_code)
 
             # Determine the current comparison window.
             # If no date filter is selected, summary should match the dashboard's
@@ -2703,16 +2747,13 @@ def get_summary(
                     params.append(str(p_to))
                 params.extend(rating_params)
                 params.extend(vp_params)
-                params.extend(mn_params)
-                params.extend(mpn_params)
+                params.extend(sku_params)
                 cur.execute(f"""
                     SELECT
-                        COALESCE(r.variant_asin, r.asin) as asin,
+                        r.asin as asin,
                         MAX(r.product_name) as product_name,
-                        MAX(r.variant_label) as variant_label,
                         MAX(r.category) as category,
-                        MAX(r.model_number) as model_number,
-                        MAX(r.mfr_part_number) as mfr_part_number,
+                        MAX(r.sku_code) as sku_code,
                         ROUND(AVG(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))), 1) as avg_rating,
                         COUNT(*) as review_count,
                         SUM(CASE WHEN t.sentiment = 'Negative' THEN 1 ELSE 0 END) as neg_count
@@ -2721,8 +2762,8 @@ def get_summary(
                     WHERE 1=1 {pf_sql}
                       {period_filter}
                       {rating_filter}
-                      {vp_filter} {mn_filter} {mpn_filter}
-                    GROUP BY COALESCE(r.variant_asin, r.asin)
+                      {vp_filter} {sku_filter}
+                    GROUP BY r.asin
                 """, params)
                 return {row["asin"]: row for row in cur.fetchall()}
 
@@ -2790,12 +2831,9 @@ def get_summary(
                 result.append({
                     "asin": asin,
                     "product_name": row["product_name"],
-                    "display_product_name": canonical_name or amazon_display_product_name(
-                        row.get("product_name"), row.get("variant_label")
-                    ),
-                    "category": row.get("category"),
-                    "model_number": row.get("model_number"),
-                    "mfr_part_number": row.get("mfr_part_number"),
+                    "display_product_name": canonical_name or row.get("product_name") or asin,
+                    "category": ASIN_MAP.get(asin, {}).get("category") or row.get("category"),
+                    "sku_code": ASIN_MAP.get(asin, {}).get("sku_code") or row.get("sku_code"),
                     "avg_rating": curr_rating,
                     "review_avg_rating": curr_rating,
                     "listing_rating": listing_rating,
@@ -2835,12 +2873,12 @@ def generate_summaries(product: Optional[str] = None, category: Optional[str] = 
             pf_sql, params = product_filter_sql(products)
 
             cur.execute(f"""
-                SELECT COALESCE(r.variant_asin, r.asin) as asin, MAX(r.product_name) as product_name,
+                SELECT r.asin as asin, MAX(r.product_name) as product_name,
                     GROUP_CONCAT(r.review ORDER BY r.scrape_date DESC SEPARATOR ' ||| ') as reviews
                 FROM raw_reviews r
                 JOIN review_tags t ON r.review_id = t.review_id
                 WHERE 1=1 {pf_sql}
-                GROUP BY COALESCE(r.variant_asin, r.asin)
+                GROUP BY r.asin
             """, params)
             asin_rows = cur.fetchall()
 
@@ -2894,8 +2932,7 @@ def get_rating_trends(
     category: Optional[str] = None,
     rating: Optional[str] = None,
     verified_purchase: Optional[str] = None,
-    model_number: Optional[str] = None,
-    mfr_part_number: Optional[str] = None,
+    sku_code: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
@@ -2924,10 +2961,8 @@ def get_rating_trends(
             base_params.extend(rating_params)
             vp_filter, vp_params = verified_purchase_filter_sql(verified_purchase)
             base_params.extend(vp_params)
-            mn_filter, mn_params = model_number_filter_sql(model_number)
-            base_params.extend(mn_params)
-            mpn_filter, mpn_params = mfr_part_number_filter_sql(mfr_part_number)
-            base_params.extend(mpn_params)
+            sku_filter, sku_params = sku_code_filter_sql(sku_code)
+            base_params.extend(sku_params)
 
             # Daily avg rating — grouped by review_date so review-derived charts align to the selected window.
             cur.execute(f"""
@@ -2942,7 +2977,7 @@ def get_rating_trends(
                     SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 4 THEN 1 ELSE 0 END) as star_4,
                     SUM(CASE WHEN ROUND(CAST(SUBSTRING_INDEX(r.rating, ' ', 1) AS DECIMAL(3,1))) = 5 THEN 1 ELSE 0 END) as star_5
                 FROM raw_reviews r
-                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {mn_filter} {mpn_filter}
+                WHERE 1=1 {pf_sql} {date_filter} {rating_filter} {vp_filter} {sku_filter}
                   AND {_rd} IS NOT NULL
                 GROUP BY day, r.product_name
                 ORDER BY day
@@ -3137,16 +3172,32 @@ class OTPVerify(BaseModel):
 @app.post("/api/auth/request-otp")
 def auth_request_otp(req: OTPRequest):
     email = req.email.strip().lower()
-    if not email.endswith(ALLOWED_EMAIL_DOMAIN):
+    allowed_domain = ALLOWED_EMAIL_DOMAIN.strip().lower()
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+", email) or not email.endswith(allowed_domain):
         raise HTTPException(status_code=400, detail=f"Only {ALLOWED_EMAIL_DOMAIN} email addresses are allowed")
 
-    otp = f"{random.randint(0, 999999):06d}"
+    if not SMTP_USER or not SMTP_PASSWORD:
+        raise HTTPException(status_code=503, detail="Login email service is not configured")
+
+    otp = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
 
     conn = get_conn()
     try:
         ensure_auth_tables(conn)
         with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS request_count FROM auth_otps
+                WHERE email=%s AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s MINUTE)
+                """,
+                (email, OTP_REQUEST_WINDOW_MINUTES),
+            )
+            if int(cur.fetchone()["request_count"]) >= OTP_MAX_REQUESTS:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many login codes requested. Please wait before trying again.",
+                )
             cur.execute("UPDATE auth_otps SET used=1 WHERE email=%s AND used=0", (email,))
             cur.execute(
                 "INSERT INTO auth_otps (email, otp, expires_at) VALUES (%s, %s, %s)",
@@ -3158,8 +3209,17 @@ def auth_request_otp(req: OTPRequest):
 
     try:
         send_otp_email(email, otp)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to send OTP email: {exc}")
+    except Exception:
+        # Do not leave a code valid when it was not delivered, and never expose
+        # SMTP/provider details to the browser.
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE auth_otps SET used=1 WHERE email=%s AND otp=%s", (email, otp))
+            conn.commit()
+        finally:
+            conn.close()
+        raise HTTPException(status_code=503, detail="Could not send the login code. Please try again shortly.")
 
     return {"message": "OTP sent to your email"}
 
@@ -3168,6 +3228,8 @@ def auth_request_otp(req: OTPRequest):
 def auth_verify_otp(req: OTPVerify, request: Request):
     email = req.email.strip().lower()
     otp = req.otp.strip()
+    if not re.fullmatch(r"\d{6}", otp):
+        raise HTTPException(status_code=400, detail="Enter a valid 6-digit login code")
 
     conn = get_conn()
     try:
@@ -3175,14 +3237,21 @@ def auth_verify_otp(req: OTPVerify, request: Request):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id FROM auth_otps
-                WHERE email=%s AND otp=%s AND used=0 AND expires_at > NOW()
+                SELECT id, otp, attempts FROM auth_otps
+                WHERE email=%s AND used=0 AND expires_at > UTC_TIMESTAMP()
                 ORDER BY id DESC LIMIT 1
                 """,
-                (email, otp),
+                (email,),
             )
             row = cur.fetchone()
-            if not row:
+            if not row or not secrets.compare_digest(row["otp"], otp):
+                if row:
+                    attempts = int(row["attempts"]) + 1
+                    cur.execute(
+                        "UPDATE auth_otps SET attempts=%s, used=%s WHERE id=%s",
+                        (attempts, int(attempts >= OTP_MAX_VERIFY_ATTEMPTS), row["id"]),
+                    )
+                    conn.commit()
                 raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
             cur.execute("UPDATE auth_otps SET used=1 WHERE id=%s", (row["id"],))
@@ -3226,6 +3295,13 @@ def auth_verify_session(request: Request):
                 (token,),
             )
             row = cur.fetchone()
+            if row:
+                cur.execute(
+                    "UPDATE auth_sessions SET expires_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s DAY) WHERE token=%s",
+                    (SESSION_EXPIRY_DAYS, token),
+                )
+                conn.commit()
+                row["expires_at"] = datetime.utcnow() + timedelta(days=SESSION_EXPIRY_DAYS)
     except pymysql.err.ProgrammingError as exc:
         if exc.args and exc.args[0] == 1146:
             raise HTTPException(status_code=401, detail="Invalid session")
@@ -3251,6 +3327,16 @@ def auth_logout(request: Request):
         finally:
             conn.close()
     return {"message": "Logged out"}
+
+
+@app.get("/api/email-drafts/quota")
+def email_draft_quota(request: Request):
+    email = _session_email_from_request(request)
+    conn = get_conn()
+    try:
+        return _draft_quota_status(conn, email)
+    finally:
+        conn.close()
 
 
 @app.get("/api/admin/access-log")

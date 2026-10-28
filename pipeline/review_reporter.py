@@ -175,46 +175,8 @@ def product_link(label, asin):
 
 
 def clean_set_name(row):
-    canonical = ASIN_NAME_MAP.get(row.get("variant_asin")) or ASIN_NAME_MAP.get(row.get("asin"))
-    if canonical:
-        return canonical
-
-    label = (row.get("variant_label") or "").strip()
     product = (row.get("product_name") or "").strip()
-    source = label or product
-    low = source.lower()
-
-    if (row.get("variant_asin") or row.get("asin")) == "B0FPGC9FFX" or low in {"4g", "dashcam 4g live", "4g dashcam"} or "dashcam 4g live" in low:
-        return "4G Dashcam"
-    if "baby" in low:
-        return "Baby Monitor"
-    if "outdoor" in low or "bullet" in low:
-        return "Outdoor 3MP Bullet"
-    if "4mp ultra" in low:
-        return "4MP Ultra 2K"
-    if "4mp 360" in low or "360 pro 4mp" in low or "smart cam 360 pro" in low:
-        return "Smart Cam 360 Pro 4MP"
-    if "pack of 2" in low and "3mp" in low:
-        return "3MP Pack of 2"
-    if "3mp 2026" in low:
-        return "3MP 2026"
-    if "smart 360" in low and "3mp" in low:
-        return "Smart 360 3MP"
-    if "dashcam pro x" in low:
-        return "Dashcam Pro X"
-    if "dashcam pro" in low:
-        return "Dashcam Pro"
-    if "dashcam" in low:
-        return "Dashcam"
-    if "smart video doorbell" in low or "vdb" in low or "doorbell" in low:
-        return "Video Doorbell"
-    if "lock" in low:
-        return "Smart Lock"
-    if "gps" in low or "tracker" in low:
-        return "Tracker"
-    if label:
-        return label[:48]
-    return product[:48] or "Unknown set"
+    return product or row.get("asin") or "Unknown set"
 
 
 def fetch_report_rows(categories, start_date, end_date):

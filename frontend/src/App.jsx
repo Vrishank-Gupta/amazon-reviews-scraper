@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchReviews, fetchFilters, fetchStats, fetchPipelineStatus, exportRawReviewsExcel, fetchAdminAccessLog, apiUrl } from './api'
+import { fetchReviews, fetchFilters, fetchStats, fetchPipelineStatus, exportRawReviewsExcel, fetchAdminAccessLog, fetchEmailDraftQuota, apiUrl } from './api'
 import { downloadCSV } from './components/TrendsPage'
 import FilterBar from './components/Filterbar'
 import ReviewsTable from './components/ReviewsTable'
@@ -16,8 +16,7 @@ const DEFAULT_FILTERS = {
   sentiment: [],
   rating: [],
   verified_purchase: [],
-  model_number: [],
-  mfr_part_number: [],
+  sku_code: [],
   date_from: null,
   date_to: null,
 }
@@ -330,10 +329,11 @@ function AdminPanel({ authedEmail, onLogout }) {
 }
 
 function Dashboard({ authedEmail, onLogout }) {
+  const [draftQuota, setDraftQuota] = useState(null)
   const [tab, setTab] = useState('analysis')
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
   const [reviews, setReviews] = useState([])
-  const [options, setOptions] = useState({ tree: {}, products: [], ratings: [], model_numbers: [], mfr_part_numbers: [] })
+  const [options, setOptions] = useState({ tree: {}, products: [], ratings: [], sku_codes: [] })
   const [scrapeStatus, setScrapeStatus] = useState(null)
   const [initialLoading, setInitialLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -349,13 +349,13 @@ function Dashboard({ authedEmail, onLogout }) {
     fetchPipelineStatus().then(setScrapeStatus).catch(() => {})
   }, [])
 
-  // Model Number / Mfr Part Number dropdown options narrow down to whatever
-  // category, product, rating, verified-purchase, or date filter is currently
-  // selected elsewhere, so they only ever offer values that actually exist
-  // within the current selection.
+  // SKU Code dropdown options narrow down to whatever category, product,
+  // rating, verified-purchase, or date filter is currently selected
+  // elsewhere, so they only ever offer values that actually exist within
+  // the current selection.
   useEffect(() => {
     fetchFilters(filters).then(o => {
-      setOptions(prev => ({ ...prev, model_numbers: o.model_numbers, mfr_part_numbers: o.mfr_part_numbers }))
+      setOptions(prev => ({ ...prev, sku_codes: o.sku_codes }))
     }).catch(() => {})
   }, [
     JSON.stringify(filters.product_category),
@@ -415,6 +415,14 @@ function Dashboard({ authedEmail, onLogout }) {
         .filter(item => item.last_scrape && item.last_scrape.slice(0, 10) === scrapeStatus.last_scrape.slice(0, 10))
         .map(item => item.product_name)
     : []
+  useEffect(() => {
+    let active = true
+    fetchEmailDraftQuota()
+      .then(data => { if (active) setDraftQuota(data) })
+      .catch(() => {})
+    return () => { active = false }
+  }, [])
+
   const headerScrapeLabel = formatHeaderDate(scrapeStatus?.last_scrape) || 'Not available'
   const headerDataStart = formatHeaderDate(scrapeStatus?.data_start_date)
   const headerDataEnd = formatHeaderDate(scrapeStatus?.data_end_date)
@@ -618,6 +626,14 @@ function Dashboard({ authedEmail, onLogout }) {
             <ShieldCheck size={12} /> Admin
           </a>
           <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
+          {draftQuota && (
+            <div
+              title={`$${draftQuota.daily_budget_remaining_usd.toFixed(2)} daily AI budget remaining`}
+              style={{ padding: '5px 9px', borderRadius: 7, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', fontSize: 11, color: draftQuota.allowed ? 'var(--text-muted)' : '#ff6b6b', whiteSpace: 'nowrap' }}
+            >
+              Email drafts: <strong style={{ color: draftQuota.allowed ? 'var(--text)' : '#ff6b6b' }}>{draftQuota.drafts_remaining}/{draftQuota.draft_limit}</strong>
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
             <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>{authedEmail}</div>
             <button

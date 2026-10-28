@@ -413,8 +413,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
   const dateTo   = filters?.date_to   || ''
   const ratingFilter = filters?.rating || []
   const verifiedPurchaseFilter = filters?.verified_purchase || []
-  const modelNumberFilter = filters?.model_number || []
-  const mfrPartNumberFilter = filters?.mfr_part_number || []
+  const skuCodeFilter = filters?.sku_code || []
 
   useEffect(() => {
     if (!allProducts?.length) return
@@ -426,13 +425,12 @@ export default function TrendsPage({ products: allProducts, filters }) {
     if (dateTo)   p.set('date_to',   dateTo)
     if (ratingFilter.length) p.set('rating', ratingFilter.join(','))
     if (verifiedPurchaseFilter.length) p.set('verified_purchase', verifiedPurchaseFilter.join(','))
-    if (modelNumberFilter.length) p.set('model_number', modelNumberFilter.join(','))
-    if (mfrPartNumberFilter.length) p.set('mfr_part_number', mfrPartNumberFilter.join(','))
+    if (skuCodeFilter.length) p.set('sku_code', skuCodeFilter.join(','))
     fetch(apiUrl(`/api/trends/cxo?${p}`), { headers: authHeaders() })
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); setHasData(true) })
       .catch(() => setLoading(false))
-  }, [JSON.stringify(productCategory), JSON.stringify(selectedProducts), JSON.stringify(ratingFilter), JSON.stringify(verifiedPurchaseFilter), JSON.stringify(modelNumberFilter), JSON.stringify(mfrPartNumberFilter), dateFrom, dateTo, allProducts?.length])
+  }, [JSON.stringify(productCategory), JSON.stringify(selectedProducts), JSON.stringify(ratingFilter), JSON.stringify(verifiedPurchaseFilter), JSON.stringify(skuCodeFilter), dateFrom, dateTo, allProducts?.length])
 
   const toggleCat = c => setHiddenCats(s => { const n=new Set(s); n.has(c)?n.delete(c):n.add(c); return n })
 
@@ -476,8 +474,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
     if (dateTo)   p.set('date_to', dateTo)
     if (ratingFilter.length) p.set('rating', ratingFilter.join(','))
     if (verifiedPurchaseFilter.length) p.set('verified_purchase', verifiedPurchaseFilter.join(','))
-    if (modelNumberFilter.length) p.set('model_number', modelNumberFilter.join(','))
-    if (mfrPartNumberFilter.length) p.set('mfr_part_number', mfrPartNumberFilter.join(','))
+    if (skuCodeFilter.length) p.set('sku_code', skuCodeFilter.join(','))
     fetch(apiUrl(`/api/trends/cxo?${p}`), { headers: authHeaders() })
       .then(r => r.json())
       .then(d => {
@@ -485,7 +482,7 @@ export default function TrendsPage({ products: allProducts, filters }) {
         setLocalDailyCats(d?.daily_categories || null)
       })
       .catch(() => { setLocalMomentum(null); setLocalDailyCats(null) })
-  }, [effectiveIssueProd, JSON.stringify(ratingFilter), JSON.stringify(verifiedPurchaseFilter), JSON.stringify(modelNumberFilter), JSON.stringify(mfrPartNumberFilter), dateFrom, dateTo])
+  }, [effectiveIssueProd, JSON.stringify(ratingFilter), JSON.stringify(verifiedPurchaseFilter), JSON.stringify(skuCodeFilter), dateFrom, dateTo])
   const issueMomentum = localMomentum ?? momentum
   const activeDailyCats = localDailyCats ?? dailyCats
 
