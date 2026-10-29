@@ -63,12 +63,6 @@ OTP_MAX_REQUESTS = int(os.getenv("OTP_MAX_REQUESTS", "5"))
 OTP_REQUEST_WINDOW_MINUTES = int(os.getenv("OTP_REQUEST_WINDOW_MINUTES", "15"))
 OTP_MAX_VERIFY_ATTEMPTS = int(os.getenv("OTP_MAX_VERIFY_ATTEMPTS", "5"))
 SESSION_EXPIRY_DAYS = int(os.getenv("SESSION_EXPIRY_DAYS", "90"))
-DRAFT_LIMIT = int(os.getenv("DRAFT_LIMIT", "8"))
-DRAFT_WINDOW_HOURS = int(os.getenv("DRAFT_WINDOW_HOURS", "12"))
-DRAFT_DAILY_BUDGET_USD = float(os.getenv("DRAFT_DAILY_BUDGET_USD", "0.50"))
-DRAFT_RESERVATION_USD = float(
-    os.getenv("DRAFT_RESERVATION_USD", str(DRAFT_DAILY_BUDGET_USD / max(DRAFT_LIMIT, 1)))
-)
 
 _AUTH_PUBLIC_PATHS = {
     "/health",
@@ -116,24 +110,6 @@ CREATE TABLE IF NOT EXISTS auth_login_events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 """
 
-AI_DRAFT_USAGE_SQL = """
-CREATE TABLE IF NOT EXISTS ai_draft_usage (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  email VARCHAR(255) NOT NULL,
-  status ENUM('reserved', 'completed', 'failed') NOT NULL DEFAULT 'reserved',
-  input_tokens INT UNSIGNED NOT NULL DEFAULT 0,
-  output_tokens INT UNSIGNED NOT NULL DEFAULT 0,
-  estimated_cost_usd DECIMAL(10,6) NOT NULL DEFAULT 0,
-  actual_cost_usd DECIMAL(10,6) NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at DATETIME NULL,
-  reservation_expires_at DATETIME NULL,
-  INDEX idx_draft_usage_email_created (email, created_at),
-  INDEX idx_draft_usage_status_expiry (status, reservation_expires_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-"""
-
-
 def ensure_auth_tables(conn):
     with conn.cursor() as cur:
         cur.execute(AUTH_TABLE_OTP_SQL)
@@ -147,125 +123,6 @@ def ensure_auth_tables(conn):
                 "TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER used"
             )
     conn.commit()
-
-
-def ensure_draft_usage_table(conn):
-    with conn.cursor() as cur:
-        cur.execute(AI_DRAFT_USAGE_SQL)
-    conn.commit()
-
-
-def _draft_quota_status(conn, email: str) -> dict:
-    ensure_draft_usage_table(conn)
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT
-              COALESCE(SUM(CASE WHEN created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s HOUR)
-                AND (status='completed' OR (status='reserved' AND reservation_expires_at > UTC_TIMESTAMP()))
-                THEN 1 ELSE 0 END), 0) AS window_count,
-              COALESCE(SUM(CASE WHEN created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
-                AND status IN ('completed', 'failed') THEN COALESCE(actual_cost_usd, estimated_cost_usd)
-                WHEN created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
-                AND status='reserved' AND reservation_expires_at > UTC_TIMESTAMP()
-                THEN estimated_cost_usd ELSE 0 END), 0) AS daily_cost
-            FROM ai_draft_usage WHERE email=%s
-            """,
-            (DRAFT_WINDOW_HOURS, email),
-        )
-        row = cur.fetchone() or {}
-        cur.execute(
-            """
-            SELECT MIN(created_at) AS oldest_window_usage
-            FROM ai_draft_usage
-            WHERE email=%s AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s HOUR)
-              AND (status='completed' OR (status='reserved' AND reservation_expires_at > UTC_TIMESTAMP()))
-            """,
-            (email, DRAFT_WINDOW_HOURS),
-        )
-        oldest = (cur.fetchone() or {}).get("oldest_window_usage")
-
-    used = int(row.get("window_count") or 0)
-    spent = float(row.get("daily_cost") or 0)
-    reset_at = oldest + timedelta(hours=DRAFT_WINDOW_HOURS) if oldest and used >= DRAFT_LIMIT else None
-    return {
-        "draft_limit": DRAFT_LIMIT,
-        "drafts_used": used,
-        "drafts_remaining": max(0, DRAFT_LIMIT - used),
-        "window_hours": DRAFT_WINDOW_HOURS,
-        "daily_budget_usd": round(DRAFT_DAILY_BUDGET_USD, 2),
-        "daily_spend_usd": round(spent, 4),
-        "daily_budget_remaining_usd": round(max(0, DRAFT_DAILY_BUDGET_USD - spent), 4),
-        "allowed": used < DRAFT_LIMIT and spent + DRAFT_RESERVATION_USD <= DRAFT_DAILY_BUDGET_USD,
-        "draft_window_reset_at": reset_at.isoformat() if reset_at else None,
-    }
-
-
-def reserve_draft_quota(email: str) -> int:
-    """Call immediately before an email-draft model request."""
-    conn = get_conn()
-    lock_name = f"draft-quota:{email}"[:64]
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT GET_LOCK(%s, 5) AS acquired", (lock_name,))
-            if not (cur.fetchone() or {}).get("acquired"):
-                raise HTTPException(status_code=503, detail="Quota check is busy. Please retry.")
-        status = _draft_quota_status(conn, email)
-        if not status["allowed"]:
-            raise HTTPException(status_code=429, detail={"message": "Draft quota exhausted", "quota": status})
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO ai_draft_usage (email, estimated_cost_usd, reservation_expires_at)
-                VALUES (%s, %s, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 10 MINUTE))
-                """,
-                (email, DRAFT_RESERVATION_USD),
-            )
-            usage_id = cur.lastrowid
-        conn.commit()
-        return usage_id
-    finally:
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
-        finally:
-            conn.close()
-
-
-def complete_draft_quota(usage_id: int, input_tokens: int, output_tokens: int, cost_usd: float):
-    """Record provider-reported tokens/cost after a successful draft."""
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE ai_draft_usage SET status='completed', input_tokens=%s, output_tokens=%s,
-                  actual_cost_usd=%s, completed_at=UTC_TIMESTAMP()
-                WHERE id=%s AND status='reserved'
-                """,
-                (max(0, input_tokens), max(0, output_tokens), max(0, cost_usd), usage_id),
-            )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def fail_draft_quota(usage_id: int, input_tokens: int = 0, output_tokens: int = 0, cost_usd: float = 0):
-    """Release a failed draft count while retaining any provider-billed cost."""
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE ai_draft_usage SET status='failed', input_tokens=%s, output_tokens=%s,
-                  actual_cost_usd=%s, completed_at=UTC_TIMESTAMP()
-                WHERE id=%s AND status='reserved'
-                """,
-                (max(0, input_tokens), max(0, output_tokens), max(0, cost_usd), usage_id),
-            )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def send_otp_email(to_email: str, otp: str):
@@ -1441,30 +1298,19 @@ def get_pipeline_status():
                 pass
 
         # Build lookup from DB results
+        from datetime import date as _date
         db_lookup = { a["asin"]: a for a in asin_rows }
 
-        # Read all ASINs from asins.csv as the master list
-        import csv as _csv
-        from datetime import date as _date
-        csv_asins = []
-        csv_path = os.path.join(os.path.dirname(__file__), "..", "data", "asins.csv")
-        try:
-            with open(csv_path, newline="", encoding="utf-8") as f:
-                for row in _csv.DictReader(f):
-                    csv_asins.append({ "asin": row["asin"].strip(), "product_name": row["product_name"].strip() })
-        except Exception:
-            pass
-
-        # Merge: CSV is source of truth for which ASINs exist
-        # Any ASIN in DB but not in CSV is also included
+        # ASIN_MAP (loaded from asins.csv) is the single source of truth for
+        # product names — it wins over whatever is stored in raw_reviews.
         seen = set()
         merged = []
-        for item in csv_asins:
-            seen.add(item["asin"])
-            db = db_lookup.get(item["asin"])
+        for asin, info in ASIN_MAP.items():
+            seen.add(asin)
+            db = db_lookup.get(asin)
             merged.append({
-                "asin": item["asin"],
-                "product_name": db["product_name"] if db and db.get("product_name") else item["product_name"],
+                "asin": asin,
+                "product_name": info.get("product_name") or (db["product_name"] if db else asin),
                 "last_scrape": str(db["last_scrape"]) if db and db["last_scrape"] else None,
                 "total_reviews": db["total_reviews"] if db else 0,
                 "recent_reviews": db["recent_reviews"] if db else 0,
@@ -3337,16 +3183,6 @@ def auth_logout(request: Request):
         finally:
             conn.close()
     return {"message": "Logged out"}
-
-
-@app.get("/api/email-drafts/quota")
-def email_draft_quota(request: Request):
-    email = _session_email_from_request(request)
-    conn = get_conn()
-    try:
-        return _draft_quota_status(conn, email)
-    finally:
-        conn.close()
 
 
 @app.get("/api/admin/access-log")

@@ -295,6 +295,12 @@ def insert_rating_snapshot(asin: str, product_name: str, snapshot: dict, conn):
         """,
         (asin, product_name, snapshot["overall_rating"], snapshot.get("total_ratings")),
     )
+    # Self-heal: INSERT IGNORE no-ops if today's row already exists (e.g. a
+    # re-run), which would otherwise leave a stale product_name in place.
+    cur.execute(
+        "UPDATE product_ratings_snapshot SET product_name=%s WHERE asin=%s",
+        (product_name, asin),
+    )
     conn.commit()
     cur.close()
 

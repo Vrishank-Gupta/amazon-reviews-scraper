@@ -1,8 +1,9 @@
 """
-One-time migration: re-pin raw_reviews.product_name / .category / .sku_code to
-the new master mapping (data/asins.csv, generated from data/mapping_updated.xlsx
-via build_asin_mapping.py). Existing review content and review_tags rows are
-never touched — only the three identity columns get overwritten, keyed by asin.
+One-time migration: re-pin raw_reviews.product_name / .category / .sku_code,
+and product_ratings_snapshot.product_name, to the new master mapping
+(data/asins.csv, generated from data/mapping_updated.xlsx via
+build_asin_mapping.py). Existing review content and review_tags rows are
+never touched — only identity columns get overwritten, keyed by asin.
 
 Safe to re-run: every statement is idempotent (ADD COLUMN IF NOT EXISTS-style
 check, UPDATE ... WHERE asin=%s).
@@ -145,6 +146,49 @@ def main():
         else:
             conn.commit()
             print(f"\nMigration applied. {total_matched} existing rows covered by the mapping.")
+
+        # product_ratings_snapshot carries its own product_name copy (written by
+        # the scraper's daily rating-snapshot insert) that drifts independently
+        # of raw_reviews — re-pin it too.
+        snap_total_matched = 0
+        snap_changed_asins = []
+        for row in rows:
+            asin = row["asin"].strip()
+            product_name = row.get("product_name", "").strip()
+
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM product_ratings_snapshot WHERE asin = %s",
+                (asin,),
+            )
+            existing = cur.fetchone()["c"]
+            if not existing:
+                continue
+            snap_total_matched += existing
+
+            if args.dry_run:
+                cur.execute(
+                    "SELECT COUNT(*) AS c FROM product_ratings_snapshot WHERE asin = %s AND product_name <> %s",
+                    (asin, product_name),
+                )
+                would_change = cur.fetchone()["c"]
+                if would_change:
+                    snap_changed_asins.append((asin, product_name, would_change))
+            else:
+                cur.execute(
+                    "UPDATE product_ratings_snapshot SET product_name=%s WHERE asin=%s",
+                    (product_name, asin),
+                )
+
+        if args.dry_run:
+            print(f"\n[product_ratings_snapshot] {snap_total_matched} existing rows matched a mapped ASIN")
+            print(f"[product_ratings_snapshot] {len(snap_changed_asins)} ASIN(s) have at least one row whose product_name would change:")
+            for asin, name, count in snap_changed_asins[:30]:
+                print(f"  {asin}  {name!r}  ({count} rows)")
+            if len(snap_changed_asins) > 30:
+                print(f"  ... and {len(snap_changed_asins) - 30} more")
+        else:
+            conn.commit()
+            print(f"[product_ratings_snapshot] Migration applied. {snap_total_matched} existing rows covered by the mapping.")
 
         if args.purge_unmapped:
             cur.execute("SELECT DISTINCT asin FROM raw_reviews")

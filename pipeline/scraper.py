@@ -11,6 +11,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 # Days back to scrape - can be overridden at runtime via env var
 SCRAPE_DAYS_BACK = int(os.environ.get("SCRAPE_DAYS_BACK", 30))
+SCRAPER_MAX_PAGES = int(os.environ.get("SCRAPER_MAX_PAGES", 10))
 
 
 def _norm_variant_label(value):
@@ -206,7 +207,7 @@ def _resolve_review_variant(review, seed_asin, product_name, variant_metadata):
         "variant_asin": variant_asin,
         "variant_label": display_label,
         "variant_dimension": dimension_name,
-        "product_name": display_label,
+        "product_name": product_name,
     }
 
 
@@ -413,7 +414,7 @@ def scrape_reviews_for_asin(
     asin,
     product_name,
     category=None,
-    max_pages=10,
+    max_pages=SCRAPER_MAX_PAGES,
     already_on_page=False,
     cutoff_date=None,
     variant_metadata=None,

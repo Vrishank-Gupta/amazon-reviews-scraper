@@ -96,13 +96,6 @@ export async function fetchAdminAccessLog(limit = 200) {
   return data
 }
 
-export async function fetchEmailDraftQuota() {
-  const res = await apiFetch(apiUrl('/api/email-drafts/quota'))
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.detail || 'Failed to fetch email draft quota')
-  return data
-}
-
 export async function fetchAnalysis(filters = {}) {
   const p = buildParams(filters)
   const res = await apiFetch(apiUrl(`/api/analysis?${p}`))
